@@ -1,0 +1,75 @@
+### Segredos e credenciais (nunca commitar) ###
+*.pem
+*.key
+*.p12
+*credentials*.json
+service-account*.json
+*.env
+.env
+.env.*
+!.env.*.example
+
+### Python (backend) ###
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.python-version
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+### Node / Frontend ###
+node_modules/
+apps/frontend/dist/
+apps/frontend/build/
+.vite/
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+
+### Terraform ###
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+### Docker ###
+*.pid
+
+### Logs ###
+*.log
+logs/
+
+### IDE ###
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+### SO ###
+.DS_Store
+Thumbs.db
+
+### Claude Code (local) ###
+.claude/settings.local.json
