@@ -156,4 +156,4 @@ Diretrizes para os workflows quando forem criados:
 - Nunca misturar recursos/dados de `dev` e `prod`.
 - Nunca usar Terraform workspaces — a separação de ambiente é sempre por diretório.
 - Nunca colocar lógica de negócio em `api/` (backend) ou chamadas HTTP direto em componentes de página (frontend).
-- Nesta fase (Fase 0), o repositório contém apenas estrutura e documentação — nenhum código de aplicação, pipeline ou Terraform real ainda existe além do que este arquivo descreve como convenção futura.
+- Fase 0 (estrutura e documentação) e Fase 1 (bootstrap do Terraform em `infra/terraform/bootstrap/`) concluídas. Ainda não existem: módulos de `infra/terraform/modules/`, root modules de `environments/{dev,prod}`, workflows em `.github/workflows/`, nem código de aplicação em `apps/`.
