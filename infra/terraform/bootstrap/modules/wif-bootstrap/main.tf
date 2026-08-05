@@ -23,6 +23,10 @@ locals {
     "roles/secretmanager.admin",
     "roles/logging.configWriter",
     "roles/iam.serviceAccountUser",
+    # Necessário para o módulo cloud-run criar a service account de runtime
+    # do Cloud Run (ex: backend-run) via `terraform apply`. Faltava e causou
+    # falha em produção (Error 403: iam.serviceAccounts.create denied).
+    "roles/iam.serviceAccountAdmin",
   ]
 }
 
