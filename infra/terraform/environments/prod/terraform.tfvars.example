@@ -1,0 +1,2 @@
+project_id = "observability-hub-prod"
+region     = "us-central1"
