@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 env:
   PROJECT_ID: observability-hub-prod
@@ -19,8 +20,66 @@ env:
   SERVICE: backend
 
 jobs:
+  # terraform-apply-prod.yml dispara no mesmo push quando o commit também
+  # toca infra/terraform/**. Sem essa espera, os dois workflows rodam em
+  # paralelo e o `gcloud run deploy` pode criar o Cloud Run antes do
+  # Terraform, gerando um serviço fora do state (aconteceu em produção).
+  # Pushes que só tocam apps/backend/** seguem sem nenhuma espera.
+  wait-for-terraform:
+    name: Wait for Terraform Apply (prod)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if this push also touches infra/terraform
+        id: check
+        run: |
+          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null \
+              | grep -qE '^infra/terraform/(environments/prod|modules)/'; then
+            echo "touches_infra=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches_infra=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for Terraform Apply (prod) on this commit
+        if: steps.check.outputs.touches_infra != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Este push também altera infra/terraform — aguardando o Terraform Apply (prod) deste commit terminar antes de buildar/deployar."
+          for i in $(seq 1 60); do
+            run_json=$(gh run list --repo "${{ github.repository }}" \
+              --workflow=terraform-apply-prod.yml \
+              --commit "${{ github.sha }}" \
+              --json status,conclusion --jq '.[0]')
+
+            if [ -z "$run_json" ] || [ "$run_json" = "null" ]; then
+              sleep 10
+              continue
+            fi
+
+            status=$(echo "$run_json" | jq -r '.status')
+            if [ "$status" = "completed" ]; then
+              conclusion=$(echo "$run_json" | jq -r '.conclusion')
+              echo "Terraform Apply (prod) concluído com status: $conclusion"
+              if [ "$conclusion" != "success" ]; then
+                echo "::error::Terraform Apply (prod) não teve sucesso ($conclusion) — abortando o deploy do backend."
+                exit 1
+              fi
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "::error::Timeout esperando o Terraform Apply (prod) terminar."
+          exit 1
+
   deploy:
     name: Build, push and deploy
+    needs: wait-for-terraform
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
