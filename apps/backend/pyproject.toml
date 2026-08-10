@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    "google-cloud-bigquery>=3.25",
+    "pydantic-settings>=2.5",
 ]
 
 [dependency-groups]
@@ -16,6 +18,11 @@ dev = [
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+# B008: FastAPI usa Depends()/Query() como default de parâmetro de rota —
+# é o padrão idiomático da lib (e o que o CLAUDE.md manda usar), não um erro.
+ignore = ["B008"]
 
 [build-system]
 requires = ["hatchling"]
