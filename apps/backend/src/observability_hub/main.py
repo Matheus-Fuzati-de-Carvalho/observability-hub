@@ -1,10 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from observability_hub.api.v1 import catalog, freshness, projects
+from observability_hub.api.v1 import catalog, freshness, profiling, projects
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.exceptions import (
     DatasetNotFoundError,
+    InvalidDateColumnError,
+    InvalidSamplePercentError,
+    ProfilingTimeoutError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
     TableNotFoundError,
@@ -15,6 +18,7 @@ app = FastAPI()
 app.include_router(projects.router)
 app.include_router(catalog.router)
 app.include_router(freshness.router)
+app.include_router(profiling.router)
 
 
 @app.get("/health")
@@ -66,4 +70,32 @@ def handle_table_not_found(request: Request, exc: TableNotFoundError) -> JSONRes
     return JSONResponse(
         status_code=404,
         content={"error": "table_not_found", "message": str(exc)},
+    )
+
+
+@app.exception_handler(InvalidSamplePercentError)
+def handle_invalid_sample_percent(request: Request, exc: InvalidSamplePercentError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"error": "invalid_sample_percent", "message": str(exc)},
+    )
+
+
+@app.exception_handler(InvalidDateColumnError)
+def handle_invalid_date_column(request: Request, exc: InvalidDateColumnError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "invalid_date_column",
+            "message": str(exc),
+            "available_date_columns": exc.available_columns,
+        },
+    )
+
+
+@app.exception_handler(ProfilingTimeoutError)
+def handle_profiling_timeout(request: Request, exc: ProfilingTimeoutError) -> JSONResponse:
+    return JSONResponse(
+        status_code=504,
+        content={"error": "profiling_timeout", "message": str(exc)},
     )

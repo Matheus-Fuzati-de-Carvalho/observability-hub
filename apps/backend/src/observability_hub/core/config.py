@@ -37,6 +37,9 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     region_discovery_max_workers: int = 8
+    # Preço on-demand do BigQuery por TiB processado (cloud.google.com/bigquery/pricing).
+    # Usado só pra estimativa de custo em domains/quality — não afeta billing real.
+    bigquery_price_usd_per_tib: float = 6.25
 
 
 settings = Settings()
