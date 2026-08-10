@@ -14,6 +14,6 @@ output "runtime_service_account_email" {
 }
 
 output "artifact_registry_repository_url" {
-  description = "Prefixo do repositório Docker (<region>-docker.pkg.dev/<project>/<repo>), usado para montar a tag da imagem nos workflows."
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.apps.repository_id}"
+  description = "Prefixo do repositório Docker (<region>-docker.pkg.dev/<project>/<repo>), usado para montar a tag da imagem nos workflows. Montado a partir das variáveis (não do recurso), pra funcionar independente de qual instância do módulo gerencia o repositório."
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_repository_id}"
 }

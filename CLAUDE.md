@@ -139,7 +139,7 @@ Diretrizes para os workflows quando forem criados:
 
 - Autenticação no GCP exclusivamente via Workload Identity Federation — nenhuma service account key em segredo do GitHub.
 - Workflows separados por app e por ambiente (ex: `backend-deploy-dev.yml`, `backend-deploy-prod.yml`, `frontend-deploy-dev.yml`, `frontend-deploy-prod.yml`, `terraform-plan.yml`, `terraform-apply-dev.yml`, `terraform-apply-prod.yml`), todos vivendo em `.github/workflows/`.
-- `terraform plan` roda em todo PR que toca `infra/terraform/**`; `apply` só roda após merge, no ambiente correspondente.
+- `terraform plan` roda em todo PR que toca `infra/terraform/**` — mas só para **dev**. O WIF de prod (`infra/terraform/bootstrap/prod`) tem `attribute_condition` restrito a `assertion.ref == "refs/heads/main"`, então nunca autentica em `pull_request` (roda em `refs/pull/N/merge`); revisar `terraform plan` de prod localmente antes de merges que tocam infra é responsabilidade manual até essa restrição ser revisitada. `apply` só roda após merge, no ambiente correspondente.
 - Deploy em prod não deve exigir Terraform workspace switch nem lógica condicional complexa — o ambiente é determinado pelo diretório (`environments/dev` vs `environments/prod`), não por uma flag em runtime.
 - Imagem Docker é buildada uma vez e promovida (mesma tag/digest) de dev para prod quando possível, evitando rebuild entre ambientes — a validar na Fase 1 conforme a estratégia de branch adotada.
 

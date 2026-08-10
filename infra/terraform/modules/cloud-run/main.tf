@@ -1,9 +1,20 @@
 resource "google_artifact_registry_repository" "apps" {
+  count = var.manage_artifact_registry ? 1 : 0
+
   project       = var.project_id
   location      = var.region
   repository_id = var.artifact_registry_repository_id
   format        = "DOCKER"
   description   = "Imagens Docker dos apps do Observability Hub (backend, frontend)."
+}
+
+# O recurso ganhou `count` para permitir instâncias do módulo que reaproveitam
+# um repositório criado por outra instância (ex: frontend + backend no mesmo
+# projeto). Este `moved` remapeia o endereço de state de instâncias já
+# aplicadas (ex: backend em dev/prod) sem destruir/recriar o repositório real.
+moved {
+  from = google_artifact_registry_repository.apps
+  to   = google_artifact_registry_repository.apps[0]
 }
 
 # Identidade runtime do Cloud Run — hoje sem papéis próprios, já que ainda
@@ -41,6 +52,14 @@ resource "google_cloud_run_v2_service" "service" {
         limits = {
           cpu    = var.cpu
           memory = var.memory
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.env
+        content {
+          name  = env.key
+          value = env.value
         }
       }
 

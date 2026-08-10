@@ -1,0 +1,123 @@
+name: Frontend Deploy (dev)
+
+on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - "apps/frontend/**"
+      - ".github/workflows/frontend-deploy-dev.yml"
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+env:
+  PROJECT_ID: observability-hub-dev
+  REGION: us-central1
+  REPOSITORY: apps
+  SERVICE: frontend
+
+jobs:
+  # O primeiro push que introduz o Cloud Run do frontend cria o serviço via
+  # Terraform e este workflow no mesmo commit — os dois podem disparar juntos.
+  # Sem essa espera, o `gcloud run deploy` pode criar o serviço antes do
+  # Terraform, gerando um recurso fora do state (já aconteceu com o backend
+  # em prod, ver backend-deploy-prod.yml).
+  wait-for-terraform:
+    name: Wait for Terraform Apply (dev)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if this push also touches infra/terraform
+        id: check
+        run: |
+          if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null \
+              | grep -qE '^infra/terraform/(environments/dev|modules)/'; then
+            echo "touches_infra=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches_infra=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for Terraform Apply (dev) on this commit
+        if: steps.check.outputs.touches_infra != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Este push também altera infra/terraform — aguardando o Terraform Apply (dev) deste commit terminar antes de buildar/deployar."
+          for i in $(seq 1 60); do
+            run_json=$(gh run list --repo "${{ github.repository }}" \
+              --workflow=terraform-apply-dev.yml \
+              --commit "${{ github.sha }}" \
+              --json status,conclusion --jq '.[0]')
+
+            if [ -z "$run_json" ] || [ "$run_json" = "null" ]; then
+              sleep 10
+              continue
+            fi
+
+            status=$(echo "$run_json" | jq -r '.status')
+            if [ "$status" = "completed" ]; then
+              conclusion=$(echo "$run_json" | jq -r '.conclusion')
+              echo "Terraform Apply (dev) concluído com status: $conclusion"
+              if [ "$conclusion" != "success" ]; then
+                echo "::error::Terraform Apply (dev) não teve sucesso ($conclusion) — abortando o deploy do frontend."
+                exit 1
+              fi
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "::error::Timeout esperando o Terraform Apply (dev) terminar."
+          exit 1
+
+  deploy:
+    name: Build, push and deploy
+    needs: wait-for-terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_DEV }}
+          service_account: ${{ secrets.WIF_SA_DEV }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Get backend URL
+        id: backend
+        run: |
+          url=$(gcloud run services describe backend \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format='value(status.url)')
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        working-directory: apps/frontend
+        run: |
+          docker build \
+            --build-arg VITE_API_BASE_URL="${{ steps.backend.outputs.url }}" \
+            -t "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${{ github.sha }}" .
+
+      - name: Push image
+        run: |
+          docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${{ github.sha }}"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${{ github.sha }}" \
+            --quiet

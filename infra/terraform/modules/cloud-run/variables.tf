@@ -72,3 +72,15 @@ variable "deletion_protection" {
   type        = bool
   default     = false
 }
+
+variable "manage_artifact_registry" {
+  description = "Se true, este módulo cria e gerencia o repositório Artifact Registry. Deixe false em instâncias adicionais do módulo no mesmo projeto que reaproveitam um repositório já criado por outra instância (ex: frontend reaproveitando o repo criado pelo backend)."
+  type        = bool
+  default     = true
+}
+
+variable "env" {
+  description = "Variáveis de ambiente injetadas no container em runtime."
+  type        = map(string)
+  default     = {}
+}

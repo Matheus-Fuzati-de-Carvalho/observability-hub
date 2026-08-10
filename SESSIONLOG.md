@@ -8,116 +8,121 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 ## Status atual
 
 **Última atualização:** 2026-08-10
-**Fase atual:** Fase 2D — Frontend MVP (concluída, aguardando push)
-**Próximo passo:** Push do commit 9dba325 (e de todos os commits desta sessão) + deploy automático via GitHub Actions
+**Fase atual:** Deploy do frontend no Cloud Run — dev concluído e validado
+ponta a ponta; prod pendente de PR + merge.
+**Próximo passo:** Abrir PR de `feature/frontend-cloud-run-deploy` para `main`
+(dispara `terraform-plan.yml`), revisar, e com aprovação explícita do usuário
+fazer o merge — isso dispara `terraform-apply-prod.yml` +
+`frontend-deploy-prod.yml` automaticamente.
 
 ---
 
 ## O que foi feito nesta sessão
 
-Sessão começou com a Fase 2A (domínio catalog) já concluída e commitada (`8f62c17`,
-de uma sessão anterior). O trabalho desta sessão foi: corrigir bugs descobertos
-ao vivo no domínio catalog, implementar Fase 2B (freshness), Fase 2C
-(quality/profiling) e Fase 2D (frontend).
+Sessão começou já com o push da sessão anterior confirmado (Backend Deploy
+prod #9 verde, todos os commits de Fase 2A–2D em `main`). O trabalho desta
+sessão foi inteiramente sobre o **deploy do frontend no Cloud Run**, que
+tinha código pronto (Fase 2D) mas nunca tinha sido provisionado.
 
-### Fase 2A — correções pós-implementação
-Cinco bugs de campo/tabela do `INFORMATION_SCHEMA` descobertos ao vivo contra
-`observability-hub-dev`, um a um, cada um confirmado antes de corrigir (ver
-"Decisões importantes" abaixo).
+### Módulo Terraform `cloud-run` adaptado (não duplicado)
+Reaproveitado para o frontend em vez de criar `cloud-run-frontend/` — decisão
+tomada com o usuário. Dois ajustes:
+- `manage_artifact_registry` (bool, default `true`): torna a criação do
+  Artifact Registry opcional, porque duas instâncias do módulo no mesmo
+  projeto tentariam gerenciar o mesmo repo `apps`. Um bloco `moved` dentro do
+  módulo remapeou o state do repositório já existente do backend (`apps` →
+  `apps[0]`) sem destruir/recriar — confirmado no `terraform plan` como
+  `has moved`, não como destroy/create.
+- `env` (`map(string)`): suporte a env vars no container, usado pra injetar
+  `OBSERVABILITY_HUB_CORS_ORIGINS` no backend com a URL real do frontend.
 
-### Fase 2B — domínio Freshness (concluída)
-- 2 endpoints, classificação de SLA por janelas fixas (12h/24h/48h/7d/1m)
-- `resolve_dataset_region()` movido para `core/bigquery.py` (compartilhado)
+### Environments dev e prod
+`module "frontend_cloud_run"` adicionado nos dois, `health_check_path = "/"`
+(frontend estático não tem `/health`), `manage_artifact_registry = false`.
+`backend_cloud_run` ganhou `env` com a URL do frontend (+ `localhost:5173`
+em dev, pra manter o Vite dev server local funcionando).
 
-### Fase 2C — domínio Quality/Profiling (concluída)
-- 3 endpoints, `sql_builder.py` com geração dinâmica de SQL, dry run de custo,
-  amostragem via `TABLESAMPLE SYSTEM`, drill-down de nulos (null-distribution)
-  deixado fora do MVP
-- 29 testes só em `test_sql_builder.py`
+### Dockerfile frontend
+`ARG`/`ENV VITE_API_BASE_URL` antes do `pnpm build` — Vite faz o replace de
+`import.meta.env.VITE_*` em build time, não dá pra trocar em runtime.
 
-### Fase 2D — Frontend MVP (concluída)
-- Setup completo do projeto React + Vite + TypeScript + shadcn/ui + Tailwind + pnpm
-- Skill de design dp6 criada em `docs/skills/frontend.md`
-- Identidade visual dp6: cores #FFB302, #1D1D1B, Ubuntu font
-- Rotas implementadas:
-  - `/` → seletor de projeto (ProjectSelector)
-  - `/p/:projectId` → catálogo, empty state até selecionar um dataset
-  - `/p/:projectId/datasets/:datasetId` → catálogo (KPI cards + tabela)
-  - `/p/:projectId/freshness` → freshness (SLA row + tabela por dataset)
-- Modal de profiling (Dialog shadcn) com estimate + run funcionando
-- CORSMiddleware adicionado ao backend (`OBSERVABILITY_HUB_CORS_ORIGINS`)
-- Dockerfile frontend: node:22-slim + pnpm build + serve, usuário não-root, $PORT
-- Testado localmente com dados reais do observability-hub-dev (Chromium headless)
-- Bug corrigido: SelectValue do shadcn não derivava label automaticamente
+### Workflows `frontend-deploy-{dev,prod}.yml`
+Mesmo padrão dos workflows do backend, com `wait-for-terraform` **nos dois**
+ambientes (o backend só tinha esse gate em prod) — ver "Descoberta" abaixo.
+Passo extra: descobre a URL atual do backend via
+`gcloud run services describe` e passa como `--build-arg
+VITE_API_BASE_URL`.
 
-### Commits desta sessão (em ordem, a partir de onde a sessão começou)
-- `fix(backend): não faz JOIN com TABLE_PARTITIONS em multi-região US/EU` (04b2ee6)
-- `fix(backend): busca last_modified_time de TABLE_STORAGE, não TABLES` (529e738)
-- `fix(backend): busca last_altered de TABLES em vez de last_modified_time de TABLE_STORAGE` (0598a5b)
-- `fix(backend): deriva partition_column de COLUMNS e corrige last_modified_time` (0b8aa7d)
-- `fix(backend): busca description de COLUMN_FIELD_PATHS, não de COLUMNS` (8c77ef2)
-- `feat(backend): implementa domínio freshness (Fase 2B)` (3f50fc7)
-- `feat(backend): implementa domínio quality/profiling (Fase 2C)` (b6ffb34)
-- `docs: atualiza CHANGELOG com Fase 2 backend concluída` (25e2230)
-- `docs: marca Fase 1.5 (dados mock no BigQuery) como concluída` (89313d2)
-- `docs: adiciona skill de design frontend (dp6) e contexto de trabalho` (9377ffe)
-- `feat(frontend): implementa Frontend MVP (Fase 2D)` (9dba325) ← **aguardando push**
-- `chore: SESSIONLOG.md e gestão de contexto no CLAUDE.md` ← este commit
+### Descoberta: backend de dev estava travado em commit pré-Fase 2
+`gcloud run services describe backend --project observability-hub-dev`
+mostrou a imagem rodando na tag `4c4b5ef` — um commit **anterior** a todo o
+catalog/freshness/quality e ao `CORSMiddleware`. Causa: os commits de Fase
+2A–2D foram direto pra `main` sem passar antes por um push em branch
+não-main (único gatilho do `backend-deploy-dev.yml`), então dev nunca
+recebeu esse deploy (só prod, via merge em `main`).
+Corrigido nesta sessão: bump `apps/backend/pyproject.toml` 0.1.0 → 0.2.0
+(+ `uv lock`) numa branch feature, disparando `backend-deploy-dev.yml` com o
+código atual da main.
+
+### IAM da runtime SA do backend em dev (aplicado manualmente por fora do Terraform)
+`backend-run@observability-hub-dev.iam.gserviceaccount.com` não tinha nenhum
+papel de BigQuery. Concedidos, com aprovação explícita do usuário a cada
+comando (rodados via `!` pelo usuário, o classificador de auto mode bloqueia
+mudança de IAM vinda do assistant):
+- `roles/bigquery.metadataViewer` — não foi suficiente sozinho.
+- `roles/bigquery.jobUser` — necessário porque `discover_regions()` roda uma
+  query real (`INFORMATION_SCHEMA.SCHEMATA`), que exige `bigquery.jobs.create`,
+  não coberto por `metadataViewer`.
+Confirmado depois dos dois: `GET /api/v1/projects/observability-hub-dev/validate`
+→ `200 {"accessible":true,"total_datasets":3}`.
+**Nota:** esses dois bindings foram aplicados via `gcloud` direto, fora do
+Terraform — não existe um módulo `secret-manager`/IAM dedicado ainda.
+Considerar formalizar em Terraform numa fase futura, se o padrão se repetir
+pra outros domínios (lineage/access vão precisar de Cloud Logging IAM
+similar).
+
+### Commits desta sessão
+- `feat(infra): adiciona Cloud Run do frontend e workflows de deploy` (`b1df46f`)
+- `chore(backend): bump versão pra 0.2.0 e força redeploy em dev` (`64afca6`)
+
+Branch: `feature/frontend-cloud-run-deploy` (push feito, aprovado pelo
+usuário). Ainda **não** mergeada em `main`.
 
 ---
 
 ## Decisões importantes tomadas nesta sessão
 
-1. **INFORMATION_SCHEMA.TABLE_PARTITIONS** não existe em multi-região US/EU, e
-   nem tem um campo com o *nome* da coluna de particionamento (só `partition_id`,
-   o valor) — `partition_column` passou a vir de `COLUMNS.is_partitioning_column`.
-2. **TABLE_STORAGE** exige a opção de projeto `enable_info_schema_storage`
-   habilitada por região (via `ALTER PROJECT`/`ALTER ORGANIZATION`) — mas em
-   `observability-hub-dev` essa opção já estava `true` (confirmado consultando
-   `INFORMATION_SCHEMA.PROJECT_OPTIONS`; **não aplicamos `ALTER PROJECT` nesta
-   sessão**). O bloqueio real observado foi lag de propagação — a documentação
-   do Google fala em "~1 dia" após habilitar a opção ou após mudanças na tabela.
-3. **`storage_last_modified_time`** é o campo correto em `TABLE_STORAGE` — não
-   `last_modified_time`, não `modified_time`, não `last_altered` (os três
-   foram tentados nesta sessão, nessa ordem, e os três estavam errados).
-4. **last_modified_time, size_bytes, row_count** (que vêm de TABLE_STORAGE) são
-   nullable — podem faltar por tabela recém-criada/modificada ainda não
-   propagada (não confirmamos um número exato de horas nesta sessão, só o
-   "~1 dia" documentado pelo Google).
-5. **COLUMN_FIELD_PATHS** é a fonte correta para `description` de colunas (não
-   `COLUMNS`, que não tem esse campo) — JOIN em `field_path = column_name` para
-   não duplicar linhas de STRUCT/RECORD aninhados.
-6. **resolve_dataset_region** movido para `core/bigquery.py` (compartilhado
-   entre catalog, freshness e quality).
-7. **Região automática**: `discover_regions()` consulta todas as regiões
-   conhecidas em paralelo via `ThreadPoolExecutor`.
-8. **Tipos TS**: escritos à mão em `src/types/` (sem codegen OpenAPI no MVP) —
-   espelham os schemas Pydantic do backend 1:1.
-9. **Null-distribution drill down** (profiling): fora do MVP, entra em fase futura.
-10. **CORS**: `CORSMiddleware` no backend, origem liberada via
-    `OBSERVABILITY_HUB_CORS_ORIGINS` (default `http://localhost:5173`) — frontend
-    e backend são origens diferentes tanto em dev quanto em prod (Cloud Run
-    separados).
+1. Reaproveitar o módulo `cloud-run` genérico em vez de duplicar em
+   `cloud-run-frontend/` — segue a regra do CLAUDE.md de checar módulo
+   reutilizável antes de duplicar.
+2. `moved` block dentro do próprio módulo (não no environment) — assim
+   qualquer instância futura do módulo herda o remapeamento automaticamente.
+3. CORS em dev inclui `http://localhost:5173` além da URL real do frontend —
+   mantém o Vite dev server local utilizável contra o backend de dev. Em
+   prod, só a URL real do frontend.
+4. `wait-for-terraform` replicado nos workflows de frontend em **dev e prod**
+   (o backend só tinha em prod) — o primeiro push que cria o Cloud Run do
+   frontend via Terraform e adiciona o workflow de deploy no mesmo commit
+   pode disparar os dois em paralelo, mesma corrida que já mordeu o backend
+   em prod uma vez.
+5. IAM da SA de runtime não é gerenciado pelo módulo `cloud-run` (que só cria
+   a SA, sem papéis) — papéis de BigQuery/Logging entram sob demanda,
+   conforme cada domínio precisa, aplicados manualmente por enquanto.
 
 ---
 
-## Erros corrigidos (para não repetir)
+## Decisões e erros de sessões anteriores (ainda válidos)
 
-- Não usar `TABLE_PARTITIONS` para achar coluna de partição — usar
-  `COLUMNS.is_partitioning_column`. `TABLE_PARTITIONS` também não existe em
-  multi-região US/EU.
-- Em `TABLE_STORAGE`, o campo é `storage_last_modified_time` — não
-  `last_modified_time`, `modified_time` nem `last_altered`.
-- Não usar `description` em `INFORMATION_SCHEMA.COLUMNS` — usar
-  `COLUMN_FIELD_PATHS`.
-- `SelectValue` do shadcn/base-ui não deriva o rótulo automaticamente a partir
-  dos `SelectItem` filhos nesta versão — precisa de render-prop explícito
-  (`<SelectValue>{(value) => label[value]}</SelectValue>`), senão mostra o
-  value bruto (ex: `__none__`) na tela.
-- Antes de escrever qualquer afirmação sobre configuração/infraestrutura do
-  BigQuery neste projeto (nomes de campo, flags, regiões suportadas), validar
-  ao vivo contra `observability-hub-dev` — specs e suposições já erraram
-  repetidas vezes nesta sessão.
+1. `INFORMATION_SCHEMA.TABLE_PARTITIONS` não existe em multi-região US/EU e
+   não tem o *nome* da coluna de particionamento — usar
+   `COLUMNS.is_partitioning_column`.
+2. `TABLE_STORAGE.storage_last_modified_time` é o campo correto (não
+   `last_modified_time`, `modified_time` nem `last_altered`).
+3. `COLUMN_FIELD_PATHS` é a fonte de `description` de colunas, não `COLUMNS`.
+4. `SelectValue` do shadcn/base-ui precisa de render-prop explícito pro
+   label — não deriva automaticamente dos `SelectItem` filhos.
+5. Antes de qualquer afirmação sobre configuração do BigQuery neste projeto,
+   validar ao vivo contra `observability-hub-dev`.
 
 ---
 
@@ -125,14 +130,19 @@ Cinco bugs de campo/tabela do `INFORMATION_SCHEMA` descobertos ao vivo contra
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ GET /health → {"status":"ok"}
-├── Artifact Registry: apps ✅
-├── TABLE_STORAGE: enable_info_schema_storage = true ✅ (já estava habilitado,
-│   não configuramos nesta sessão — confirmado via INFORMATION_SCHEMA.PROJECT_OPTIONS)
+├── Cloud Run: backend ✅ imagem atual (0.2.0, commit 64afca6), CORS liberado
+├── Cloud Run: frontend ✅ https://frontend-46qbggr2oa-uc.a.run.app (200)
+├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
+├── IAM backend-run SA: bigquery.metadataViewer + bigquery.jobUser ✅
+│   (aplicados via gcloud direto, fora do Terraform)
+├── Pipeline validado ponta a ponta: frontend → backend → BigQuery
+│   (GET /api/v1/projects/observability-hub-dev/validate → 200, 3 datasets)
 └── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ GET /health → {"status":"ok"}
+├── Cloud Run: backend ✅ GET /health → {"status":"ok"} (imagem pré-Fase-2E,
+│   vai atualizar quando a branch mergear em main)
+├── Cloud Run: frontend ❌ ainda não existe — só depois do merge
 └── Artifact Registry: apps ✅
 
 GitHub Secrets
@@ -142,18 +152,17 @@ GitHub Secrets
 └── WIF_SA_PROD ✅
 ```
 
-Frontend ainda **não** tem Cloud Run provisionado — Fase 2D só entregou
-`apps/frontend/` + `Dockerfile`, sem módulo Terraform novo (fora do escopo
-combinado). Provisionar depois, reaproveitando o módulo `cloud-run` existente.
-
 ---
 
-## Próximas fases após o push
+## Próximas fases
 
 ```
-Fase 2D push → deploy automático do backend no Cloud Run (dev/prod)
+PR feature/frontend-cloud-run-deploy → main (terraform-plan.yml roda no PR)
+      ↓ (aprovação explícita do usuário pro merge)
+merge em main → terraform-apply-prod.yml + frontend-deploy-prod.yml automáticos
       ↓
-Frontend ainda não deploya sozinho — falta módulo Terraform/workflow dedicado
+Conceder bigquery.metadataViewer + bigquery.jobUser pra backend-run SA em PROD
+também (mesmo gap que existia em dev) — checar antes de assumir que já existe
       ↓
 Fase 3 — Discovery (lineage, PII, mapa de acesso)  [pendente]
 Fase 4 — FinOps                                    [pendente]
@@ -166,3 +175,4 @@ Fase 4 — FinOps                                    [pendente]
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
 3. Confirma próximo passo com o usuário antes de executar
+4. Branch atual: `feature/frontend-cloud-run-deploy` — não mergeada ainda
