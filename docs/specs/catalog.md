@@ -1,50 +1,71 @@
 # Spec — Domínio: Catálogo (catalog)
 
-**Status:** Draft para revisão
-**Fase:** 2 — MVP
+**Versão:** 1.1 (atualizada com cross-project e validate endpoint)
+**Status:** Aprovada
+**Fase:** 2 — MVP v1
 **Última atualização:** 2026-08-05
 
 ---
 
 ## Objetivo
 
-Prover um inventário navegável e completo de todos os datasets e tabelas de um
-projeto BigQuery, exibindo volumetria, tipo, região e metadados de tempo —
-sem executar queries em dados reais, apenas em metadados do INFORMATION_SCHEMA.
+Prover um inventário navegável e completo de todos os datasets e tabelas de
+qualquer projeto BigQuery acessível pela service account do Hub, exibindo
+volumetria, tipo, região e metadados de tempo — sem queries em dados reais,
+apenas em metadados do INFORMATION_SCHEMA.
+
+O projeto alvo é informado pelo usuário via campo no frontend (cross-project,
+conforme ADR-006) e validado antes de carregar o catálogo.
 
 ---
 
 ## Fonte de dados
 
-Todas as informações vêm exclusivamente de:
+Todas as informações vêm exclusivamente de metadados — **custo $0**:
 
 ```sql
--- Datasets
 `<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA`
-
--- Tabelas e views
 `<project>.region-<region>.INFORMATION_SCHEMA.TABLES`
-`<project>.region-<region>.INFORMATION_SCHEMA.TABLE_OPTIONS`
-
--- Tamanho e contagem de linhas (metadados, sem scan de dados)
 `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE`
+`<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS`
+`<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS`
 ```
-
-Custo: metadados do INFORMATION_SCHEMA são **gratuitos** no BigQuery.
 
 ---
 
 ## Endpoints da API
 
-### GET /api/v1/catalog/projects
-Lista os projetos GCP disponíveis para o usuário autenticado.
+### GET /api/v1/projects/{project_id}/validate
+Valida se o projeto existe e se a SA tem acesso antes de carregar o catálogo.
+Chamado pelo frontend ao submeter o seletor de projeto.
 
-**Response:**
+**Parâmetros:**
+- `project_id` (path) — ID do projeto GCP alvo
+
+**Response 200:**
 ```json
 {
-  "projects": [
-    { "project_id": "observability-hub-dev", "display_name": "Observability Hub Dev" }
-  ]
+  "project_id": "cliente-x-prod",
+  "accessible": true,
+  "default_region": "us-central1",
+  "available_regions": ["us-central1", "us-east1"]
+}
+```
+
+**Response 403:**
+```json
+{
+  "error": "access_denied",
+  "message": "A service account do Hub não tem acesso a este projeto.",
+  "fix": "gcloud projects add-iam-policy-binding cliente-x-prod --member='serviceAccount:backend-run@observability-hub-prod.iam.gserviceaccount.com' --role='roles/bigquery.metadataViewer'"
+}
+```
+
+**Response 404:**
+```json
+{
+  "error": "project_not_found",
+  "message": "Projeto 'cliente-x-prod' não encontrado ou não existe."
 }
 ```
 
@@ -54,26 +75,26 @@ Lista os projetos GCP disponíveis para o usuário autenticado.
 Lista todos os datasets de um projeto com resumo de volumetria.
 
 **Parâmetros:**
-- `project_id` (path) — ID do projeto GCP
-- `region` (query, default: `us-central1`) — região do dataset
+- `project_id` (path)
+- `region` (query, default: `us-central1`)
 
-**Response:**
+**Response 200:**
 ```json
 {
-  "project_id": "observability-hub-dev",
+  "project_id": "cliente-x-prod",
   "region": "us-central1",
   "total_datasets": 3,
   "datasets": [
     {
-      "dataset_id": "analytics",
+      "dataset_id": "RAW",
       "location": "US",
       "creation_time": "2024-01-15T10:00:00Z",
       "last_modified_time": "2024-06-01T08:30:00Z",
-      "total_tables": 12,
-      "total_views": 3,
-      "total_size_bytes": 1073741824,
-      "total_size_gb": 1.07,
-      "total_rows": 5000000
+      "total_tables": 3,
+      "total_views": 0,
+      "total_size_bytes": 2075443,
+      "total_size_gb": 0.002,
+      "total_rows": 30000
     }
   ]
 }
@@ -88,28 +109,30 @@ Lista todas as tabelas de um dataset com metadados detalhados.
 - `project_id` (path)
 - `dataset_id` (path)
 - `region` (query, default: `us-central1`)
-- `table_type` (query, opcional) — filtro: `TABLE`, `VIEW`, `EXTERNAL`, `MATERIALIZED_VIEW`
+- `table_type` (query, opcional) — `TABLE`, `VIEW`, `EXTERNAL`, `MATERIALIZED_VIEW`
 
-**Response:**
+**Response 200:**
 ```json
 {
-  "project_id": "observability-hub-dev",
-  "dataset_id": "analytics",
-  "total_tables": 12,
+  "project_id": "cliente-x-prod",
+  "dataset_id": "RAW",
+  "total_tables": 3,
   "tables": [
     {
-      "table_id": "events",
+      "table_id": "crm_leads_mock",
       "table_type": "TABLE",
-      "creation_time": "2024-01-15T10:00:00Z",
-      "last_modified_time": "2024-06-01T08:00:00Z",
-      "size_bytes": 536870912,
-      "size_gb": 0.54,
-      "row_count": 2500000,
-      "is_partitioned": true,
-      "partition_column": "_PARTITIONTIME",
-      "partition_type": "DAY",
-      "is_clustered": true,
-      "clustering_columns": ["event_name", "user_pseudo_id"]
+      "creation_time": "2026-06-08T18:27:49Z",
+      "last_modified_time": "2026-06-08T18:27:49Z",
+      "size_bytes": 849813,
+      "size_gb": 0.0008,
+      "row_count": 10000,
+      "column_count": 6,
+      "is_partitioned": false,
+      "partition_column": null,
+      "partition_type": null,
+      "is_clustered": false,
+      "clustering_columns": [],
+      "region": "US"
     }
   ]
 }
@@ -118,24 +141,21 @@ Lista todas as tabelas de um dataset com metadados detalhados.
 ---
 
 ### GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/tables/{table_id}
-Detalhe completo de uma tabela específica.
+Detalhe completo de uma tabela incluindo schema de colunas.
 
-**Response adicional ao item acima:**
+**Response 200** (campos adicionais ao item acima):
 ```json
 {
   "columns": [
     {
-      "column_name": "event_name",
+      "column_name": "lead_id",
       "data_type": "STRING",
       "is_nullable": true,
-      "description": "Nome do evento GA4"
+      "description": null
     }
   ],
-  "labels": {
-    "env": "prod",
-    "team": "analytics"
-  },
-  "description": "Eventos brutos do GA4"
+  "labels": {},
+  "description": null
 }
 ```
 
@@ -143,48 +163,64 @@ Detalhe completo de uma tabela específica.
 
 ## Queries BigQuery planejadas
 
-### Query 1 — Resumo de datasets
+### Query 1 — Validação de acesso ao projeto
+```sql
+SELECT schema_name
+FROM `<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA`
+LIMIT 1
+```
+Custo: $0. Se lançar exceção de permissão → 403. Se projeto não existir → 404.
+
+### Query 2 — Resumo de datasets
 ```sql
 SELECT
-  s.schema_name                          AS dataset_id,
+  s.schema_name                              AS dataset_id,
   s.location,
   s.creation_time,
   s.last_modified_time,
-  COUNT(DISTINCT t.table_name)           AS total_tables,
-  COALESCE(SUM(ts.total_rows), 0)        AS total_rows,
-  COALESCE(SUM(ts.total_logical_bytes), 0) AS total_size_bytes
+  COUNTIF(t.table_type = 'BASE TABLE')       AS total_tables,
+  COUNTIF(t.table_type IN ('VIEW','MATERIALIZED VIEW')) AS total_views,
+  COALESCE(SUM(ts.total_logical_bytes), 0)   AS total_size_bytes,
+  COALESCE(SUM(ts.total_rows), 0)            AS total_rows
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA` s
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLES` t
   ON t.table_schema = s.schema_name
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE` ts
   ON ts.table_schema = t.table_schema
- AND ts.table_name  = t.table_name
+ AND ts.table_name   = t.table_name
 GROUP BY 1, 2, 3, 4
 ORDER BY total_size_bytes DESC
 ```
-**Custo estimado:** $0 (metadados)
+Custo: $0
 
-### Query 2 — Tabelas de um dataset
+### Query 3 — Tabelas de um dataset
 ```sql
 SELECT
   t.table_name,
   t.table_type,
   t.creation_time,
   t.last_modified_time,
-  ts.total_rows,
-  ts.total_logical_bytes,
-  tp.partition_expiration_days,
-  tp.partition_column,
+  ts.total_rows        AS row_count,
+  ts.total_logical_bytes AS size_bytes,
+  COUNT(c.column_name) AS column_count,
+  MAX(CASE WHEN tp.partition_column IS NOT NULL
+      THEN tp.partition_column END) AS partition_column,
+  MAX(tp.partition_expiration_days)  AS partition_expiration_days
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLES` t
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE` ts
-  ON ts.table_name = t.table_name AND ts.table_schema = t.table_schema
+  ON ts.table_name   = t.table_name
+ AND ts.table_schema = t.table_schema
+LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS` c
+  ON c.table_name   = t.table_name
+ AND c.table_schema = t.table_schema
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS` tp
-  ON tp.table_name = t.table_name AND tp.table_schema = t.table_schema
+  ON tp.table_name   = t.table_name
+ AND tp.table_schema = t.table_schema
 WHERE t.table_schema = @dataset_id
-GROUP BY 1,2,3,4,5,6,7,8
-ORDER BY ts.total_logical_bytes DESC
+GROUP BY 1, 2, 3, 4, 5, 6
+ORDER BY size_bytes DESC NULLS LAST
 ```
-**Custo estimado:** $0 (metadados)
+Custo: $0
 
 ---
 
@@ -192,42 +228,38 @@ ORDER BY ts.total_logical_bytes DESC
 
 ```
 apps/backend/src/observability_hub/
-├── api/
-│   └── v1/
-│       └── catalog.py          # Router FastAPI — só HTTP, sem lógica
-├── domains/
-│   └── catalog/
-│       ├── __init__.py
-│       ├── service.py          # Lógica principal, chama o repository
-│       ├── repository.py       # Queries BQ — única camada que toca GCP
-│       └── schemas.py          # Pydantic models de request/response
-└── tests/
-    └── unit/
-        └── catalog/
-            ├── test_service.py     # Testa lógica com mocks do repository
-            └── test_schemas.py     # Testa validação dos Pydantic models
+├── api/v1/
+│   ├── projects.py       # GET /projects/{project_id}/validate
+│   └── catalog.py        # GET /catalog/...
+├── domains/catalog/
+│   ├── __init__.py
+│   ├── service.py        # Lógica principal
+│   ├── repository.py     # Queries BQ
+│   └── schemas.py        # Pydantic models
+└── tests/unit/catalog/
+    ├── test_service.py
+    └── test_schemas.py
 ```
 
 ---
 
 ## Casos de borda
 
-| Cenário | Comportamento esperado |
+| Cenário | Comportamento |
 |---|---|
-| Projeto sem datasets | Retorna `total_datasets: 0`, lista vazia |
-| Dataset sem tabelas | Retorna `total_tables: 0`, lista vazia |
-| Tabela externa (EXTERNAL) | Inclui na listagem, `size_bytes` pode ser null |
-| View | Inclui na listagem, `row_count` e `size_bytes` são null |
-| Sem permissão no projeto | HTTP 403 com mensagem clara |
+| Projeto sem permissão | HTTP 403 com comando de correção |
 | Projeto inexistente | HTTP 404 |
-| Região incorreta | HTTP 400 com sugestão de regiões válidas |
+| Região incorreta | HTTP 400 com regiões válidas sugeridas |
+| Dataset sem tabelas | `total_tables: 0`, lista vazia |
+| Tabela externa (EXTERNAL) | Incluída, `size_bytes` pode ser null |
+| View | Incluída, `row_count` e `size_bytes` null |
 
 ---
 
 ## Fora do escopo desta spec
 
-- Busca semântica por nome de tabela (Fase futura)
-- Lineage de tabelas (Fase 3)
-- Detecção de PII nas colunas (Fase 3)
-- Cache de metadados (avaliar na Fase 2 conforme performance)
+- Busca semântica por nome de tabela
+- Lineage (Fase 3)
+- Detecção de PII (Fase 3)
+- Cache de metadados
 - Suporte a múltiplas regiões em uma única chamada
