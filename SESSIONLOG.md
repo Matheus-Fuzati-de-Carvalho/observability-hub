@@ -8,12 +8,12 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 ## Status atual
 
 **Última atualização:** 2026-08-10
-**Fase atual:** Deploy do frontend no Cloud Run — dev concluído e validado
-ponta a ponta; prod pendente de PR + merge.
-**Próximo passo:** Abrir PR de `feature/frontend-cloud-run-deploy` para `main`
-(dispara `terraform-plan.yml`), revisar, e com aprovação explícita do usuário
-fazer o merge — isso dispara `terraform-apply-prod.yml` +
-`frontend-deploy-prod.yml` automaticamente.
+**Fase atual:** Deploy do frontend no Cloud Run — **concluído em dev e prod**,
+validado ponta a ponta nos dois ambientes.
+**Próximo passo:** Nenhum pendente desta fase. Local ainda está na branch
+`feature/frontend-cloud-run-deploy` (já mergeada via PR #1) — trocar pra
+`main` e `git pull` no início da próxima sessão. Depois disso, a próxima
+fase de produto é a Fase 3 (Discovery: lineage, PII, mapa de acesso).
 
 ---
 
@@ -22,7 +22,8 @@ fazer o merge — isso dispara `terraform-apply-prod.yml` +
 Sessão começou já com o push da sessão anterior confirmado (Backend Deploy
 prod #9 verde, todos os commits de Fase 2A–2D em `main`). O trabalho desta
 sessão foi inteiramente sobre o **deploy do frontend no Cloud Run**, que
-tinha código pronto (Fase 2D) mas nunca tinha sido provisionado.
+tinha código pronto (Fase 2D) mas nunca tinha sido provisionado — em dev e,
+depois, em prod via PR #1.
 
 ### Módulo Terraform `cloud-run` adaptado (não duplicado)
 Reaproveitado para o frontend em vez de criar `cloud-run-frontend/` — decisão
@@ -31,8 +32,8 @@ tomada com o usuário. Dois ajustes:
   Artifact Registry opcional, porque duas instâncias do módulo no mesmo
   projeto tentariam gerenciar o mesmo repo `apps`. Um bloco `moved` dentro do
   módulo remapeou o state do repositório já existente do backend (`apps` →
-  `apps[0]`) sem destruir/recriar — confirmado no `terraform plan` como
-  `has moved`, não como destroy/create.
+  `apps[0]`) sem destruir/recriar — confirmado no `terraform plan` (dev e
+  prod) como `has moved`, não como destroy/create.
 - `env` (`map(string)`): suporte a env vars no container, usado pra injetar
   `OBSERVABILITY_HUB_CORS_ORIGINS` no backend com a URL real do frontend.
 
@@ -48,45 +49,62 @@ em dev, pra manter o Vite dev server local funcionando).
 
 ### Workflows `frontend-deploy-{dev,prod}.yml`
 Mesmo padrão dos workflows do backend, com `wait-for-terraform` **nos dois**
-ambientes (o backend só tinha esse gate em prod) — ver "Descoberta" abaixo.
-Passo extra: descobre a URL atual do backend via
-`gcloud run services describe` e passa como `--build-arg
-VITE_API_BASE_URL`.
+ambientes (o backend só tinha esse gate em prod). Passo extra: descobre a
+URL atual do backend via `gcloud run services describe` e passa como
+`--build-arg VITE_API_BASE_URL`.
 
-### Descoberta: backend de dev estava travado em commit pré-Fase 2
+### Descoberta 1: backend de dev estava travado em commit pré-Fase 2
 `gcloud run services describe backend --project observability-hub-dev`
 mostrou a imagem rodando na tag `4c4b5ef` — um commit **anterior** a todo o
 catalog/freshness/quality e ao `CORSMiddleware`. Causa: os commits de Fase
 2A–2D foram direto pra `main` sem passar antes por um push em branch
 não-main (único gatilho do `backend-deploy-dev.yml`), então dev nunca
 recebeu esse deploy (só prod, via merge em `main`).
-Corrigido nesta sessão: bump `apps/backend/pyproject.toml` 0.1.0 → 0.2.0
-(+ `uv lock`) numa branch feature, disparando `backend-deploy-dev.yml` com o
-código atual da main.
+Corrigido: bump `apps/backend/pyproject.toml` 0.1.0 → 0.2.0 (+ `uv lock`)
+numa branch feature, disparando `backend-deploy-dev.yml` com o código atual
+da main.
 
-### IAM da runtime SA do backend em dev (aplicado manualmente por fora do Terraform)
-`backend-run@observability-hub-dev.iam.gserviceaccount.com` não tinha nenhum
-papel de BigQuery. Concedidos, com aprovação explícita do usuário a cada
-comando (rodados via `!` pelo usuário, o classificador de auto mode bloqueia
-mudança de IAM vinda do assistant):
+### Descoberta 2: WIF de prod incompatível com `terraform-plan.yml` em PR
+Ao abrir o PR #1 (primeiro PR real deste repositório), o job `Plan (prod)`
+falhou no passo de auth: `"credential is rejected by the attribute
+condition"`. Causa: `infra/terraform/bootstrap/prod` tem
+`attribute_condition = 'assertion.repository == "..." &&
+assertion.ref == "refs/heads/main"'` — só autentica em push direto pra
+`main`, nunca em `pull_request` (roda em `refs/pull/N/merge`). O de dev não
+tem essa restrição de `ref`, por isso `Plan (dev)` sempre passou.
+Decisão (com o usuário): remover o job `Plan (prod)` de `terraform-plan.yml`
+em vez de afrouxar o WIF de prod pra aceitar PRs (trade-off de segurança
+real, mesmo em repo privado). `terraform plan` de prod continua sendo
+revisão manual antes de merges que tocam `infra/terraform/**`. `CLAUDE.md`
+atualizado pra não prometer mais plan de prod automatizado em PR.
+
+### IAM das runtime SAs do backend (aplicado manualmente por fora do Terraform, dev e prod)
+Nenhuma das duas SAs (`backend-run@observability-hub-{dev,prod}`) tinha
+papel de BigQuery. Todo `gcloud add-iam-policy-binding` foi bloqueado pelo
+classificador de auto mode quando tentado pelo assistant — rodados pelo
+usuário via `!` na sessão, com aprovação explícita a cada comando:
 - `roles/bigquery.metadataViewer` — não foi suficiente sozinho.
 - `roles/bigquery.jobUser` — necessário porque `discover_regions()` roda uma
   query real (`INFORMATION_SCHEMA.SCHEMATA`), que exige `bigquery.jobs.create`,
   não coberto por `metadataViewer`.
-Confirmado depois dos dois: `GET /api/v1/projects/observability-hub-dev/validate`
-→ `200 {"accessible":true,"total_datasets":3}`.
-**Nota:** esses dois bindings foram aplicados via `gcloud` direto, fora do
+Confirmado nos dois ambientes depois dos dois papéis:
+- dev: `GET /api/v1/projects/observability-hub-dev/validate` →
+  `200 {"accessible":true,"total_datasets":3}`.
+- prod: `GET /api/v1/projects/observability-hub-prod/validate` →
+  `200 {"accessible":true,"total_datasets":0}` (0 é esperado — não há
+  datasets mock em prod, só em dev).
+**Nota:** esses bindings foram aplicados via `gcloud` direto, fora do
 Terraform — não existe um módulo `secret-manager`/IAM dedicado ainda.
 Considerar formalizar em Terraform numa fase futura, se o padrão se repetir
 pra outros domínios (lineage/access vão precisar de Cloud Logging IAM
 similar).
 
-### Commits desta sessão
+### Commits desta sessão (branch `feature/frontend-cloud-run-deploy`, mergeada em `main` via PR #1)
 - `feat(infra): adiciona Cloud Run do frontend e workflows de deploy` (`b1df46f`)
 - `chore(backend): bump versão pra 0.2.0 e força redeploy em dev` (`64afca6`)
-
-Branch: `feature/frontend-cloud-run-deploy` (push feito, aprovado pelo
-usuário). Ainda **não** mergeada em `main`.
+- `chore: atualiza SESSIONLOG.md com deploy do frontend em dev` (`92b223f`)
+- `fix(ci): remove job Plan (prod) do terraform-plan.yml` (`b8b0e56`)
+- Merge commit `4f76ad3` — PR #1 mergeado em `main`
 
 ---
 
@@ -108,6 +126,9 @@ usuário). Ainda **não** mergeada em `main`.
 5. IAM da SA de runtime não é gerenciado pelo módulo `cloud-run` (que só cria
    a SA, sem papéis) — papéis de BigQuery/Logging entram sob demanda,
    conforme cada domínio precisa, aplicados manualmente por enquanto.
+6. `Plan (prod)` removido de `terraform-plan.yml` em vez de afrouxar o WIF —
+   prioriza a postura de segurança já decidida no bootstrap sobre a
+   conveniência de plan automatizado em PR.
 
 ---
 
@@ -126,11 +147,27 @@ usuário). Ainda **não** mergeada em `main`.
 
 ---
 
+## Erros corrigidos nesta sessão (para não repetir)
+
+- Comandos `gcloud ... add-iam-policy-binding` (e outras mudanças de IAM) são
+  bloqueados pelo classificador de auto mode quando o assistant tenta
+  rodá-los — sempre passar o comando pronto pro usuário rodar via `!`.
+- Colar dois comandos prefixados com `!` no mesmo bloco só aplica o prefixo
+  no primeiro; o segundo é executado literalmente pelo bash (`!gcloud:
+  command not found`) — sempre um comando `!` por vez.
+- Antes de assumir que um ambiente (dev ou prod) está com o código mais
+  recente só porque `main` está atualizado, checar a tag da imagem
+  (`gcloud run services describe ... --format='value(spec.template.spec.containers[0].image)'`)
+  contra `git log` — deploy automático só dispara em quem tocou os paths do
+  workflow, não em "está tudo commitado".
+
+---
+
 ## Estado da infraestrutura
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ imagem atual (0.2.0, commit 64afca6), CORS liberado
+├── Cloud Run: backend ✅ imagem atual (0.2.0), CORS liberado
 ├── Cloud Run: frontend ✅ https://frontend-46qbggr2oa-uc.a.run.app (200)
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
 ├── IAM backend-run SA: bigquery.metadataViewer + bigquery.jobUser ✅
@@ -140,10 +177,16 @@ GCP Dev  (observability-hub-dev)
 └── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ GET /health → {"status":"ok"} (imagem pré-Fase-2E,
-│   vai atualizar quando a branch mergear em main)
-├── Cloud Run: frontend ❌ ainda não existe — só depois do merge
-└── Artifact Registry: apps ✅
+├── Cloud Run: backend ✅ imagem atual (0.2.0), CORS liberado
+├── Cloud Run: frontend ✅ https://frontend-4j3il2grfq-uc.a.run.app (200)
+├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
+├── IAM backend-run SA: bigquery.metadataViewer + bigquery.jobUser ✅
+│   (aplicados via gcloud direto, fora do Terraform)
+├── Pipeline validado ponta a ponta: frontend → backend → BigQuery
+│   (GET /api/v1/projects/observability-hub-prod/validate → 200, 0 datasets
+│   — esperado, sem dados mock em prod)
+└── WIF: attribute_condition restrito a refs/heads/main (só push direto,
+    nunca PR) — ver "Descoberta 2" acima
 
 GitHub Secrets
 ├── WIF_PROVIDER_DEV ✅
@@ -157,15 +200,15 @@ GitHub Secrets
 ## Próximas fases
 
 ```
-PR feature/frontend-cloud-run-deploy → main (terraform-plan.yml roda no PR)
-      ↓ (aprovação explícita do usuário pro merge)
-merge em main → terraform-apply-prod.yml + frontend-deploy-prod.yml automáticos
-      ↓
-Conceder bigquery.metadataViewer + bigquery.jobUser pra backend-run SA em PROD
-também (mesmo gap que existia em dev) — checar antes de assumir que já existe
-      ↓
 Fase 3 — Discovery (lineage, PII, mapa de acesso)  [pendente]
 Fase 4 — FinOps                                    [pendente]
+
+Itens soltos, não bloqueantes, pra considerar quando aparecer necessidade:
+- Formalizar IAM (bigquery.metadataViewer/jobUser) em Terraform em vez de
+  gcloud manual, se mais domínios precisarem de papéis (lineage/access vão
+  precisar de Cloud Logging).
+- Revisitar a restrição de WIF de prod (refs/heads/main) se algum dia for
+  necessário automatizar terraform plan de prod em PR.
 ```
 
 ---
@@ -175,4 +218,6 @@ Fase 4 — FinOps                                    [pendente]
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
 3. Confirma próximo passo com o usuário antes de executar
-4. Branch atual: `feature/frontend-cloud-run-deploy` — não mergeada ainda
+4. Trocar pra `main` e `git pull` — a branch local ainda pode estar em
+   `feature/frontend-cloud-run-deploy` (já mergeada via PR #1, pode apagar
+   depois de confirmar com o usuário).
