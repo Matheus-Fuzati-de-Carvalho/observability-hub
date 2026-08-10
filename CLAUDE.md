@@ -157,3 +157,91 @@ Diretrizes para os workflows quando forem criados:
 - Nunca usar Terraform workspaces — a separação de ambiente é sempre por diretório.
 - Nunca colocar lógica de negócio em `api/` (backend) ou chamadas HTTP direto em componentes de página (frontend).
 - Fase 0 (estrutura e documentação) e Fase 1 (bootstrap do Terraform em `infra/terraform/bootstrap/`) concluídas. Ainda não existem: módulos de `infra/terraform/modules/`, root modules de `environments/{dev,prod}`, workflows em `.github/workflows/`, nem código de aplicação em `apps/`.
+
+## Contextos de trabalho
+
+Dependendo do escopo da tarefa, assuma o contexto correspondente abaixo.
+Cada contexto define foco, prioridades e checklist antes de considerar uma tarefa concluída.
+
+---
+
+### Contexto: IaC (infra/terraform/)
+
+**Foco:** segurança, idempotência, custo e rastreabilidade.
+
+Antes de criar ou editar qualquer .tf:
+- Verificar se existe módulo reutilizável em modules/ antes de duplicar código
+- Nunca hardcodar project_id, region ou valores de ambiente — sempre variáveis
+- Sempre rodar terraform fmt + terraform validate antes de commitar
+- Rodar terraform plan e apresentar o output para aprovação antes de apply
+- Confirmar que deletion_protection = true em recursos de prod
+- Labels obrigatórias em todos os recursos: environment, managed-by = terraform
+
+Checklist de entrega:
+- [ ] terraform validate passou
+- [ ] terraform plan revisado e aprovado
+- [ ] Nenhum secret ou credencial em .tf ou .tfvars commitados
+- [ ] README.md do módulo atualizado se necessário
+
+---
+
+### Contexto: Backend (apps/backend/)
+
+**Foco:** corretude do domínio, testabilidade e custo de queries BQ.
+
+Antes de implementar qualquer domínio:
+- Ler a spec em docs/specs/<domínio>.md — não implementar sem spec aprovada
+- Lógica de negócio fica em domains/, nunca em api/
+- Clients GCP inicializados em core/, injetados via Depends
+- Endpoints que chamam libs GCP síncronas devem ser def, não async def
+- Toda query BigQuery deve ter estimativa de custo (dry run) antes de implementar
+- Logs estruturados em JSON, nunca print()
+
+Checklist de entrega:
+- [ ] Spec do domínio existe e foi seguida
+- [ ] Testes unitários em tests/unit/ cobrindo lógica principal
+- [ ] pytest passou sem erros
+- [ ] Nenhuma chamada GCP em tests/unit/ (usar mocks)
+- [ ] ruff check e ruff format sem erros
+
+---
+
+### Contexto: CI/CD (.github/workflows/)
+
+**Foco:** segurança de secrets, ordem de execução e falha rápida.
+
+Regras obrigatórias:
+- Autenticação GCP exclusivamente via WIF — nunca service account keys
+- Workflows de deploy de app sempre com needs: apontando para o terraform apply correspondente quando o push tocar infra/ e apps/ juntos
+- Secrets referenciados sempre como ${{ secrets.NOME }} — nunca valores literais
+- Todo workflow deve ter permissions: explícito (principle of least privilege)
+- Usar actions fixadas em SHA ou tag de versão (ex: actions/checkout@v4)
+
+Checklist de entrega:
+- [ ] Nenhum secret literal no YAML
+- [ ] permissions: definido explicitamente
+- [ ] Ordem de jobs garantida com needs: onde necessário
+- [ ] Testado com um push real ou via act localmente
+
+---
+
+### Contexto: Spec e documentação (docs/)
+
+**Foco:** clareza, completude e rastreabilidade de decisões.
+
+Ao criar uma spec de domínio (docs/specs/<domínio>.md), incluir obrigatoriamente:
+- Objetivo e problema que resolve
+- Fonte de dados (qual API/tabela BQ/log)
+- Endpoints da API (método, path, parâmetros, response schema)
+- Queries BigQuery planejadas com estimativa de custo
+- Casos de borda e comportamento esperado
+- O que está fora do escopo desta spec
+
+Ao atualizar o CHANGELOG.md:
+- Registrar o que foi feito, erros cometidos e aprendizados
+- Registrar qualquer mudança de arquitetura com justificativa
+- Atualizar o status das fases na tabela de próximas fases
+
+Ao criar um ADR:
+- Seguir o padrão: contexto → decisão → alternativas consideradas → consequências
+- Nunca apagar um ADR — se a decisão mudar, criar um novo ADR referenciando o anterior
