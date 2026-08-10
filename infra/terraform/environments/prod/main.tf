@@ -10,9 +10,11 @@ module "backend_cloud_run" {
   deletion_protection   = true
   allow_unauthenticated = true
 
-  # Libera CORS pra URL real do frontend em prod.
+  # Libera CORS pras duas URLs válidas do frontend em prod — todo Cloud Run
+  # responde tanto na URL canônica (com hash) quanto na URL legada baseada
+  # no número do projeto, e o browser pode acessar por qualquer uma das duas.
   env = {
-    OBSERVABILITY_HUB_CORS_ORIGINS = module.frontend_cloud_run.service_url
+    OBSERVABILITY_HUB_CORS_ORIGINS = "${module.frontend_cloud_run.service_url},${module.frontend_cloud_run.service_url_alt}"
   }
 }
 

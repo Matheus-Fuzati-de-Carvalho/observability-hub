@@ -1,3 +1,7 @@
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 resource "google_artifact_registry_repository" "apps" {
   count = var.manage_artifact_registry ? 1 : 0
 
