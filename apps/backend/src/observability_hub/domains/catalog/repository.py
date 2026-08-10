@@ -190,10 +190,14 @@ def get_table_columns(
     location: str,
 ) -> list[dict]:
     query = f"""
-        SELECT column_name, data_type, is_nullable, description
-        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMNS`
-        WHERE table_schema = @dataset_id AND table_name = @table_id
-        ORDER BY ordinal_position
+        SELECT c.column_name, c.data_type, c.is_nullable, cfp.description
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMNS` c
+        LEFT JOIN `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` cfp
+          ON cfp.table_schema = c.table_schema
+         AND cfp.table_name = c.table_name
+         AND cfp.field_path = c.column_name
+        WHERE c.table_schema = @dataset_id AND c.table_name = @table_id
+        ORDER BY c.ordinal_position
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
