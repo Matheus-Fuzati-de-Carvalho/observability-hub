@@ -156,7 +156,7 @@ Diretrizes para os workflows quando forem criados:
 - Nunca misturar recursos/dados de `dev` e `prod`.
 - Nunca usar Terraform workspaces — a separação de ambiente é sempre por diretório.
 - Nunca colocar lógica de negócio em `api/` (backend) ou chamadas HTTP direto em componentes de página (frontend).
-- Fase 0 (estrutura e documentação) e Fase 1 (bootstrap do Terraform em `infra/terraform/bootstrap/`) concluídas. Ainda não existem: módulos de `infra/terraform/modules/`, root modules de `environments/{dev,prod}`, workflows em `.github/workflows/`, nem código de aplicação em `apps/`.
+- Fase 0 (estrutura e documentação) e Fase 1 (bootstrap do Terraform, módulo `infra/terraform/modules/cloud-run/`, root modules de `environments/{dev,prod}`, workflows em `.github/workflows/` e backend skeleton com `GET /health` em `apps/backend/`) concluídas — dev e prod com Cloud Run, Artifact Registry e CI/CD funcionando de ponta a ponta. Ainda não existem: os demais módulos de `infra/terraform/modules/` (artifact-registry standalone já é interno ao módulo cloud-run; faltam bigquery, secret-manager, logging-sink), lógica de domínio em `apps/backend/src/observability_hub/domains/`, e nenhum código em `apps/frontend/`.
 
 ## Contextos de trabalho
 
