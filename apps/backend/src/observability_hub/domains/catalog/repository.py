@@ -171,7 +171,7 @@ def get_tables_summary(
           t.table_name,
           t.table_type,
           t.creation_time,
-          t.last_modified_time,
+          ts.last_modified_time,
           ts.total_rows                                    AS row_count,
           ts.total_logical_bytes                            AS size_bytes,
           ANY_VALUE(COALESCE(ca.column_count, 0))           AS column_count,
