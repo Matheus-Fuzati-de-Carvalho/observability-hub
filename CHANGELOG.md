@@ -182,7 +182,7 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 | Fase | Descrição | Status |
 |---|---|---|
-| Fase 1.5 | Dados mock no BigQuery (GA4 público) | ⏳ Pendente |
+| Fase 1.5 | Dados mock no BigQuery (GA4 público) | ✅ Concluída |
 | Fase 2 | MVP: Catálogo + Freshness + Profiling (backend) | ✅ Concluída |
 | Fase 2D | Frontend MVP | 🔄 Em andamento |
 | Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Pendente |
