@@ -1,5 +1,6 @@
 # Spec — Domínio: Profiling (quality)
 
+**Versão:** 1.1 (região automática)
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
 **Última atualização:** 2026-08-05
@@ -10,20 +11,19 @@
 
 Análise estatística configurável de qualquer tabela BigQuery, coluna a coluna,
 com controles de amostragem, filtro temporal e estimativa de custo antes da
-execução. Substitui queries manuais de profiling no processo de discovery e
-análise exploratória de qualidade de dados.
+execução. A região é resolvida automaticamente via metadados do dataset.
 
 ---
 
 ## Fluxo de uso
 
 ```
-1. Usuário abre modal "Analisar" em uma tabela do catálogo
-2. Configura parâmetros (amostragem, método, coluna de data, janela)
-3. Clica em "Estimar Custo" → dry run retorna volume e custo estimado
-4. Revisa SQL gerado na interface
-5. Clica em "Executar Profile" → retorna métricas por coluna e por tabela
-6. Opcional: drill down em "Distribuição de nulos ao longo do tempo"
+1. Usuário clica em "Analisar" em uma tabela do catálogo
+2. Modal abre com colunas da tabela já carregadas
+3. Configura: amostragem %, método unicidade, coluna de data, janela
+4. "Estimar Custo" → dry run retorna volume e custo USD + SQL gerado
+5. "Executar Profile" → métricas por coluna e resumo da tabela
+6. Opcional: drill down "Distribuição de nulos ao longo do tempo"
 ```
 
 ---
@@ -32,17 +32,17 @@ análise exploratória de qualidade de dados.
 
 | Parâmetro | Tipo | Default | Descrição |
 |---|---|---|---|
-| `sample_percent` | float | 100 | % de amostragem via TABLESAMPLE SYSTEM |
-| `uniqueness_method` | enum | `approx` | `approx` (HLL) ou `exact` (COUNT DISTINCT) |
+| `sample_percent` | float | 100 | % TABLESAMPLE SYSTEM (mín: 1) |
+| `uniqueness_method` | enum | `approx` | `approx` (HLL) ou `exact` (DISTINCT) |
 | `date_column` | string | null | Coluna de data para filtro temporal |
-| `date_window_days` | int | null | Janela temporal em dias (D-X dias) |
+| `date_window_days` | int | null | Janela em dias (D-X dias até hoje) |
 
 ---
 
 ## Endpoints da API
 
 ### POST /api/v1/profiling/{project_id}/{dataset_id}/{table_id}/estimate
-Dry run — retorna bytes estimados e custo sem executar a query real.
+Dry run — bytes e custo estimados sem executar query real.
 
 **Body:**
 ```json
@@ -60,23 +60,23 @@ Dry run — retorna bytes estimados e custo sem executar a query real.
   "estimated_bytes": 849813,
   "estimated_bytes_human": "830.13 KB",
   "estimated_cost_usd": 0.000005,
-  "sql": "SELECT COUNT(*) AS _total_sampled_rows, COUNT(`lead_id`) AS lead_id__count_filled, APPROX_COUNT_DISTINCT(`lead_id`) AS lead_id__approx_distinct ... FROM `cliente-x-prod.RAW.crm_leads_mock` TABLESAMPLE SYSTEM (10.0 PERCENT) WHERE `date` >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)"
+  "sql": "SELECT COUNT(*) AS _total_sampled_rows, ..."
 }
 ```
 
 ---
 
 ### POST /api/v1/profiling/{project_id}/{dataset_id}/{table_id}/run
-Executa o profiling e retorna métricas completas.
+Executa profiling e retorna métricas completas.
 
 **Body:** mesmo schema do `/estimate`
 
 **Response 200:**
 ```json
 {
-  "project_id": "cliente-x-prod",
+  "project_id": "observability-hub-dev",
   "dataset_id": "RAW",
-  "table_id": "crm_leads_mock",
+  "table_id": "crm_leads",
   "executed_at": "2026-08-05T10:00:00Z",
   "parameters": {
     "sample_percent": 10,
@@ -93,21 +93,6 @@ Executa o profiling e retorna métricas completas.
     "overall_density": 100.0
   },
   "columns": [
-    {
-      "column_name": "lead_id",
-      "data_type": "STRING",
-      "is_nullable": true,
-      "completeness_pct": 100.0,
-      "null_count": 0,
-      "distinct_count": 9526,
-      "distinct_pct": 95.26,
-      "min_value": "ld-200000",
-      "max_value": "ld-209999",
-      "top_values": null,
-      "inferred_logical_type": "id",
-      "coefficient_of_variation": null,
-      "quality_flag": "ok"
-    },
     {
       "column_name": "lead_status",
       "data_type": "STRING",
@@ -160,36 +145,27 @@ Drill down: distribuição de nulos ao longo do tempo por coluna.
 
 ## Lógica de geração de SQL
 
-### Query de profiling principal
-
-Gerada dinamicamente com base nas colunas da tabela:
-
+### Query principal (gerada dinamicamente)
 ```sql
 SELECT
   COUNT(*) AS _total_sampled_rows,
 
-  -- Para cada coluna:
-  COUNT(`{col}`)                    AS {col}__count_filled,
-  -- Se approx:
-  APPROX_COUNT_DISTINCT(`{col}`)    AS {col}__approx_distinct,
-  -- Se exact:
-  COUNT(DISTINCT `{col}`)           AS {col}__exact_distinct,
-  MIN(`{col}`)                      AS {col}__min,
-  MAX(`{col}`)                      AS {col}__max,
-  -- Se numérico:
-  AVG(CAST(`{col}` AS FLOAT64))     AS {col}__avg,
-  STDDEV(CAST(`{col}` AS FLOAT64))  AS {col}__stddev
+  -- Por coluna:
+  COUNT(`{col}`)                      AS {col}__count_filled,
+  APPROX_COUNT_DISTINCT(`{col}`)      AS {col}__approx_distinct,  -- se approx
+  COUNT(DISTINCT `{col}`)             AS {col}__exact_distinct,   -- se exact
+  MIN(`{col}`)                        AS {col}__min,
+  MAX(`{col}`)                        AS {col}__max,
+  -- Apenas para numéricos:
+  AVG(CAST(`{col}` AS FLOAT64))       AS {col}__avg,
+  STDDEV(CAST(`{col}` AS FLOAT64))    AS {col}__stddev
 
 FROM `{project}.{dataset}.{table}`
-  TABLESAMPLE SYSTEM ({sample_percent} PERCENT)   -- se sample_percent < 100
+  TABLESAMPLE SYSTEM ({sample_percent} PERCENT)
 WHERE `{date_column}` >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
-  -- omitido se date_column não informado
 ```
 
-### Top N valores
-
-Executada separadamente, apenas para colunas com `distinct_count < 50`:
-
+### Top N valores (só para colunas com distinct_count < 50)
 ```sql
 SELECT `{col}` AS value, COUNT(*) AS count
 FROM `{project}.{dataset}.{table}`
@@ -202,11 +178,11 @@ LIMIT 10
 
 ---
 
-## Regras de negócio das métricas
+## Regras das métricas
 
-### Tipo lógico inferido (sem custo extra — usa min/max/top_values)
+### Tipo lógico inferido (sem custo extra — usa min/max/top_values já retornados)
 
-| Tipo inferido | Critério |
+| Tipo | Critério |
 |---|---|
 | `id` | distinct_pct > 90% |
 | `categorical` | distinct_count < 50 |
@@ -214,34 +190,29 @@ LIMIT 10
 | `date_string` | STRING com padrão `YYYY-MM-DD` |
 | `numeric_string` | STRING onde min e max são numéricos |
 | `boolean` | distinct_count = 2 |
-| `free_text` | STRING com distinct_pct > 50% e sem padrão |
+| `free_text` | STRING com distinct_pct > 50% sem padrão |
 | `unknown` | nenhum padrão identificado |
 
-### Quality flag por coluna
+### Quality flag
 
 | Flag | Critério |
 |---|---|
 | `ok` | completeness ≥ 80% |
-| `warning` | completeness entre 50% e 80% |
+| `warning` | completeness 50%–80% |
 | `critical` | completeness < 50% |
 
 ### Coeficiente de variação
-
-Calculado apenas para colunas numéricas (INTEGER, FLOAT, NUMERIC):
-`CV = stddev / avg * 100`
+Apenas para INTEGER, FLOAT, NUMERIC: `CV = stddev / avg * 100`
 
 ### Registros duplicados estimados
+`duplicate_rows = COUNT(*) - APPROX_COUNT_DISTINCT(TO_JSON_STRING(t))`
 
-`duplicate_rows = total_rows - distinct_count(concat de todas as colunas)`
-Usando APPROX_COUNT_DISTINCT para performance.
-
-### Densidade geral da tabela
-
+### Densidade geral
 `overall_density = média de completeness_pct de todas as colunas`
 
 ---
 
-## Estrutura de arquivos a criar
+## Estrutura de arquivos
 
 ```
 apps/backend/src/observability_hub/
@@ -249,9 +220,9 @@ apps/backend/src/observability_hub/
 │   └── profiling.py
 ├── domains/quality/
 │   ├── __init__.py
-│   ├── service.py          # Orquestra estimate, run e null-distribution
-│   ├── repository.py       # Executa queries BQ e dry run
-│   ├── sql_builder.py      # Gera SQL dinamicamente por tabela/colunas
+│   ├── service.py
+│   ├── repository.py
+│   ├── sql_builder.py      # Gera SQL dinamicamente
 │   └── schemas.py
 └── tests/unit/quality/
     ├── test_service.py
@@ -265,18 +236,18 @@ apps/backend/src/observability_hub/
 
 | Cenário | Comportamento |
 |---|---|
-| Tabela com 0 linhas | Retorna métricas zeradas, sem erro |
+| Tabela com 0 linhas | Métricas zeradas, sem erro |
 | Coluna com 100% nulos | completeness = 0%, quality_flag = critical |
-| Coluna STRUCT/ARRAY | Excluída do profiling com nota no response |
+| Coluna STRUCT/ARRAY | Excluída do profiling, informado no response |
 | date_column inexistente | HTTP 400 com lista de colunas de data disponíveis |
-| sample_percent = 0 | HTTP 400 — mínimo 1% |
-| Timeout de query (> 60s) | HTTP 504 com sugestão de reduzir amostragem |
+| sample_percent < 1 | HTTP 400 — mínimo 1% |
+| Timeout > 60s | HTTP 504 com sugestão de reduzir amostragem |
 
 ---
 
 ## Fora do escopo desta spec
 
 - Comparação histórica entre execuções (fase futura)
-- Detecção de PII (Fase 3 — usa lógica diferente)
+- Detecção de PII (Fase 3)
 - Validação de constraints de negócio (fase futura)
-- Exportação de relatório de profiling (fase futura)
+- Exportação de relatório (fase futura)

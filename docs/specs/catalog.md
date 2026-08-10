@@ -1,6 +1,6 @@
 # Spec — Domínio: Catálogo (catalog)
 
-**Versão:** 1.1 (atualizada com cross-project e validate endpoint)
+**Versão:** 1.2 (região automática — sem parâmetro de região obrigatório)
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
 **Última atualização:** 2026-08-05
@@ -10,25 +10,38 @@
 ## Objetivo
 
 Prover um inventário navegável e completo de todos os datasets e tabelas de
-qualquer projeto BigQuery acessível pela service account do Hub, exibindo
-volumetria, tipo, região e metadados de tempo — sem queries em dados reais,
-apenas em metadados do INFORMATION_SCHEMA.
-
-O projeto alvo é informado pelo usuário via campo no frontend (cross-project,
-conforme ADR-006) e validado antes de carregar o catálogo.
+qualquer projeto BigQuery acessível pela service account do Hub. A descoberta
+de regiões é automática — o backend consulta todas as regiões conhecidas do
+BigQuery em paralelo e agrega os resultados. Nenhum parâmetro de região é
+necessário nos endpoints.
 
 ---
 
 ## Fonte de dados
 
-Todas as informações vêm exclusivamente de metadados — **custo $0**:
+Metadados do INFORMATION_SCHEMA — **custo $0**:
 
-```sql
-`<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA`
-`<project>.region-<region>.INFORMATION_SCHEMA.TABLES`
-`<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE`
-`<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS`
-`<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS`
+```
+<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA
+<project>.region-<region>.INFORMATION_SCHEMA.TABLES
+<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE
+<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS
+<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS
+```
+
+Lista de regiões mantida em `core/config.py`:
+```python
+BQ_REGIONS = [
+    "US", "EU",
+    "us-central1", "us-east1", "us-east4", "us-west1", "us-west2",
+    "us-west3", "us-west4", "northamerica-northeast1",
+    "southamerica-east1", "europe-west1", "europe-west2",
+    "europe-west3", "europe-west4", "europe-west6",
+    "europe-north1", "asia-east1", "asia-east2",
+    "asia-northeast1", "asia-northeast2", "asia-northeast3",
+    "asia-south1", "asia-southeast1", "asia-southeast2",
+    "australia-southeast1",
+]
 ```
 
 ---
@@ -36,19 +49,15 @@ Todas as informações vêm exclusivamente de metadados — **custo $0**:
 ## Endpoints da API
 
 ### GET /api/v1/projects/{project_id}/validate
-Valida se o projeto existe e se a SA tem acesso antes de carregar o catálogo.
-Chamado pelo frontend ao submeter o seletor de projeto.
-
-**Parâmetros:**
-- `project_id` (path) — ID do projeto GCP alvo
+Valida acesso e descobre automaticamente as regiões com datasets.
 
 **Response 200:**
 ```json
 {
-  "project_id": "cliente-x-prod",
+  "project_id": "observability-hub-dev",
   "accessible": true,
-  "default_region": "us-central1",
-  "available_regions": ["us-central1", "us-east1"]
+  "available_regions": ["US"],
+  "total_datasets": 3
 }
 ```
 
@@ -57,7 +66,7 @@ Chamado pelo frontend ao submeter o seletor de projeto.
 {
   "error": "access_denied",
   "message": "A service account do Hub não tem acesso a este projeto.",
-  "fix": "gcloud projects add-iam-policy-binding cliente-x-prod --member='serviceAccount:backend-run@observability-hub-prod.iam.gserviceaccount.com' --role='roles/bigquery.metadataViewer'"
+  "fix": "gcloud projects add-iam-policy-binding {project_id} --member='serviceAccount:backend-run@observability-hub-prod.iam.gserviceaccount.com' --role='roles/bigquery.metadataViewer'"
 }
 ```
 
@@ -65,31 +74,28 @@ Chamado pelo frontend ao submeter o seletor de projeto.
 ```json
 {
   "error": "project_not_found",
-  "message": "Projeto 'cliente-x-prod' não encontrado ou não existe."
+  "message": "Projeto não encontrado ou não existe."
 }
 ```
 
 ---
 
 ### GET /api/v1/catalog/{project_id}/datasets
-Lista todos os datasets de um projeto com resumo de volumetria.
-
-**Parâmetros:**
-- `project_id` (path)
-- `region` (query, default: `us-central1`)
+Lista todos os datasets agregando todas as regiões automaticamente.
 
 **Response 200:**
 ```json
 {
-  "project_id": "cliente-x-prod",
-  "region": "us-central1",
+  "project_id": "observability-hub-dev",
+  "evaluated_at": "2026-08-05T10:00:00Z",
   "total_datasets": 3,
+  "regions_found": ["US"],
   "datasets": [
     {
       "dataset_id": "RAW",
       "location": "US",
-      "creation_time": "2024-01-15T10:00:00Z",
-      "last_modified_time": "2024-06-01T08:30:00Z",
+      "creation_time": "2026-06-03T19:40:00Z",
+      "last_modified_time": "2026-06-08T18:38:00Z",
       "total_tables": 3,
       "total_views": 0,
       "total_size_bytes": 2075443,
@@ -103,36 +109,33 @@ Lista todos os datasets de um projeto com resumo de volumetria.
 ---
 
 ### GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/tables
-Lista todas as tabelas de um dataset com metadados detalhados.
+Lista tabelas do dataset. Região descoberta automaticamente via metadados.
 
-**Parâmetros:**
-- `project_id` (path)
-- `dataset_id` (path)
-- `region` (query, default: `us-central1`)
-- `table_type` (query, opcional) — `TABLE`, `VIEW`, `EXTERNAL`, `MATERIALIZED_VIEW`
+**Parâmetros opcionais:**
+- `table_type` (query) — `TABLE`, `VIEW`, `EXTERNAL`, `MATERIALIZED_VIEW`
 
 **Response 200:**
 ```json
 {
-  "project_id": "cliente-x-prod",
+  "project_id": "observability-hub-dev",
   "dataset_id": "RAW",
+  "location": "US",
   "total_tables": 3,
   "tables": [
     {
-      "table_id": "crm_leads_mock",
+      "table_id": "ga4_events",
       "table_type": "TABLE",
-      "creation_time": "2026-06-08T18:27:49Z",
-      "last_modified_time": "2026-06-08T18:27:49Z",
-      "size_bytes": 849813,
-      "size_gb": 0.0008,
+      "creation_time": "2026-06-08T18:38:40Z",
+      "last_modified_time": "2026-06-08T18:38:40Z",
+      "size_bytes": 576920,
+      "size_gb": 0.0005,
       "row_count": 10000,
-      "column_count": 6,
+      "column_count": 8,
       "is_partitioned": false,
       "partition_column": null,
-      "partition_type": null,
       "is_clustered": false,
       "clustering_columns": [],
-      "region": "US"
+      "location": "US"
     }
   ]
 }
@@ -141,14 +144,14 @@ Lista todas as tabelas de um dataset com metadados detalhados.
 ---
 
 ### GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/tables/{table_id}
-Detalhe completo de uma tabela incluindo schema de colunas.
+Detalhe completo com schema de colunas.
 
-**Response 200** (campos adicionais ao item acima):
+**Response 200** (campos adicionais):
 ```json
 {
   "columns": [
     {
-      "column_name": "lead_id",
+      "column_name": "event_date",
       "data_type": "STRING",
       "is_nullable": true,
       "description": null
@@ -161,27 +164,41 @@ Detalhe completo de uma tabela incluindo schema de colunas.
 
 ---
 
-## Queries BigQuery planejadas
+## Lógica de descoberta de regiões
 
-### Query 1 — Validação de acesso ao projeto
+```python
+# core/bigquery.py
+async def discover_regions(project_id: str) -> list[str]:
+    """
+    Tenta INFORMATION_SCHEMA.SCHEMATA em cada região conhecida em paralelo.
+    Retorna apenas as regiões onde o projeto tem datasets.
+    Ignora erros de 'não encontrado' (sem datasets naquela região).
+    Lança PermissionError se nenhuma região retornar dados por falta de acesso.
+    """
+```
+
+---
+
+## Queries BigQuery
+
+### Query 1 — Descoberta de regiões (executada por região em paralelo)
 ```sql
-SELECT schema_name
+SELECT schema_name, location
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA`
 LIMIT 1
 ```
-Custo: $0. Se lançar exceção de permissão → 403. Se projeto não existir → 404.
 
 ### Query 2 — Resumo de datasets
 ```sql
 SELECT
-  s.schema_name                              AS dataset_id,
+  s.schema_name                                          AS dataset_id,
   s.location,
   s.creation_time,
   s.last_modified_time,
-  COUNTIF(t.table_type = 'BASE TABLE')       AS total_tables,
-  COUNTIF(t.table_type IN ('VIEW','MATERIALIZED VIEW')) AS total_views,
-  COALESCE(SUM(ts.total_logical_bytes), 0)   AS total_size_bytes,
-  COALESCE(SUM(ts.total_rows), 0)            AS total_rows
+  COUNTIF(t.table_type = 'BASE TABLE')                   AS total_tables,
+  COUNTIF(t.table_type IN ('VIEW','MATERIALIZED VIEW'))  AS total_views,
+  COALESCE(SUM(ts.total_logical_bytes), 0)               AS total_size_bytes,
+  COALESCE(SUM(ts.total_rows), 0)                        AS total_rows
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA` s
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLES` t
   ON t.table_schema = s.schema_name
@@ -191,7 +208,6 @@ LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE` ts
 GROUP BY 1, 2, 3, 4
 ORDER BY total_size_bytes DESC
 ```
-Custo: $0
 
 ### Query 3 — Tabelas de um dataset
 ```sql
@@ -200,42 +216,39 @@ SELECT
   t.table_type,
   t.creation_time,
   t.last_modified_time,
-  ts.total_rows        AS row_count,
+  ts.total_rows          AS row_count,
   ts.total_logical_bytes AS size_bytes,
-  COUNT(c.column_name) AS column_count,
-  MAX(CASE WHEN tp.partition_column IS NOT NULL
-      THEN tp.partition_column END) AS partition_column,
-  MAX(tp.partition_expiration_days)  AS partition_expiration_days
+  COUNT(c.column_name)   AS column_count,
+  MAX(tp.partition_column) AS partition_column
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLES` t
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE` ts
-  ON ts.table_name   = t.table_name
- AND ts.table_schema = t.table_schema
+  ON ts.table_name = t.table_name AND ts.table_schema = t.table_schema
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS` c
-  ON c.table_name   = t.table_name
- AND c.table_schema = t.table_schema
+  ON c.table_name = t.table_name AND c.table_schema = t.table_schema
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS` tp
-  ON tp.table_name   = t.table_name
- AND tp.table_schema = t.table_schema
+  ON tp.table_name = t.table_name AND tp.table_schema = t.table_schema
 WHERE t.table_schema = @dataset_id
 GROUP BY 1, 2, 3, 4, 5, 6
 ORDER BY size_bytes DESC NULLS LAST
 ```
-Custo: $0
 
 ---
 
-## Estrutura de arquivos a criar
+## Estrutura de arquivos
 
 ```
 apps/backend/src/observability_hub/
 ├── api/v1/
 │   ├── projects.py       # GET /projects/{project_id}/validate
-│   └── catalog.py        # GET /catalog/...
+│   └── catalog.py
+├── core/
+│   ├── config.py         # BQ_REGIONS e demais configs
+│   └── bigquery.py       # discover_regions(), get_client()
 ├── domains/catalog/
 │   ├── __init__.py
-│   ├── service.py        # Lógica principal
-│   ├── repository.py     # Queries BQ
-│   └── schemas.py        # Pydantic models
+│   ├── service.py
+│   ├── repository.py
+│   └── schemas.py
 └── tests/unit/catalog/
     ├── test_service.py
     └── test_schemas.py
@@ -249,9 +262,9 @@ apps/backend/src/observability_hub/
 |---|---|
 | Projeto sem permissão | HTTP 403 com comando de correção |
 | Projeto inexistente | HTTP 404 |
-| Região incorreta | HTTP 400 com regiões válidas sugeridas |
+| Projeto com datasets em múltiplas regiões | Todos retornados, cada um com seu `location` |
 | Dataset sem tabelas | `total_tables: 0`, lista vazia |
-| Tabela externa (EXTERNAL) | Incluída, `size_bytes` pode ser null |
+| Tabela externa | Incluída, `size_bytes` pode ser null |
 | View | Incluída, `row_count` e `size_bytes` null |
 
 ---
@@ -262,4 +275,3 @@ apps/backend/src/observability_hub/
 - Lineage (Fase 3)
 - Detecção de PII (Fase 3)
 - Cache de metadados
-- Suporte a múltiplas regiões em uma única chamada

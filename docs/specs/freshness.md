@@ -1,5 +1,6 @@
 # Spec — Domínio: Freshness com SLA
 
+**Versão:** 1.1 (região automática)
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
 **Última atualização:** 2026-08-05
@@ -8,47 +9,63 @@
 
 ## Objetivo
 
-Monitorar a atualização de tabelas BigQuery e classificar seu status em relação
-a janelas de SLA configuráveis — identificando tabelas dentro do prazo, em
-alerta ou violando o SLA, incluindo tabelas que pararam de atualizar
-silenciosamente.
-
-Fonte exclusiva: metadados do `INFORMATION_SCHEMA` — **custo $0**.
+Monitorar atualização de tabelas BigQuery e classificar status em relação a
+janelas de SLA fixas. A região é descoberta automaticamente via metadados do
+dataset — nenhum parâmetro de região necessário nos endpoints.
 
 ---
 
 ## Lógica de classificação de SLA
 
-Baseada no tempo decorrido desde `last_modified_time`:
-
 | Status | Cor | Critério |
 |---|---|---|
-| `ok` | verde | última atualização ≤ 12h |
-| `warning_12_24` | amarelo claro | entre 12h e 24h |
-| `warning_24_48` | amarelo | entre 24h e 48h |
-| `warning_48_7d` | laranja | entre 48h e 7 dias |
-| `warning_7d_1m` | vermelho claro | entre 7 dias e 1 mês |
-| `stale` | vermelho | última atualização > 1 mês |
-
-As janelas são fixas no MVP — configuração por tabela entra em fase futura.
+| `ok` | verde | ≤ 12h |
+| `warning_12_24` | amarelo claro | 12h a 24h |
+| `warning_24_48` | amarelo | 24h a 48h |
+| `warning_48_7d` | laranja | 48h a 7 dias |
+| `warning_7d_1m` | vermelho claro | 7 dias a 1 mês |
+| `stale` | vermelho | > 1 mês |
 
 ---
 
 ## Endpoints da API
 
-### GET /api/v1/freshness/{project_id}/datasets/{dataset_id}
-Retorna status de freshness de todas as tabelas de um dataset.
-
-**Parâmetros:**
-- `project_id` (path)
-- `dataset_id` (path)
-- `region` (query, default: `us-central1`)
+### GET /api/v1/freshness/{project_id}
+Visão consolidada de todos os datasets do projeto.
 
 **Response 200:**
 ```json
 {
-  "project_id": "cliente-x-prod",
+  "project_id": "observability-hub-dev",
+  "evaluated_at": "2026-08-05T10:00:00Z",
+  "datasets": [
+    {
+      "dataset_id": "RAW",
+      "location": "US",
+      "total_tables": 3,
+      "ok": 0,
+      "warning_12_24": 0,
+      "warning_24_48": 0,
+      "warning_48_7d": 0,
+      "warning_7d_1m": 0,
+      "stale": 3,
+      "worst_status": "stale"
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/v1/freshness/{project_id}/datasets/{dataset_id}
+Freshness detalhado de todas as tabelas de um dataset.
+
+**Response 200:**
+```json
+{
+  "project_id": "observability-hub-dev",
   "dataset_id": "RAW",
+  "location": "US",
   "evaluated_at": "2026-08-05T10:00:00Z",
   "summary": {
     "total_tables": 3,
@@ -61,10 +78,10 @@ Retorna status de freshness de todas as tabelas de um dataset.
   },
   "tables": [
     {
-      "table_id": "crm_leads_mock",
+      "table_id": "crm_leads",
       "table_type": "TABLE",
-      "last_modified_time": "2026-06-08T18:27:49Z",
-      "hours_since_update": 1271.5,
+      "last_modified_time": "2024-01-15T00:00:00Z",
+      "hours_since_update": 14424.0,
       "sla_status": "stale",
       "size_bytes": 849813,
       "row_count": 10000
@@ -75,40 +92,20 @@ Retorna status de freshness de todas as tabelas de um dataset.
 
 ---
 
-### GET /api/v1/freshness/{project_id}
-Retorna visão consolidada de freshness de todos os datasets do projeto.
-
-**Response 200:**
-```json
-{
-  "project_id": "cliente-x-prod",
-  "evaluated_at": "2026-08-05T10:00:00Z",
-  "datasets": [
-    {
-      "dataset_id": "RAW",
-      "total_tables": 3,
-      "ok": 0,
-      "stale": 3,
-      "worst_status": "stale"
-    }
-  ]
-}
-```
-
----
-
 ## Query BigQuery
+
+A região é resolvida previamente via `discover_regions()` do core.
 
 ```sql
 SELECT
-  table_schema                                        AS dataset_id,
-  table_name                                          AS table_id,
+  table_schema                                           AS dataset_id,
+  table_name                                             AS table_id,
   table_type,
   last_modified_time,
   TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), last_modified_time, HOUR)
-                                                      AS hours_since_update,
-  total_logical_bytes                                 AS size_bytes,
-  total_rows                                          AS row_count,
+                                                         AS hours_since_update,
+  total_logical_bytes                                    AS size_bytes,
+  total_rows                                             AS row_count,
   CASE
     WHEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), last_modified_time, HOUR) <= 12
       THEN 'ok'
@@ -121,7 +118,7 @@ SELECT
     WHEN TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), last_modified_time, HOUR) <= 720
       THEN 'warning_7d_1m'
     ELSE 'stale'
-  END                                                 AS sla_status
+  END                                                    AS sla_status
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE`
 WHERE table_schema = @dataset_id   -- omitir para visão do projeto inteiro
 ORDER BY hours_since_update DESC
@@ -130,7 +127,7 @@ Custo: $0
 
 ---
 
-## Estrutura de arquivos a criar
+## Estrutura de arquivos
 
 ```
 apps/backend/src/observability_hub/
@@ -152,9 +149,9 @@ apps/backend/src/observability_hub/
 
 | Cenário | Comportamento |
 |---|---|
-| Tabela nunca atualizada (criada mas vazia) | `last_modified_time` = `creation_time`, classificada normalmente |
-| View | Incluída — `last_modified_time` reflete última alteração da definição da view |
-| Tabela externa | Incluída — `last_modified_time` pode não refletir atualização dos dados externos |
+| Tabela nunca atualizada | `last_modified_time` = `creation_time`, classificada normalmente |
+| View | Incluída — reflete última alteração da definição |
+| Tabela externa | Incluída — `last_modified_time` pode não refletir dados externos |
 | Dataset vazio | `total_tables: 0`, summary zerado |
 
 ---
