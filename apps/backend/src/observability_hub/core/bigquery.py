@@ -14,7 +14,11 @@ from google.api_core.exceptions import Forbidden, NotFound
 from google.cloud import bigquery
 
 from observability_hub.core.config import BQ_REGIONS, settings
-from observability_hub.core.exceptions import ProjectAccessDeniedError, ProjectNotFoundError
+from observability_hub.core.exceptions import (
+    DatasetNotFoundError,
+    ProjectAccessDeniedError,
+    ProjectNotFoundError,
+)
 
 
 @lru_cache
@@ -77,3 +81,29 @@ def discover_regions(
     if forbidden_count > 0:
         raise ProjectAccessDeniedError(project_id)
     return []
+
+
+def resolve_dataset_region(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    candidate_regions: list[str],
+) -> str:
+    """Descobre em qual região está um dataset_id. Vários domínios (catalog,
+    freshness, ...) recebem apenas dataset_id nos endpoints, sem region —
+    dataset_id é único por projeto independente da região, então basta
+    encontrar a primeira região candidata que bate."""
+    for region in candidate_regions:
+        query = f"""
+            SELECT location
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.SCHEMATA`
+            WHERE schema_name = @dataset_id
+            LIMIT 1
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id)]
+        )
+        rows = list(client.query(query, job_config=job_config).result())
+        if rows:
+            return region
+    raise DatasetNotFoundError(project_id, dataset_id)

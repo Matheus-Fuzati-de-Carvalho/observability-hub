@@ -5,7 +5,11 @@ client do BigQuery além do que essas funções retornam.
 
 from google.cloud import bigquery
 
-from observability_hub.core.exceptions import DatasetNotFoundError, TableNotFoundError
+# Re-exportado para manter repository.resolve_dataset_region (usado por
+# service.py e pelos testes existentes) — implementação mora em core/bigquery
+# porque é compartilhada entre domínios (ver core/exceptions.py).
+from observability_hub.core.bigquery import resolve_dataset_region  # noqa: F401
+from observability_hub.core.exceptions import TableNotFoundError
 
 # INFORMATION_SCHEMA.TABLES usa "BASE TABLE" e "MATERIALIZED VIEW" (com
 # espaço); a API expõe os valores documentados na spec (catalog.md v1.2).
@@ -66,31 +70,6 @@ def get_datasets_summary(
                 }
             )
     return datasets
-
-
-def resolve_dataset_region(
-    client: bigquery.Client,
-    project_id: str,
-    dataset_id: str,
-    candidate_regions: list[str],
-) -> str:
-    """Descobre em qual região está um dataset_id. Os endpoints de tabelas não
-    recebem region (spec v1.2) — dataset_id é único por projeto independente
-    da região, então basta encontrar a primeira região candidata que bate."""
-    for region in candidate_regions:
-        query = f"""
-            SELECT location
-            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.SCHEMATA`
-            WHERE schema_name = @dataset_id
-            LIMIT 1
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id)]
-        )
-        rows = list(client.query(query, job_config=job_config).result())
-        if rows:
-            return region
-    raise DatasetNotFoundError(project_id, dataset_id)
 
 
 def _row_to_table_dict(row, location: str) -> dict:

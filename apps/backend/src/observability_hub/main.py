@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from observability_hub.api.v1 import catalog, projects
+from observability_hub.api.v1 import catalog, freshness, projects
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.exceptions import (
     DatasetNotFoundError,
@@ -14,6 +14,7 @@ app = FastAPI()
 
 app.include_router(projects.router)
 app.include_router(catalog.router)
+app.include_router(freshness.router)
 
 
 @app.get("/health")

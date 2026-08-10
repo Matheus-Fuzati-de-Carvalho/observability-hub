@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from observability_hub.core.exceptions import DatasetNotFoundError, TableNotFoundError
+from observability_hub.core.exceptions import TableNotFoundError
 from observability_hub.domains.catalog import repository
 
 
@@ -56,20 +56,13 @@ def test_get_datasets_summary_runs_one_query_per_region_and_computes_gb():
     assert result[0]["total_size_gb"] == 0.0021
 
 
-def test_resolve_dataset_region_returns_first_matching_region():
-    client = _client_returning([[], [_row(location="US")]])
+def test_resolve_dataset_region_is_reexported_from_core_bigquery():
+    """Cobertura de comportamento mora em tests/unit/core/test_bigquery.py —
+    aqui só garantimos que repository.resolve_dataset_region (usado por
+    service.py) continua sendo o mesmo objeto de core.bigquery."""
+    from observability_hub.core.bigquery import resolve_dataset_region
 
-    region = repository.resolve_dataset_region(client, "proj", "RAW", ["EU", "US"])
-
-    assert region == "US"
-    assert client.query.call_count == 2
-
-
-def test_resolve_dataset_region_raises_when_not_found_anywhere():
-    client = _client_returning([[], []])
-
-    with pytest.raises(DatasetNotFoundError):
-        repository.resolve_dataset_region(client, "proj", "GHOST", ["US", "EU"])
+    assert repository.resolve_dataset_region is resolve_dataset_region
 
 
 def test_row_to_table_dict_derives_partitioned_and_clustered():
