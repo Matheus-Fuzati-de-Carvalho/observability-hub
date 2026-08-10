@@ -10,10 +10,11 @@ module "backend_cloud_run" {
   deletion_protection   = false
   allow_unauthenticated = true
 
-  # Libera CORS pra URL real do frontend em dev, mantendo o Vite dev server
-  # local (localhost:5173) funcionando contra o backend de dev também.
+  # Libera CORS pras duas URLs válidas do frontend em dev (canônica + legada
+  # por número do projeto, ver environments/prod/main.tf), mantendo o Vite
+  # dev server local (localhost:5173) funcionando contra o backend de dev.
   env = {
-    OBSERVABILITY_HUB_CORS_ORIGINS = "${module.frontend_cloud_run.service_url},http://localhost:5173"
+    OBSERVABILITY_HUB_CORS_ORIGINS = "${module.frontend_cloud_run.service_url},${module.frontend_cloud_run.service_url_alt},http://localhost:5173"
   }
 }
 

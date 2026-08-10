@@ -3,6 +3,11 @@ output "service_url" {
   value       = google_cloud_run_v2_service.service.uri
 }
 
+output "service_url_alt" {
+  description = "URL alternativa do Cloud Run baseada no número do projeto (<service>-<project_number>.<region>.run.app) — coexiste com service_url e serve a mesma revisão; precisa estar em qualquer allowlist de CORS que dependa da URL do serviço."
+  value       = "https://${var.service_name}-${data.google_project.current.number}.${var.region}.run.app"
+}
+
 output "service_name" {
   description = "Nome do serviço Cloud Run (usado por `gcloud run deploy` nos workflows)."
   value       = google_cloud_run_v2_service.service.name
