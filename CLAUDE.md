@@ -263,3 +263,32 @@ Ao atualizar o CHANGELOG.md:
 Ao criar um ADR:
 - Seguir o padrão: contexto → decisão → alternativas consideradas → consequências
 - Nunca apagar um ADR — se a decisão mudar, criar um novo ADR referenciando o anterior
+
+---
+
+## Gestão de contexto de sessão
+
+### Quando atualizar o SESSIONLOG.md
+- Quando /status mostrar uso acima de 60% do contexto
+- Ao final de cada fase concluída
+- Antes de qualquer reset ou /compact de sessão
+- Quando o usuário pedir explicitamente
+
+### O que o SESSIONLOG.md deve conter
+- Status atual (fase, próximo passo exato)
+- Lista de commits desta sessão
+- Decisões importantes tomadas e por quê
+- Erros encontrados e como foram resolvidos
+- Estado atual da infraestrutura (GCP, GitHub Secrets, etc.)
+- Como retomar após reset
+
+### Ao iniciar uma nova sessão
+1. Ler CLAUDE.md obrigatoriamente (sempre)
+2. Verificar se existe SESSIONLOG.md — se sim, ler antes de qualquer ação
+3. Confirmar com o usuário o próximo passo antes de executar
+4. Nunca assumir o estado do projeto sem ler os dois arquivos
+
+### Comandos úteis de contexto
+- `/status` — ver uso atual de contexto e limites da sessão
+- `/compact` — comprimir histórico preservando contexto essencial
+- `/clear` — resetar sessão completamente (usar SESSIONLOG.md para retomar)
