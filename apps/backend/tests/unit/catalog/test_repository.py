@@ -150,6 +150,42 @@ def test_get_tables_summary_maps_api_table_type_to_raw_value():
     assert param_values["table_type"] == "MATERIALIZED VIEW"
 
 
+@pytest.mark.parametrize("multi_region", ["US", "EU", "us", "eu"])
+def test_get_tables_summary_omits_table_partitions_join_in_multi_region(multi_region):
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.get_tables_summary(client, "proj", "RAW", multi_region)
+
+    assert "TABLE_PARTITIONS" not in captured["sql"]
+    assert "partition_column" in captured["sql"]
+
+
+def test_get_tables_summary_keeps_table_partitions_join_in_specific_region():
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.get_tables_summary(client, "proj", "RAW", "us-central1")
+
+    assert "TABLE_PARTITIONS" in captured["sql"]
+
+
 def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeypatch):
     matching_dict = {
         "table_id": "ga4_events",
