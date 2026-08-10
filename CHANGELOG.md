@@ -5,6 +5,91 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Fase 2 — Backend MVP (concluída)
+
+### O que foi feito
+- Domínio Catálogo (Fase 2A): 4 endpoints, `discover_regions()` para descoberta
+  automática de região, modelo de acesso cross-project
+- Domínio Freshness (Fase 2B): 2 endpoints, classificação de SLA por janelas
+  fixas (12h/24h/48h/7d/1m)
+- Domínio Profiling/quality (Fase 2C): 3 endpoints, `sql_builder.py` com
+  geração dinâmica de SQL por coluna, dry run de custo, amostragem via
+  `TABLESAMPLE SYSTEM`, drill-down de distribuição de nulos ao longo do tempo
+- 155 testes unitários passando (100%), com mocks — nenhum toca o BigQuery real
+- Validado com `curl` contra `observability-hub-dev` ao final de cada uma das
+  três sub-fases, antes de cada commit
+
+### Erros cometidos e aprendizados
+
+**Erro 1 — `INFORMATION_SCHEMA.TABLE_PARTITIONS` não existe em multi-região**
+- O que aconteceu: a query de tabelas do catálogo fazia `JOIN` com
+  `TABLE_PARTITIONS` para obter `partition_column`; deu `404 NotFound` em
+  datasets na multi-região `US`.
+- Correção: `TABLE_PARTITIONS` nem tem um campo com o *nome* da coluna de
+  particionamento (só `partition_id`, o valor da partição) — e não existe em
+  `US`/`EU` de qualquer forma. `partition_column` passou a vir de
+  `INFORMATION_SCHEMA.COLUMNS.is_partitioning_column`, que funciona em
+  qualquer região e já estava sendo consultada para `clustering_columns`.
+- Aprendizado: não confiar em nomes de campo documentados ou sugeridos sem
+  validar contra o schema real (`SELECT * LIMIT 1` ou introspecção do
+  `result().schema`).
+
+**Erro 2 — `last_modified_time` incorreto, repetido em duas specs**
+- O que aconteceu: a spec do catálogo referenciava
+  `TABLES.last_modified_time` (não existe) e, na correção seguinte,
+  `TABLE_STORAGE.last_modified_time` (também não existe). O mesmo erro
+  apareceu de novo na spec de freshness, que também usa `TABLE_STORAGE`.
+- Correção: `TABLES` não tem nenhum campo de "última alteração" nesta versão
+  do BigQuery; o campo real em `TABLE_STORAGE` é `storage_last_modified_time`.
+- Aprendizado: todo campo de `INFORMATION_SCHEMA` citado numa spec precisa
+  ser confirmado contra o schema real do projeto antes de implementar — esse
+  erro específico se repetiu em 3 ocasiões diferentes ao longo da Fase 2.
+
+**Erro 3 — `description` não existe em `INFORMATION_SCHEMA.COLUMNS`**
+- O que aconteceu: o endpoint de detalhe de tabela buscava `description`
+  direto de `COLUMNS`; `400 Unrecognized name: description`.
+- Correção: `description` vem de `INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`,
+  com `JOIN` em `field_path = column_name` para não duplicar linhas em
+  colunas `STRUCT`/`RECORD` aninhadas.
+- Aprendizado: mesmo aprendizado do Erro 2.
+
+**Erro 4 — `TABLE_STORAGE` sem dados para as tabelas de `observability-hub-dev`**
+- O que aconteceu: freshness e profiling dependem de `TABLE_STORAGE` para
+  `last_modified_time`/`total_rows`/`size_bytes`; a view retornou 0 linhas
+  para as tabelas do projeto dev durante toda a Fase 2.
+- Investigação: `TABLE_STORAGE` exige a opção de projeto
+  `enable_info_schema_storage` habilitada por região (via `ALTER PROJECT`) —
+  mas essa opção já estava `true` em `observability-hub-dev` (confirmado
+  consultando `INFORMATION_SCHEMA.PROJECT_OPTIONS`), então não era o
+  bloqueio. O motivo real é o lag de propagação que a documentação do Google
+  descreve como "cerca de 1 dia" após habilitar a opção ou após mudanças na
+  tabela até os dados de storage aparecerem.
+- Correção: todo campo que depende de `TABLE_STORAGE`
+  (`last_modified_time`, `size_bytes`, `row_count`, `hours_since_update`,
+  `sla_status`) foi tipado como opcional (`| None`) em vez de obrigatório.
+- Aprendizado: qualquer domínio que dependa de `TABLE_STORAGE` precisa
+  tolerar ausência de dado para tabelas recém-criadas ou recém-modificadas —
+  não é bug do nosso código, é o comportamento documentado do BigQuery.
+
+### Mudanças de arquitetura
+- `resolve_dataset_region()` movido de `domains/catalog/repository.py` para
+  `core/bigquery.py` durante a Fase 2B — passou a ser compartilhado entre
+  catalog e freshness (e, na prática, também usado por quality na Fase 2C).
+  `catalog/repository.py` reexporta o nome para não quebrar chamadas
+  existentes de `service.py` e dos testes. Justificativa: `core/exceptions.py`
+  já antecipava essa necessidade desde a Fase 2A ("catalog hoje; freshness e
+  profiling depois").
+
+### Status final
+- Catálogo: 4 endpoints ✅ | Freshness: 2 endpoints ✅ | Profiling: 3 endpoints ✅
+- 155 testes unitários, 100% passando ✅
+- `ruff check` + `ruff format` limpos em todas as três sub-fases ✅
+- Validado com `curl` contra `observability-hub-dev` (dados reais, incluindo
+  multi-região `US`, tabelas particionadas/clusterizadas e profiling
+  completo em `RAW.crm_leads`) ✅
+
+---
+
 ## Fase 1 — Infraestrutura base (concluída)
 
 ### O que foi feito
@@ -98,6 +183,7 @@ Atualizado ao final de cada fase pelo Claude Code.
 | Fase | Descrição | Status |
 |---|---|---|
 | Fase 1.5 | Dados mock no BigQuery (GA4 público) | ⏳ Pendente |
-| Fase 2 | MVP: Catálogo + Volumetria + Freshness + Profiling | ⏳ Pendente |
+| Fase 2 | MVP: Catálogo + Freshness + Profiling (backend) | ✅ Concluída |
+| Fase 2D | Frontend MVP | 🔄 Em andamento |
 | Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Pendente |
 | Fase 4 | FinOps completo | ⏳ Pendente |
