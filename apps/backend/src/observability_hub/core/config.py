@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     # Preço on-demand do BigQuery por TiB processado (cloud.google.com/bigquery/pricing).
     # Usado só pra estimativa de custo em domains/quality — não afeta billing real.
     bigquery_price_usd_per_tib: float = 6.25
+    # Origens liberadas pro CORS do frontend, separadas por vírgula (o
+    # frontend roda em outra origem tanto em dev — Vite dev server — quanto
+    # em prod — outro serviço Cloud Run).
+    cors_origins: str = "http://localhost:5173"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 settings = Settings()

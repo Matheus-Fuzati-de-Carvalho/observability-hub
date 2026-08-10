@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from observability_hub.api.v1 import catalog, freshness, profiling, projects
 from observability_hub.core.bigquery import get_client
+from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
     DatasetNotFoundError,
     InvalidDateColumnError,
@@ -14,6 +16,16 @@ from observability_hub.core.exceptions import (
 )
 
 app = FastAPI()
+
+# Frontend roda em outra origem (Vite dev server local, ou outro serviço
+# Cloud Run em prod) — sem isso todo fetch do browser falha no preflight.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(projects.router)
 app.include_router(catalog.router)
