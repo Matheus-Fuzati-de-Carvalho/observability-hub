@@ -10,6 +10,13 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+
+# Vite faz o replace de import.meta.env.VITE_* em tempo de build — não dá pra
+# trocar a URL da API depois, em runtime. O workflow de deploy passa o valor
+# real via --build-arg.
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 RUN pnpm build
 
 
