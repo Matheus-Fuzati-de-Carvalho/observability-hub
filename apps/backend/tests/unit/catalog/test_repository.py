@@ -150,8 +150,11 @@ def test_get_tables_summary_maps_api_table_type_to_raw_value():
     assert param_values["table_type"] == "MATERIALIZED VIEW"
 
 
-@pytest.mark.parametrize("multi_region", ["US", "EU", "us", "eu"])
-def test_get_tables_summary_omits_table_partitions_join_in_multi_region(multi_region):
+@pytest.mark.parametrize("location", ["US", "EU", "us-central1"])
+def test_get_tables_summary_derives_partition_column_from_columns_schema(location):
+    """TABLE_PARTITIONS não tem o nome da coluna de particionamento e não
+    existe em US/EU — partition_column vem de COLUMNS.is_partitioning_column,
+    que funciona igual em qualquer região."""
     captured = {}
 
     def fake_query(sql, job_config=None):
@@ -163,27 +166,33 @@ def test_get_tables_summary_omits_table_partitions_join_in_multi_region(multi_re
     client = MagicMock()
     client.query.side_effect = fake_query
 
-    repository.get_tables_summary(client, "proj", "RAW", multi_region)
+    repository.get_tables_summary(client, "proj", "RAW", location)
 
     assert "TABLE_PARTITIONS" not in captured["sql"]
+    assert "is_partitioning_column" in captured["sql"]
     assert "partition_column" in captured["sql"]
 
 
-def test_get_tables_summary_keeps_table_partitions_join_in_specific_region():
-    captured = {}
+def test_get_tables_summary_row_to_dict_reads_partition_column_from_columns_agg():
+    rows = [
+        _row(
+            table_name="ga4_events",
+            table_type="BASE TABLE",
+            creation_time="2026-06-08T18:38:40Z",
+            last_modified_time="2026-06-08T18:38:40Z",
+            row_count=10000,
+            size_bytes=576920,
+            column_count=8,
+            partition_column="event_date",
+            clustering_columns=["event_name"],
+        )
+    ]
+    client = _client_returning([rows])
 
-    def fake_query(sql, job_config=None):
-        captured["sql"] = sql
-        job = MagicMock()
-        job.result.return_value = []
-        return job
+    result = repository.get_tables_summary(client, "proj", "RAW", "US")
 
-    client = MagicMock()
-    client.query.side_effect = fake_query
-
-    repository.get_tables_summary(client, "proj", "RAW", "us-central1")
-
-    assert "TABLE_PARTITIONS" in captured["sql"]
+    assert result[0]["partition_column"] == "event_date"
+    assert result[0]["is_partitioned"] is True
 
 
 def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeypatch):

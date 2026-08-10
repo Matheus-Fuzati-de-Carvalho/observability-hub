@@ -46,7 +46,9 @@ class TableSummary(BaseModel):
     table_id: str
     table_type: str
     creation_time: datetime
-    last_modified_time: datetime
+    # Vem de TABLE_STORAGE (mesmo JOIN de size_bytes/row_count) — pode ser
+    # null por atraso de propagação de metadados em tabelas recém-criadas.
+    last_modified_time: datetime | None
     size_bytes: int | None
     size_gb: float | None
     row_count: int | None

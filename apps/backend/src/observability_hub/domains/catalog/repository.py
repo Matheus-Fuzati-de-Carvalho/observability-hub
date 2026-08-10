@@ -113,9 +113,6 @@ def _row_to_table_dict(row, location: str) -> dict:
     }
 
 
-_MULTI_REGIONS = {"US", "EU"}
-
-
 def get_tables_summary(
     client: bigquery.Client,
     project_id: str,
@@ -124,13 +121,18 @@ def get_tables_summary(
     table_type: str | None = None,
 ) -> list[dict]:
     """Query 3 da spec, estendida para derivar is_clustered/clustering_columns
-    de COLUMNS.clustering_ordinal_position — a query documentada não fazia
-    isso, mas o response da spec exige esses campos (divergência resolvida
-    conforme combinado).
+    e partition_column de INFORMATION_SCHEMA.COLUMNS (clustering_ordinal_position
+    e is_partitioning_column) — a query documentada não fazia isso, mas o
+    response da spec exige esses campos (divergência resolvida conforme
+    combinado).
 
-    INFORMATION_SCHEMA.TABLE_PARTITIONS não existe nas multi-regiões US/EU
-    (só em regiões específicas, ex: us-central1) — nessas multi-regiões o
-    JOIN é omitido e partition_column sempre retorna null."""
+    INFORMATION_SCHEMA.TABLE_PARTITIONS não tem uma coluna com o nome da
+    coluna de particionamento (só partition_id, o valor da partição) e não
+    está disponível nas multi-regiões US/EU; TABLE_OPTIONS também não serve
+    (só expõe pares chave/valor como require_partition_filter, sem o nome da
+    coluna). COLUMNS.is_partitioning_column resolve isso de forma confiável
+    em qualquer região, e a tabela já estava sendo consultada para as
+    colunas de clustering."""
     query_params = [bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id)]
     where_extra = ""
     if table_type is not None:
@@ -138,26 +140,15 @@ def get_tables_summary(
         where_extra = " AND t.table_type = @table_type"
         query_params.append(bigquery.ScalarQueryParameter("table_type", "STRING", raw_type))
 
-    is_multi_region = location.upper() in _MULTI_REGIONS
-    if is_multi_region:
-        partition_join = ""
-        partition_column_select = (
-            "CAST(NULL AS STRING)                              AS partition_column,"
-        )
-    else:
-        partition_join = f"""
-        LEFT JOIN `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLE_PARTITIONS` tp
-          ON tp.table_name = t.table_name AND tp.table_schema = t.table_schema"""
-        partition_column_select = (
-            "MAX(tp.partition_column)                          AS partition_column,"
-        )
-
     query = f"""
         WITH columns_agg AS (
           SELECT
             table_schema,
             table_name,
             COUNT(column_name)                                       AS column_count,
+            MAX(
+              CASE WHEN is_partitioning_column = 'YES' THEN column_name END
+            )                                                        AS partition_column,
             ARRAY_AGG(
               CASE WHEN clustering_ordinal_position IS NOT NULL THEN column_name END
               IGNORE NULLS
@@ -171,17 +162,17 @@ def get_tables_summary(
           t.table_name,
           t.table_type,
           t.creation_time,
-          t.last_altered                                    AS last_modified_time,
+          ts.storage_last_modified_time                     AS last_modified_time,
           ts.total_rows                                    AS row_count,
           ts.total_logical_bytes                            AS size_bytes,
           ANY_VALUE(COALESCE(ca.column_count, 0))           AS column_count,
-          {partition_column_select}
+          ANY_VALUE(ca.partition_column)                    AS partition_column,
           ANY_VALUE(COALESCE(ca.clustering_columns, []))    AS clustering_columns
         FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES` t
         LEFT JOIN `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLE_STORAGE` ts
           ON ts.table_name = t.table_name AND ts.table_schema = t.table_schema
         LEFT JOIN columns_agg ca
-          ON ca.table_name = t.table_name AND ca.table_schema = t.table_schema{partition_join}
+          ON ca.table_name = t.table_name AND ca.table_schema = t.table_schema
         WHERE t.table_schema = @dataset_id{where_extra}
         GROUP BY 1, 2, 3, 4, 5, 6
         ORDER BY size_bytes DESC NULLS LAST
