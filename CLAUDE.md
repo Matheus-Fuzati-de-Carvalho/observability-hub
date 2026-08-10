@@ -206,6 +206,24 @@ Checklist de entrega:
 
 ---
 
+### Contexto: Frontend (apps/frontend/)
+
+**Foco:** fidelidade à identidade visual dp6, densidade de informação estilo Metabase, UX funcional.
+
+Antes de criar qualquer componente:
+- Ler docs/skills/frontend.md obrigatoriamente
+- Usar apenas as cores, fontes e padrões definidos na skill
+- Componentes de UI via shadcn/ui — nunca escrever CSS do zero para primitivas
+- Data fetching exclusivamente via TanStack Query — nunca fetch direto em componentes
+- TypeScript strict — sem any
+
+Checklist de entrega:
+- [ ] Skill de frontend foi lida
+- [ ] Cores e fontes seguem a identidade dp6
+- [ ] pnpm lint (biome) e pnpm build sem erros
+
+---
+
 ### Contexto: CI/CD (.github/workflows/)
 
 **Foco:** segurança de secrets, ordem de execução e falha rápida.
