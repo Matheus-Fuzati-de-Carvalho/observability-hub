@@ -1,11 +1,6 @@
-import { Cloud } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { ProjectSelector } from '@/features/projects/ProjectSelector'
 
-interface TopbarProps {
-  projectId: string
-}
-
-export function Topbar({ projectId }: TopbarProps) {
+export function Topbar() {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b-2 border-primary bg-background px-4">
       <div className="flex items-center gap-3">
@@ -15,13 +10,7 @@ export function Topbar({ projectId }: TopbarProps) {
 
       <div className="h-6 w-px bg-border" />
 
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Cloud size={16} />
-        <span>GCP Project:</span>
-        <Link to="/" className="font-medium text-foreground hover:text-primary">
-          {projectId}
-        </Link>
-      </div>
+      <ProjectSelector />
     </header>
   )
 }

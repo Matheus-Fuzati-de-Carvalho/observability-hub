@@ -8,6 +8,9 @@ export type InferredLogicalType =
   | 'numeric_string'
   | 'boolean'
   | 'free_text'
+  | 'numeric'
+  | 'date'
+  | 'timestamp'
   | 'unknown'
 
 export type QualityFlag = 'ok' | 'warning' | 'critical'

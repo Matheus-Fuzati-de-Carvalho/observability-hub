@@ -4,10 +4,12 @@ import { useDatasets, useTables } from '@/features/catalog/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
 import { useProjectFreshness } from '@/features/freshness/hooks'
 import { SLA_LABELS } from '@/features/freshness/sla'
+import { useProjectContext } from '@/features/projects/ProjectContext'
 import { formatNumber } from '@/lib/format'
 
 export function CatalogDatasetPage() {
-  const { projectId, datasetId } = useParams<{ projectId: string; datasetId: string }>()
+  const { projectId } = useProjectContext()
+  const { datasetId } = useParams<{ datasetId: string }>()
 
   const tablesQuery = useTables(projectId, datasetId)
   const datasetsQuery = useDatasets(projectId)

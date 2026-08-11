@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   Table,
   TableBody,
@@ -12,8 +12,6 @@ import { cn } from '@/lib/utils'
 import type { DatasetFreshnessSummary } from '@/types/freshness'
 
 export function DatasetFreshnessTable({ datasets }: { datasets: DatasetFreshnessSummary[] }) {
-  const { projectId } = useParams<{ projectId: string }>()
-
   return (
     <Table>
       <TableHeader>
@@ -33,10 +31,7 @@ export function DatasetFreshnessTable({ datasets }: { datasets: DatasetFreshness
         {datasets.map((dataset) => (
           <TableRow key={dataset.dataset_id}>
             <TableCell className="font-medium">
-              <Link
-                to={`/p/${projectId}/datasets/${dataset.dataset_id}`}
-                className="hover:text-primary"
-              >
+              <Link to={`/datasets/${dataset.dataset_id}`} className="hover:text-primary">
                 {dataset.dataset_id}
               </Link>
             </TableCell>

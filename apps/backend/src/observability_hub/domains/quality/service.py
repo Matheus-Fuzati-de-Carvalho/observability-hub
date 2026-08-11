@@ -38,6 +38,13 @@ _PROFILING_TIMEOUT_SECONDS = 60.0
 _TOP_N_MAX_DISTINCT = 50
 _DATE_STRING_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# Tipos físicos numéricos do BigQuery — têm prioridade sobre as heurísticas
+# de distinct_count/distinct_pct (id, boolean, categorical): o tipo físico
+# já responde a pergunta, não precisa inferir a partir da cardinalidade.
+_NUMERIC_PHYSICAL_TYPES = {"INTEGER", "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"}
+_DATE_PHYSICAL_TYPES = {"DATE"}
+_TIMESTAMP_PHYSICAL_TYPES = {"DATETIME", "TIMESTAMP"}
+
 
 def _validate_sample_percent(sample_percent: float) -> None:
     if sample_percent < 1:
@@ -144,9 +151,20 @@ def _infer_logical_type(
     """Ordem de checagem por especificidade (não pela ordem da tabela da
     spec, que é auto-contraditória de forma literal: distinct_count<50
     sempre é verdade quando distinct_count==2, então "boolean" nunca seria
-    alcançável se "categorical" fosse checado primeiro)."""
-    is_string = data_type.upper() == "STRING"
+    alcançável se "categorical" fosse checado primeiro).
 
+    Tipo físico (DATE/DATETIME/TIMESTAMP/numérico) é checado antes de
+    qualquer heurística de cardinalidade — o dado já diz o que é, não
+    precisa inferir de distinct_count/distinct_pct."""
+    data_type_upper = data_type.upper()
+    is_string = data_type_upper == "STRING"
+
+    if data_type_upper in _DATE_PHYSICAL_TYPES:
+        return InferredLogicalType.DATE
+    if data_type_upper in _TIMESTAMP_PHYSICAL_TYPES:
+        return InferredLogicalType.TIMESTAMP
+    if data_type_upper in _NUMERIC_PHYSICAL_TYPES:
+        return InferredLogicalType.NUMERIC
     if distinct_pct > 90:
         return InferredLogicalType.ID
     if distinct_count == 2:

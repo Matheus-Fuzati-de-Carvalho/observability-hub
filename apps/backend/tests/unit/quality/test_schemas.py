@@ -191,6 +191,9 @@ def test_inferred_logical_type_enum_values():
         "numeric_string",
         "boolean",
         "free_text",
+        "numeric",
+        "date",
+        "timestamp",
         "unknown",
     }
 

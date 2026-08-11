@@ -17,6 +17,9 @@ class InferredLogicalType(str, Enum):
     NUMERIC_STRING = "numeric_string"
     BOOLEAN = "boolean"
     FREE_TEXT = "free_text"
+    NUMERIC = "numeric"
+    DATE = "date"
+    TIMESTAMP = "timestamp"
     UNKNOWN = "unknown"
 
 
