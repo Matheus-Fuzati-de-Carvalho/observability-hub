@@ -22,12 +22,17 @@ def _fake_client() -> MagicMock:
     return MagicMock(name="bigquery.Client")
 
 
-def _stub_region_resolution(monkeypatch, location="US"):
+def _stub_region_resolution(monkeypatch, location="US", is_view=False):
     monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
     monkeypatch.setattr(
         service,
         "resolve_dataset_region",
         lambda client, project_id, dataset_id, candidate_regions: location,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "is_view",
+        lambda client, project_id, dataset_id, table_id, location: is_view,
     )
 
 
@@ -221,6 +226,25 @@ def test_estimate_profiling_returns_dry_run_bytes_and_cost(monkeypatch):
     assert result.estimated_bytes == 849813
     assert "KB" in result.estimated_bytes_human
     assert "SELECT" in result.sql
+
+
+def test_estimate_profiling_omits_tablesample_for_view(monkeypatch):
+    client = _fake_client()
+    _stub_region_resolution(monkeypatch, is_view=True)
+    monkeypatch.setattr(
+        service.repository,
+        "get_table_columns",
+        lambda client, project_id, dataset_id, table_id, location: [
+            {"column_name": "lead_status", "data_type": "STRING", "is_nullable": True}
+        ],
+    )
+    monkeypatch.setattr(service.repository, "dry_run", lambda client, project_id, sql: 0)
+
+    result = service.estimate_profiling(
+        client, "observability-hub-dev", "RAW", "crm_leads_view", ProfilingRequest()
+    )
+
+    assert "TABLESAMPLE" not in result.sql
 
 
 def test_estimate_profiling_raises_for_invalid_sample_percent(monkeypatch):
@@ -476,6 +500,50 @@ def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
     )
 
     assert result.columns[0].distinct_count == 4
+
+
+def test_run_profiling_omits_tablesample_for_view(monkeypatch):
+    client = _fake_client()
+    _stub_region_resolution(monkeypatch, is_view=True)
+    monkeypatch.setattr(
+        service.repository,
+        "get_table_columns",
+        lambda client, project_id, dataset_id, table_id, location: [
+            {"column_name": "lead_status", "data_type": "STRING", "is_nullable": True},
+        ],
+    )
+    main_result = {
+        "_total_sampled_rows": 100,
+        "_approx_distinct_rows": 4,
+        "lead_status__count_filled": 100,
+        "lead_status__approx_distinct": 4,
+        "lead_status__min": "lead",
+        "lead_status__max": "venda",
+    }
+    captured_top_n_sql = {}
+
+    def fake_execute_top_n_query(client, project_id, sql, timeout):
+        captured_top_n_sql["sql"] = sql
+        return []
+
+    monkeypatch.setattr(
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, timeout: main_result,
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_total_table_rows",
+        lambda client, project_id, dataset_id, table_id, location: 100,
+    )
+    monkeypatch.setattr(service.repository, "execute_top_n_query", fake_execute_top_n_query)
+
+    result = service.run_profiling(
+        client, "observability-hub-dev", "RAW", "crm_leads_view", ProfilingRequest()
+    )
+
+    assert "TABLESAMPLE" not in result.sql
+    assert "TABLESAMPLE" not in captured_top_n_sql["sql"]
 
 
 # --- timeout handling ---------------------------------------------------

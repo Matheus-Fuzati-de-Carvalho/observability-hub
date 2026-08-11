@@ -18,6 +18,17 @@ interface DatasetSidebarProps {
   projectId: string
 }
 
+// Só mostra "· views" quando há tabelas e views ao mesmo tempo — dataset só
+// de views (ou só de tabelas) mostra um único número, sem "0 tabelas"/"0
+// views" ao lado.
+function formatAssetCounts(totalTables: number, totalViews: number): string {
+  const tablesLabel = `${totalTables} ${totalTables === 1 ? 'tabela' : 'tabelas'}`
+  const viewsLabel = `${totalViews} ${totalViews === 1 ? 'view' : 'views'}`
+  if (totalTables > 0 && totalViews > 0) return `${tablesLabel} · ${viewsLabel}`
+  if (totalTables === 0 && totalViews > 0) return viewsLabel
+  return tablesLabel
+}
+
 export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   const datasetsQuery = useDatasets(projectId)
   const freshnessQuery = useProjectFreshness(projectId)
@@ -58,7 +69,6 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
       <nav className="flex flex-col gap-0.5">
         {datasetsQuery.data?.datasets.map((dataset) => {
           const worstStatus = worstStatusByDataset.get(dataset.dataset_id)
-          const assetCount = dataset.total_tables + dataset.total_views
 
           return (
             <NavLink
@@ -82,7 +92,7 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
                 <span className="truncate">{dataset.dataset_id}</span>
               </span>
               <span className="shrink-0 text-xs opacity-70">
-                [{assetCount} {assetCount === 1 ? 'tabela' : 'tabelas'}]
+                [{formatAssetCounts(dataset.total_tables, dataset.total_views)}]
               </span>
             </NavLink>
           )

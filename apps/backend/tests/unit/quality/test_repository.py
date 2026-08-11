@@ -49,6 +49,34 @@ def test_get_table_columns_maps_is_nullable_and_data_type():
     assert result[1]["is_nullable"] is False
 
 
+def test_is_view_true_for_view_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="VIEW")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is True
+
+
+def test_is_view_true_for_materialized_view_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="MATERIALIZED VIEW")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is True
+
+
+def test_is_view_false_for_base_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="BASE TABLE")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is False
+
+
+def test_is_view_false_when_no_rows_found():
+    client = MagicMock()
+    client.query.return_value.result.return_value = []
+
+    assert repository.is_view(client, "proj", "RAW", "ghost", "US") is False
+
+
 def test_get_total_table_rows_returns_value_when_present():
     client = MagicMock()
     client.query.return_value.result.return_value = [_row(total_rows=10000)]

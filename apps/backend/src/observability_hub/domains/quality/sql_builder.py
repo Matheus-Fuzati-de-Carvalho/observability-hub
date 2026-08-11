@@ -78,12 +78,16 @@ def build_main_query(
     uniqueness_method: UniquenessMethod,
     date_column: str | None,
     date_window_days: int | None,
+    is_view: bool = False,
 ) -> str:
     """Query principal (spec, "Query principal") — uma linha só, com todas as
     métricas agregadas de todas as colunas. _approx_distinct_rows (via
     TO_JSON_STRING(t)) é calculado aqui também, não numa query separada —
     mais barato que reler a tabela de novo, e é o motivo do alias `t` no
-    FROM (ver spec, "Registros duplicados estimados")."""
+    FROM (ver spec, "Registros duplicados estimados").
+
+    is_view=True omite o TABLESAMPLE (e ignora sample_percent) — VIEW e
+    MATERIALIZED VIEW não suportam essa sintaxe no BigQuery."""
     select_parts = [
         "COUNT(*) AS _total_sampled_rows",
         "APPROX_COUNT_DISTINCT(TO_JSON_STRING(t)) AS _approx_distinct_rows",
@@ -101,11 +105,12 @@ def build_main_query(
 
     select_clause = ",\n  ".join(select_parts)
     where_clause = _date_filter_sql(date_column, date_window_days)
+    sample_clause = "" if is_view else f"\nTABLESAMPLE SYSTEM ({sample_percent} PERCENT)"
     return (
         f"SELECT\n"
         f"  {select_clause}\n"
-        f"FROM `{project_id}.{dataset_id}.{table_id}` AS t\n"
-        f"TABLESAMPLE SYSTEM ({sample_percent} PERCENT)"
+        f"FROM `{project_id}.{dataset_id}.{table_id}` AS t"
+        f"{sample_clause}"
         f"{where_clause}"
     )
 
@@ -118,14 +123,19 @@ def build_top_n_query(
     sample_percent: float,
     date_column: str | None,
     date_window_days: int | None,
+    is_view: bool = False,
 ) -> str:
     """Top N valores (spec) — só chamada para colunas com distinct_count < 50
-    (decisão tomada por quem chama, não por esta função)."""
+    (decisão tomada por quem chama, não por esta função).
+
+    is_view=True omite o TABLESAMPLE (e ignora sample_percent), pelo mesmo
+    motivo de build_main_query."""
     where_clause = _date_filter_sql(date_column, date_window_days)
+    sample_clause = "" if is_view else f"\nTABLESAMPLE SYSTEM ({sample_percent} PERCENT)"
     return (
         f"SELECT `{column_name}` AS value, COUNT(*) AS count\n"
-        f"FROM `{project_id}.{dataset_id}.{table_id}`\n"
-        f"TABLESAMPLE SYSTEM ({sample_percent} PERCENT)"
+        f"FROM `{project_id}.{dataset_id}.{table_id}`"
+        f"{sample_clause}"
         f"{where_clause}\n"
         f"GROUP BY 1\n"
         f"ORDER BY count DESC\n"

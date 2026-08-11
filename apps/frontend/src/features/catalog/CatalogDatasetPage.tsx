@@ -36,7 +36,8 @@ export function CatalogDatasetPage() {
       <KpiCards
         items={[
           { label: 'Região', value: tablesQuery.data.location },
-          { label: 'Tabelas', value: String(tablesQuery.data.total_tables) },
+          { label: 'Tabelas', value: String(datasetSummary?.total_tables ?? 0) },
+          { label: 'Views', value: String(datasetSummary?.total_views ?? 0) },
           { label: 'Tamanho', value: `${(datasetSummary?.total_size_gb ?? 0).toFixed(2)} GB` },
           { label: 'Linhas', value: formatNumber(datasetSummary?.total_rows ?? null) },
           {
