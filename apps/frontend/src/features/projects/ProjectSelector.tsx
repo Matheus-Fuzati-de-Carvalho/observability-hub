@@ -1,10 +1,13 @@
 import { CheckCircle2, Cloud, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useValidateProject } from '@/features/projects/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
 import { setLastProjectId } from '@/hooks/useLastProject'
+import { cn } from '@/lib/utils'
 
 export function ProjectSelector() {
   const { projectId, setProjectId } = useProjectContext()
@@ -47,7 +50,29 @@ export function ProjectSelector() {
         {validateQuery.isFetching ? 'Validando…' : 'Validar'}
       </Button>
       {validateQuery.data?.accessible && submittedProjectId === projectId && (
-        <CheckCircle2 size={16} className="text-status-ok" aria-label="Projeto acessível" />
+        <>
+          <CheckCircle2 size={16} className="text-status-ok" aria-label="Projeto acessível" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    validateQuery.data.is_native
+                      ? 'border-status-ok/30 bg-status-ok/10 text-status-ok'
+                      : 'border-status-warn/30 bg-status-warn/10 text-status-warn',
+                  )}
+                />
+              }
+            >
+              {validateQuery.data.is_native ? 'Projeto nativo' : 'Projeto externo'}
+            </TooltipTrigger>
+            <TooltipContent>
+              Nativo = projeto onde o Hub está hospedado. Externo = projeto de cliente ou outro
+              ambiente.
+            </TooltipContent>
+          </Tooltip>
+        </>
       )}
       {showError && (
         <span title={errorMessage}>

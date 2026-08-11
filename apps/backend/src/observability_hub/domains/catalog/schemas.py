@@ -20,6 +20,11 @@ class ProjectValidateResponse(BaseModel):
     accessible: bool
     available_regions: list[str]
     total_datasets: int
+    # True quando project_id é o projeto GCP onde o próprio Hub está rodando
+    # (client.project, resolvido via GOOGLE_CLOUD_PROJECT/ADC — ver
+    # core/bigquery.py::get_client). Usado pelo frontend pra distinguir
+    # "observando a si mesmo" de "observando um projeto de cliente/externo".
+    is_native: bool
 
 
 class DatasetSummary(BaseModel):

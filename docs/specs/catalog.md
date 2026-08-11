@@ -1,9 +1,9 @@
 # Spec — Domínio: Catálogo (catalog)
 
-**Versão:** 1.3 (volumetria em tempo real via client.get_table())
+**Versão:** 1.4 (flag is_native em /projects/{project_id}/validate)
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
-**Última atualização:** 2026-08-11
+**Última atualização:** 2026-08-11 (v1.4)
 
 ---
 
@@ -63,13 +63,22 @@ BQ_REGIONS = [
 ### GET /api/v1/projects/{project_id}/validate
 Valida acesso e descobre automaticamente as regiões com datasets.
 
+`is_native` indica se `project_id` é o projeto GCP onde esta instância do
+Hub está rodando (`client.project`, resolvido via `GOOGLE_CLOUD_PROJECT` ou
+`google.auth.default()` — mesma fonte usada no `fix` da Response 403
+abaixo). Usado pelo frontend para diferenciar "Hub observando a si mesmo"
+(dev observando `observability-hub-dev`, prod observando
+`observability-hub-prod`) de "Hub observando um projeto externo" (ex: prod
+observando `observability-hub-dev` como projeto-alvo, ou vice-versa).
+
 **Response 200:**
 ```json
 {
   "project_id": "observability-hub-dev",
   "accessible": true,
   "available_regions": ["US"],
-  "total_datasets": 3
+  "total_datasets": 3,
+  "is_native": true
 }
 ```
 

@@ -3,6 +3,7 @@ export interface ProjectValidateResponse {
   accessible: boolean
   available_regions: string[]
   total_datasets: number
+  is_native: boolean
 }
 
 export interface ApiErrorBody {
