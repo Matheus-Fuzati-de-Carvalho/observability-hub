@@ -18,6 +18,15 @@ export const SLA_TEXT_COLOR: Record<SLAStatus, string> = {
   stale: 'text-status-error',
 }
 
+export const SLA_SHORT_LABELS: Record<SLAStatus, string> = {
+  ok: '≤12h',
+  warning_12_24: '12-24h',
+  warning_24_48: '24-48h',
+  warning_48_7d: '48h-7d',
+  warning_7d_1m: '7d-1m',
+  stale: '>1m',
+}
+
 export const SLA_ORDER: SLAStatus[] = [
   'ok',
   'warning_12_24',
