@@ -209,6 +209,10 @@ Itens soltos, não bloqueantes, pra considerar quando aparecer necessidade:
   precisar de Cloud Logging).
 - Revisitar a restrição de WIF de prod (refs/heads/main) se algum dia for
   necessário automatizar terraform plan de prod em PR.
+- Datasets com apenas views não exibem indicador de freshness na sidebar
+  (bolinha de status). Views não têm modified_time de dados, só de
+  definição. Melhoria futura: exibir ícone neutro (ex: traço ou ícone de
+  view) em vez de ausência de bolinha para datasets sem tabelas físicas.
 ```
 
 ---
