@@ -1,6 +1,6 @@
 [project]
 name = "observability-hub-backend"
-version = "0.2.0"
+version = "0.2.1"
 description = "Backend do Observability Hub (FastAPI)"
 requires-python = ">=3.12"
 dependencies = [
