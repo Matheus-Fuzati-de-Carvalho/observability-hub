@@ -1,13 +1,5 @@
 const STORAGE_KEY = 'observability-hub:last-project-id'
 
-export function getLastProjectId(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
-}
-
 export function setLastProjectId(projectId: string): void {
   try {
     localStorage.setItem(STORAGE_KEY, projectId)

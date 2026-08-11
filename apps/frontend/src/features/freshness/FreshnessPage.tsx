@@ -1,12 +1,12 @@
-import { useParams } from 'react-router-dom'
 import { DatasetFreshnessTable } from '@/features/freshness/DatasetFreshnessTable'
 import { useProjectFreshness } from '@/features/freshness/hooks'
 import { SlaRow } from '@/features/freshness/SlaRow'
 import { SLA_ORDER } from '@/features/freshness/sla'
+import { useProjectContext } from '@/features/projects/ProjectContext'
 import type { FreshnessCounts } from '@/types/freshness'
 
 export function FreshnessPage() {
-  const { projectId } = useParams<{ projectId: string }>()
+  const { projectId } = useProjectContext()
   const freshnessQuery = useProjectFreshness(projectId)
 
   if (freshnessQuery.isLoading) {

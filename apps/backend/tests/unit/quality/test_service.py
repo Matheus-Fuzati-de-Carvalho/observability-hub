@@ -123,20 +123,58 @@ def test_infer_logical_type_free_text_for_high_cardinality_string_without_patter
 
 
 def test_infer_logical_type_unknown_for_high_cardinality_non_string():
-    result = service._infer_logical_type("FLOAT64", 900, 90.0, 1.5, 9999.9)
+    result = service._infer_logical_type("BOOL", 900, 90.0, 1.5, 9999.9)
     assert result == InferredLogicalType.UNKNOWN
 
 
 def test_infer_logical_type_email_check_skipped_for_non_string_columns():
     """Uma coluna não-STRING jamais deveria virar 'email' mesmo se o valor
     stringificado contivesse '@' por acaso."""
-    result = service._infer_logical_type("FLOAT64", 900, 90.0, "1@2", "3@4")
+    result = service._infer_logical_type("BOOL", 900, 90.0, "1@2", "3@4")
     assert result != InferredLogicalType.EMAIL
 
 
 def test_infer_logical_type_handles_null_min_max_for_fully_null_column():
     result = service._infer_logical_type("STRING", 0, 0.0, None, None)
     assert result == InferredLogicalType.CATEGORICAL
+
+
+# --- _infer_logical_type: tipo físico numérico/data (prioridade sobre cardinalidade) ---
+
+
+@pytest.mark.parametrize("data_type", ["INTEGER", "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"])
+def test_infer_logical_type_numeric_for_numeric_physical_types(data_type):
+    result = service._infer_logical_type(data_type, 900, 90.0, 1.5, 9999.9)
+    assert result == InferredLogicalType.NUMERIC
+
+
+def test_infer_logical_type_numeric_takes_priority_over_categorical():
+    result = service._infer_logical_type("INT64", 4, 0.04, 1, 4)
+    assert result == InferredLogicalType.NUMERIC
+
+
+def test_infer_logical_type_numeric_takes_priority_over_id():
+    result = service._infer_logical_type("FLOAT64", 950, 95.0, 1.5, 9999.9)
+    assert result == InferredLogicalType.NUMERIC
+
+
+def test_infer_logical_type_date_for_date_physical_type():
+    result = service._infer_logical_type("DATE", 4, 0.04, "2026-01-01", "2026-12-31")
+    assert result == InferredLogicalType.DATE
+
+
+@pytest.mark.parametrize("data_type", ["DATETIME", "TIMESTAMP"])
+def test_infer_logical_type_timestamp_for_datetime_and_timestamp_physical_types(data_type):
+    result = service._infer_logical_type(data_type, 4, 0.04, "2026-01-01", "2026-12-31")
+    assert result == InferredLogicalType.TIMESTAMP
+
+
+def test_infer_logical_type_date_does_not_fall_into_categorical():
+    """distinct_count baixo não pode desviar DATE/TIMESTAMP pra categorical —
+    o tipo físico decide direto, sem checar cardinalidade."""
+    result = service._infer_logical_type("DATE", 2, 0.02, "2026-01-01", "2026-01-02")
+    assert result == InferredLogicalType.DATE
+    assert result != InferredLogicalType.CATEGORICAL
 
 
 # --- _coefficient_of_variation ----------------------------------------------

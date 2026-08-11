@@ -30,7 +30,7 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
       <div className="mb-4">
         <NavLink
-          to={`/p/${projectId}/freshness`}
+          to="/freshness"
           className={({ isActive }) =>
             cn(
               'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
@@ -63,7 +63,7 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
           return (
             <NavLink
               key={dataset.dataset_id}
-              to={`/p/${projectId}/datasets/${dataset.dataset_id}`}
+              to={`/datasets/${dataset.dataset_id}`}
               className={({ isActive }) =>
                 cn(
                   'flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
