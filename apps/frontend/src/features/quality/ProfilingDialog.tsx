@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useTableDetail } from '@/features/catalog/hooks'
+import { KpiCards } from '@/features/catalog/KpiCards'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
 import { SqlPreview } from '@/features/quality/SqlPreview'
@@ -101,7 +102,7 @@ export function ProfilingDialog({
 
   return (
     <Dialog open={Boolean(tableId)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-[900px] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-[min(1100px,90vw)] overflow-y-auto">
         <DialogHeader>
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">
             Módulo de qualidade
@@ -220,32 +221,26 @@ export function ProfilingDialog({
         {runMutation.data && (
           <>
             <Separator />
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase">Amostradas</p>
-                <p className="text-xl font-bold">
-                  {formatNumber(runMutation.data.table_summary.total_sampled_rows)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase">Total da tabela</p>
-                <p className="text-xl font-bold">
-                  {formatNumber(runMutation.data.table_summary.total_table_rows)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase">Duplicatas est.</p>
-                <p className="text-xl font-bold">
-                  {formatPercent(runMutation.data.table_summary.estimated_duplicate_pct)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground uppercase">Densidade geral</p>
-                <p className="text-xl font-bold">
-                  {formatPercent(runMutation.data.table_summary.overall_density)}
-                </p>
-              </div>
-            </div>
+            <KpiCards
+              items={[
+                {
+                  label: 'Amostradas',
+                  value: formatNumber(runMutation.data.table_summary.total_sampled_rows),
+                },
+                {
+                  label: 'Total da tabela',
+                  value: formatNumber(runMutation.data.table_summary.total_table_rows),
+                },
+                {
+                  label: 'Duplicatas est.',
+                  value: formatPercent(runMutation.data.table_summary.estimated_duplicate_pct),
+                },
+                {
+                  label: 'Densidade geral',
+                  value: formatPercent(runMutation.data.table_summary.overall_density),
+                },
+              ]}
+            />
 
             {runMutation.data.excluded_columns.length > 0 && (
               <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -262,7 +257,13 @@ export function ProfilingDialog({
           </>
         )}
 
-        {sql && <SqlPreview sql={sql} />}
+        {sql && (
+          <SqlPreview
+            key={runMutation.data ? 'run' : 'estimate'}
+            sql={sql}
+            defaultOpen={!runMutation.data}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )
