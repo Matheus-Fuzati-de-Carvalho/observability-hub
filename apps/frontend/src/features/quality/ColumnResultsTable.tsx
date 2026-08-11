@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { CompletenessBar } from '@/features/quality/CompletenessBar'
 import { cn } from '@/lib/utils'
-import type { ColumnProfile, ScalarValue } from '@/types/profiling'
+import type { ColumnProfile, QualityFlag, ScalarValue } from '@/types/profiling'
 
 function formatScalar(value: ScalarValue): string {
   if (value === null) return '—'
@@ -19,6 +19,18 @@ function formatScalar(value: ScalarValue): string {
 // distinct_pct alto = mais provável ser uma chave/id (alta cardinalidade);
 // baixo = mais provável ser categórico (baixa cardinalidade).
 const HIGH_CARDINALITY_THRESHOLD = 50
+
+const QUALITY_FLAG_LABELS: Record<QualityFlag, string> = {
+  ok: 'OK',
+  warning: 'Atenção',
+  critical: 'Crítico',
+}
+
+const QUALITY_FLAG_COLOR: Record<QualityFlag, string> = {
+  ok: 'text-status-ok',
+  warning: 'text-status-warn',
+  critical: 'text-status-error',
+}
 
 export function ColumnResultsTable({ columns }: { columns: ColumnProfile[] }) {
   return (
@@ -32,6 +44,7 @@ export function ColumnResultsTable({ columns }: { columns: ColumnProfile[] }) {
           <TableHead>Min</TableHead>
           <TableHead>Max</TableHead>
           <TableHead>Tipo lógico</TableHead>
+          <TableHead>Quality flag</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -63,6 +76,11 @@ export function ColumnResultsTable({ columns }: { columns: ColumnProfile[] }) {
             </TableCell>
             <TableCell>
               <Badge variant="outline">{column.inferred_logical_type}</Badge>
+            </TableCell>
+            <TableCell>
+              <span className={cn('font-medium', QUALITY_FLAG_COLOR[column.quality_flag])}>
+                {QUALITY_FLAG_LABELS[column.quality_flag]}
+              </span>
             </TableCell>
           </TableRow>
         ))}

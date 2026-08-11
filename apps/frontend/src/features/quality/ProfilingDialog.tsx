@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useTableDetail } from '@/features/catalog/hooks'
-import { KpiCards } from '@/features/catalog/KpiCards'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
 import { SqlPreview } from '@/features/quality/SqlPreview'
@@ -100,9 +99,12 @@ export function ProfilingDialog({
 
   const sql = runMutation.data?.sql ?? estimateMutation.data?.sql
 
+  // sm:max-w-sm do DialogContent base vence w-[90vw]/max-w-[1000px] na
+  // cascata em qualquer tela >=640px (aparece depois no CSS gerado,
+  // independente da ordem no className) — precisa de ! pra sobrepor.
   return (
     <Dialog open={Boolean(tableId)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-[min(1100px,90vw)] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] w-[90vw]! max-w-[1000px]! overflow-y-auto">
         <DialogHeader>
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">
             Módulo de qualidade
@@ -221,8 +223,8 @@ export function ProfilingDialog({
         {runMutation.data && (
           <>
             <Separator />
-            <KpiCards
-              items={[
+            <div className="flex flex-wrap gap-4">
+              {[
                 {
                   label: 'Amostradas',
                   value: formatNumber(runMutation.data.table_summary.total_sampled_rows),
@@ -239,8 +241,18 @@ export function ProfilingDialog({
                   label: 'Densidade geral',
                   value: formatPercent(runMutation.data.table_summary.overall_density),
                 },
-              ]}
-            />
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="min-w-[160px] flex-1 rounded-lg border border-border bg-card p-4"
+                >
+                  <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    {item.label}
+                  </p>
+                  <p className="text-2xl font-bold">{item.value}</p>
+                </div>
+              ))}
+            </div>
 
             {runMutation.data.excluded_columns.length > 0 && (
               <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
