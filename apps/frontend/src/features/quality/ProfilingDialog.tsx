@@ -101,7 +101,7 @@ export function ProfilingDialog({
 
   return (
     <Dialog open={Boolean(tableId)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[900px]">
+      <DialogContent className="max-h-[90vh] max-w-[900px] overflow-y-auto">
         <DialogHeader>
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">
             Módulo de qualidade

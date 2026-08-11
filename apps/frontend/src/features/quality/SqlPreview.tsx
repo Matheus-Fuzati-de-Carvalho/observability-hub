@@ -22,7 +22,7 @@ export function SqlPreview({ sql }: { sql: string }) {
           {copied ? 'Copiado' : 'Copiar SQL'}
         </Button>
       </div>
-      <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap text-foreground">
+      <pre className="max-h-48 overflow-y-auto overflow-x-auto font-mono text-xs whitespace-pre-wrap text-foreground">
         {sql}
       </pre>
     </div>
