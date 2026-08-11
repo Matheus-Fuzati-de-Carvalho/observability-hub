@@ -209,7 +209,7 @@ def estimate_profiling(
         request.date_column,
         request.date_window_days,
     )
-    estimated_bytes = repository.dry_run(client, sql)
+    estimated_bytes = repository.dry_run(client, project_id, sql)
     return EstimateResponse(
         estimated_bytes=estimated_bytes,
         estimated_bytes_human=_human_bytes(estimated_bytes),
@@ -245,7 +245,14 @@ def run_profiling(
     )
     budget = _remaining_budget(start, project_id, dataset_id, table_id)
     main_result = _run_with_timeout_guard(
-        project_id, dataset_id, table_id, repository.execute_main_query, client, sql, budget
+        project_id,
+        dataset_id,
+        table_id,
+        repository.execute_main_query,
+        client,
+        project_id,
+        sql,
+        budget,
     )
 
     total_table_rows = (
@@ -290,6 +297,7 @@ def run_profiling(
                 table_id,
                 repository.execute_top_n_query,
                 client,
+                project_id,
                 top_n_sql,
                 budget,
             )
@@ -383,6 +391,7 @@ def get_null_distribution(
         table_id,
         repository.execute_null_distribution_query,
         client,
+        project_id,
         sql,
         _PROFILING_TIMEOUT_SECONDS,
     )
