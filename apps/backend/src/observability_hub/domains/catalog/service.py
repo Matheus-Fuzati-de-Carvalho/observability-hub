@@ -28,6 +28,10 @@ def validate_project(client: bigquery.Client, project_id: str) -> ProjectValidat
         accessible=True,
         available_regions=regions,
         total_datasets=len(datasets),
+        # client.project é resolvido pelo SDK via GOOGLE_CLOUD_PROJECT ou
+        # google.auth.default() (metadados do Cloud Run em produção) — mesma
+        # fonte já usada em main.py para montar o "fix" de ProjectAccessDeniedError.
+        is_native=project_id == client.project,
     )
 
 

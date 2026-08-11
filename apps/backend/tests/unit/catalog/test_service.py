@@ -11,8 +11,10 @@ from observability_hub.core.exceptions import (
 from observability_hub.domains.catalog import service
 
 
-def _fake_client() -> MagicMock:
-    return MagicMock(name="bigquery.Client")
+def _fake_client(project: str = "observability-hub-dev") -> MagicMock:
+    client = MagicMock(name="bigquery.Client")
+    client.project = project
+    return client
 
 
 def test_validate_project_happy_path(monkeypatch):
@@ -43,6 +45,30 @@ def test_validate_project_empty_project_has_zero_datasets(monkeypatch):
     assert result.accessible is True
     assert result.available_regions == []
     assert result.total_datasets == 0
+
+
+def test_validate_project_is_native_true_when_project_id_matches_runtime_project(monkeypatch):
+    client = _fake_client(project="observability-hub-dev")
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository, "get_datasets_summary", lambda client, project_id, regions: []
+    )
+
+    result = service.validate_project(client, "observability-hub-dev")
+
+    assert result.is_native is True
+
+
+def test_validate_project_is_native_false_for_external_project(monkeypatch):
+    client = _fake_client(project="observability-hub-dev")
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository, "get_datasets_summary", lambda client, project_id, regions: []
+    )
+
+    result = service.validate_project(client, "some-customer-project")
+
+    assert result.is_native is False
 
 
 def test_validate_project_propagates_access_denied(monkeypatch):

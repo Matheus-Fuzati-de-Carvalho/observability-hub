@@ -18,6 +18,7 @@ def test_project_validate_response_matches_spec_example():
         "accessible": True,
         "available_regions": ["US"],
         "total_datasets": 3,
+        "is_native": True,
     }
     model = ProjectValidateResponse(**payload)
     assert model.model_dump() == payload
