@@ -85,14 +85,15 @@ def _validate_date_column(date_column: str | None, profileable: list[dict]) -> N
 
 def _resolve_location_and_columns(
     client: bigquery.Client, project_id: str, dataset_id: str, table_id: str
-) -> tuple[str, list[dict], list[ExcludedColumn]]:
+) -> tuple[str, list[dict], list[ExcludedColumn], bool]:
     regions = discover_regions(project_id, client=client)
     location = resolve_dataset_region(client, project_id, dataset_id, regions)
     raw_columns = repository.get_table_columns(client, project_id, dataset_id, table_id, location)
     if not raw_columns:
         raise TableNotFoundError(project_id, dataset_id, table_id)
     profileable, excluded = _split_columns(raw_columns)
-    return location, profileable, excluded
+    is_view = repository.is_view(client, project_id, dataset_id, table_id, location)
+    return location, profileable, excluded, is_view
 
 
 def _remaining_budget(start: float, project_id: str, dataset_id: str, table_id: str) -> float:
@@ -211,7 +212,7 @@ def estimate_profiling(
     request: ProfilingRequest,
 ) -> EstimateResponse:
     _validate_sample_percent(request.sample_percent)
-    _location, profileable, _excluded = _resolve_location_and_columns(
+    _location, profileable, _excluded, is_view = _resolve_location_and_columns(
         client, project_id, dataset_id, table_id
     )
     _validate_date_column(request.date_column, profileable)
@@ -226,6 +227,7 @@ def estimate_profiling(
         request.uniqueness_method,
         request.date_column,
         request.date_window_days,
+        is_view=is_view,
     )
     estimated_bytes = repository.dry_run(client, project_id, sql)
     return EstimateResponse(
@@ -245,7 +247,7 @@ def run_profiling(
 ) -> ProfilingRunResponse:
     start = time.monotonic()
     _validate_sample_percent(request.sample_percent)
-    location, profileable, excluded = _resolve_location_and_columns(
+    location, profileable, excluded, is_view = _resolve_location_and_columns(
         client, project_id, dataset_id, table_id
     )
     _validate_date_column(request.date_column, profileable)
@@ -260,6 +262,7 @@ def run_profiling(
         request.uniqueness_method,
         request.date_column,
         request.date_window_days,
+        is_view=is_view,
     )
     budget = _remaining_budget(start, project_id, dataset_id, table_id)
     main_result = _run_with_timeout_guard(
@@ -308,6 +311,7 @@ def run_profiling(
                 request.sample_percent,
                 request.date_column,
                 request.date_window_days,
+                is_view=is_view,
             )
             raw_top = _run_with_timeout_guard(
                 project_id,
@@ -387,7 +391,7 @@ def get_null_distribution(
     date_window_days: int,
     granularity: Granularity,
 ) -> NullDistributionResponse:
-    _location, profileable, _excluded = _resolve_location_and_columns(
+    _location, profileable, _excluded, _is_view = _resolve_location_and_columns(
         client, project_id, dataset_id, table_id
     )
     _validate_date_column(date_column, profileable)

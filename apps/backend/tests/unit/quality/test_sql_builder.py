@@ -140,6 +140,21 @@ def test_build_main_query_multiple_columns_each_get_own_select_expressions():
     assert "lead_status__avg" not in sql
 
 
+def test_build_main_query_omits_tablesample_for_view():
+    sql = sql_builder.build_main_query(
+        "proj", "RAW", "sales_view", [], 50, UniquenessMethod.APPROX, None, None, is_view=True
+    )
+    assert "TABLESAMPLE" not in sql
+    assert "FROM `proj.RAW.sales_view` AS t" in sql
+
+
+def test_build_main_query_defaults_to_not_a_view():
+    sql = sql_builder.build_main_query(
+        "proj", "RAW", "leads", [], 100, UniquenessMethod.APPROX, None, None
+    )
+    assert "TABLESAMPLE SYSTEM (100 PERCENT)" in sql
+
+
 # --- build_top_n_query ----------------------------------------------------
 
 
@@ -163,6 +178,14 @@ def test_build_top_n_query_has_no_table_alias():
     """Diferente da query principal, não precisa de TO_JSON_STRING(t)."""
     sql = sql_builder.build_top_n_query("proj", "RAW", "leads", "lead_status", 100, None, None)
     assert "AS t" not in sql
+
+
+def test_build_top_n_query_omits_tablesample_for_view():
+    sql = sql_builder.build_top_n_query(
+        "proj", "RAW", "sales_view", "region", 50, None, None, is_view=True
+    )
+    assert "TABLESAMPLE" not in sql
+    assert "FROM `proj.RAW.sales_view`" in sql
 
 
 # --- build_null_distribution_query ----------------------------------------

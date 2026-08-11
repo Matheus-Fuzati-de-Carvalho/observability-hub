@@ -16,6 +16,10 @@ from observability_hub.core.exceptions import ProjectAccessDeniedError
 # TIMESTAMP_TRUNC/DATETIME_TRUNC fazem sentido.
 DATE_COLUMN_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
 
+# INFORMATION_SCHEMA.TABLES.table_type usa "VIEW" e "MATERIALIZED VIEW" (com
+# espaço) — nenhum dos dois suporta TABLESAMPLE no BigQuery.
+_VIEW_TABLE_TYPES = {"VIEW", "MATERIALIZED VIEW"}
+
 
 def _to_jsonable_scalar(value: object) -> str | int | float | bool | None:
     """MIN/MAX podem vir em qualquer tipo do BigQuery. int/float/bool/str já
@@ -61,6 +65,27 @@ def get_table_columns(
         }
         for row in rows
     ]
+
+
+def is_view(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> bool:
+    """VIEW e MATERIALIZED VIEW não suportam TABLESAMPLE no BigQuery — o
+    sql_builder precisa saber disso antes de montar a query principal e a
+    de top N valores."""
+    query = f"""
+        SELECT table_type
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+    return bool(rows) and rows[0].table_type in _VIEW_TABLE_TYPES
 
 
 def get_total_table_rows(

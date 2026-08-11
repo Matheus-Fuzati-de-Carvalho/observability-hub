@@ -28,6 +28,7 @@ import type { UniquenessMethod } from '@/types/profiling'
 
 const NO_DATE_COLUMN = '__none__'
 const DATE_TYPES = new Set(['DATE', 'DATETIME', 'TIMESTAMP'])
+const VIEW_TYPES = new Set(['VIEW', 'MATERIALIZED_VIEW'])
 
 // SelectValue não deriva o rótulo a partir dos SelectItem filhos nesta
 // versão do base-ui — precisa de um render-prop mapeando valor -> rótulo.
@@ -75,6 +76,7 @@ export function ProfilingDialog({
 
   const dateColumns =
     tableDetailQuery.data?.columns.filter((c) => DATE_TYPES.has(c.data_type.toUpperCase())) ?? []
+  const isView = Boolean(tableDetailQuery.data && VIEW_TYPES.has(tableDetailQuery.data.table_type))
 
   function buildRequest() {
     const hasDateFilter = dateColumn !== NO_DATE_COLUMN
@@ -129,7 +131,11 @@ export function ProfilingDialog({
               className="w-24"
               value={samplePercent}
               onChange={(e) => setSamplePercent(Number(e.target.value))}
+              disabled={isView}
             />
+            {isView && (
+              <p className="text-xs text-status-warn">Amostragem não disponível para views</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
