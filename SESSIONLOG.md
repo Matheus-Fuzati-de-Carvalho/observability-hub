@@ -7,128 +7,157 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-10
-**Fase atual:** Deploy do frontend no Cloud Run — **concluído em dev e prod**,
-validado ponta a ponta nos dois ambientes.
-**Próximo passo:** Nenhum pendente desta fase. Local ainda está na branch
-`feature/frontend-cloud-run-deploy` (já mergeada via PR #1) — trocar pra
-`main` e `git pull` no início da próxima sessão. Depois disso, a próxima
-fase de produto é a Fase 3 (Discovery: lineage, PII, mapa de acesso).
+**Última atualização:** 2026-08-11 — **encerramento da Sprint 2**
+**Fase atual:** Sprint 2 concluída. Backend e frontend com MVP completo dos
+domínios catalog, freshness e quality/profiling, deployados e validados
+ponta a ponta em dev e prod (ambos em sincronia, commit `5aa7179`).
+**Próximo passo:** Iniciar **Sprint 3 — Discovery** (Fase 3 do CLAUDE.md):
+lineage, PII, mapa de acesso. Nenhuma implementação desses domínios foi
+começada ainda. Local e `origin/main` já sincronizados nesta sessão.
 
 ---
 
-## O que foi feito nesta sessão
+## O que foi feito na Sprint 2
 
-Sessão começou já com o push da sessão anterior confirmado (Backend Deploy
-prod #9 verde, todos os commits de Fase 2A–2D em `main`). O trabalho desta
-sessão foi inteiramente sobre o **deploy do frontend no Cloud Run**, que
-tinha código pronto (Fase 2D) mas nunca tinha sido provisionado — em dev e,
-depois, em prod via PR #1.
+A Sprint 2 cobriu do PR #2 ao #13 (o PR #1, deploy do frontend no Cloud Run,
+já estava documentado no encerramento da sessão anterior). Trabalho spread
+por várias sessões — o que segue é a reconstrução a partir do histórico real
+de PRs (`gh pr list`/`gh pr view`), não só da sessão mais recente.
 
-### Módulo Terraform `cloud-run` adaptado (não duplicado)
-Reaproveitado para o frontend em vez de criar `cloud-run-frontend/` — decisão
-tomada com o usuário. Dois ajustes:
-- `manage_artifact_registry` (bool, default `true`): torna a criação do
-  Artifact Registry opcional, porque duas instâncias do módulo no mesmo
-  projeto tentariam gerenciar o mesmo repo `apps`. Um bloco `moved` dentro do
-  módulo remapeou o state do repositório já existente do backend (`apps` →
-  `apps[0]`) sem destruir/recriar — confirmado no `terraform plan` (dev e
-  prod) como `has moved`, não como destroy/create.
-- `env` (`map(string)`): suporte a env vars no container, usado pra injetar
-  `OBSERVABILITY_HUB_CORS_ORIGINS` no backend com a URL real do frontend.
+### Infra e correções de plataforma
+- **PR #2 — CORS para a segunda URL do Cloud Run**: todo serviço Cloud Run
+  responde em duas URLs válidas (a com hash e a legada por número de
+  projeto); só a primeira estava na allowlist de CORS do backend, quebrando
+  o frontend quando acessado pela URL de project number. Módulo `cloud-run`
+  ganhou `output "service_url_alt"` (via `data "google_project"`,
+  reaproveitável), e as duas URLs entraram em `OBSERVABILITY_HUB_CORS_ORIGINS`
+  nos dois ambientes.
+- **PR #10 / #11 — bumps de versão pra forçar redeploy em dev**: dev tinha
+  ficado defasado de `main` (deploy automático só dispara em push que toca
+  os paths do workflow, não em "está tudo commitado" — mesma armadilha já
+  registrada na sessão anterior). Bump de versão em `package.json` (frontend)
+  e `pyproject.toml`/`uv.lock` (backend) sincronizou dev com o código real.
 
-### Environments dev e prod
-`module "frontend_cloud_run"` adicionado nos dois, `health_check_path = "/"`
-(frontend estático não tem `/health`), `manage_artifact_registry = false`.
-`backend_cloud_run` ganhou `env` com a URL do frontend (+ `localhost:5173`
-em dev, pra manter o Vite dev server local funcionando).
+### Domínio quality/profiling
+- **PR #3 — 403 limpo em vez de 500 no profiling**: a runtime SA tinha
+  `metadataViewer`+`jobUser` (suficiente pra catalog/freshness, só
+  `INFORMATION_SCHEMA`), mas profiling roda SQL real contra dados de tabela
+  e precisa de `bigquery.dataViewer` — faltava nos dois ambientes. As 4
+  funções de query em `domains/quality/repository.py` passaram a capturar
+  `Forbidden` e relançar `ProjectAccessDeniedError` (já mapeada pra 403 no
+  handler). O handler em `main.py` também estava sugerindo só uma role no
+  `fix`; passou a sugerir as três (idempotente, seguro rodar mesmo quando só
+  uma faltava).
+- **PR #4, #5, #6 — três rodadas até acertar o modal de profiling**: scroll
+  (modal + área de SQL), depois largura/KPIs/SQL colapsável, depois a causa
+  raiz real da largura: `DialogContent` do shadcn já vem com `sm:max-w-sm`
+  embutido, e no CSS compilado pelo Tailwind v4 essa regra `sm:` aparece
+  **depois** de qualquer `max-w-[...]` simples adicionado via `className` —
+  vencia o empate de especificidade silenciosamente em qualquer tela
+  ≥640px, apesar do build passar limpo nas duas tentativas anteriores.
+  Resolvido com `w-[90vw]! max-w-[1000px]!` (sintaxe `!important` do
+  Tailwind v4), confirmado inspecionando o CSS gerado.
+- **PR #8 — profiling em views**: `TABLESAMPLE SYSTEM` não é suportado pelo
+  BigQuery em VIEW/MATERIALIZED VIEW — causava "Failed to fetch". Query
+  builder ganhou `is_view: bool` (omite `TABLESAMPLE`/`sample_percent`
+  quando `True`), detectado via `INFORMATION_SCHEMA.TABLES`. Frontend
+  desabilita o campo de amostragem com aviso quando a tabela é view. Mesmo
+  PR separou a contagem de tabelas e views no catálogo (sidebar e KPI
+  cards), que antes vinham somadas sob um único rótulo "tabelas".
+- **PR #9 — schema da tabela no modal antes de rodar profiling**: nova
+  `SchemaTable` (Nome/Tipo/Nullable) usando o endpoint de detalhe já
+  existente, com parsing de subcampos STRUCT/ARRAY (badge "Complexo"),
+  destaque pra colunas de data e badge de coluna de partição. Header do
+  modal ganhou badges "Particionada por"/"Clusterizada por".
+- **PR #7 — inferência de tipo lógico**: colunas numéricas (INTEGER,
+  FLOAT64, NUMERIC, BIGNUMERIC, INT64) e de data/hora (DATE/DATETIME/
+  TIMESTAMP) passaram a ter `inferred_logical_type` correto direto pelo tipo
+  físico, sem cair nas heurísticas de cardinalidade (categorical/id) que
+  valiam só quando o tipo físico não decidia sozinho.
 
-### Dockerfile frontend
-`ARG`/`ENV VITE_API_BASE_URL` antes do `pnpm build` — Vite faz o replace de
-`import.meta.env.VITE_*` em build time, não dá pra trocar em runtime.
+### Domínio freshness
+- Colunas de contagem por SLA na tabela de freshness (commit `8324fbe`,
+  direto em `main`, sem PR associado).
+- Backlog registrado (commit `ab68237`, também direto em `main`): datasets
+  só com views não têm indicador de freshness na sidebar (sem
+  `modified_time` de dados) — ainda pendente, ver "Backlog" abaixo.
+- **Esta sessão (PR #12)**: `get_tables_summary` (catalog) e
+  `get_table_freshness` (freshness) passaram de `INFORMATION_SCHEMA.
+  TABLE_STORAGE` (lag de até 24h) para `client.get_table()` — tempo real,
+  chamadas em paralelo (`ThreadPoolExecutor`) com cache TTL de 5min
+  compartilhado (`core/bigquery.py`). Escopo decidido com o usuário: as
+  visões agregadas por projeto (`get_datasets_summary`,
+  `get_freshness_summary_by_dataset`) ficaram em `TABLE_STORAGE` de
+  propósito, pra não virar uma chamada de API por tabela do projeto inteiro
+  numa tela de dashboard. Specs `catalog.md` (v1.3) e `freshness.md` (v1.2)
+  atualizadas.
 
-### Workflows `frontend-deploy-{dev,prod}.yml`
-Mesmo padrão dos workflows do backend, com `wait-for-terraform` **nos dois**
-ambientes (o backend só tinha esse gate em prod). Passo extra: descobre a
-URL atual do backend via `gcloud run services describe` e passa como
-`--build-arg VITE_API_BASE_URL`.
+### UX geral e autenticação
+- **PR #7 — 5 melhorias de UX**: tabela de resultados sem scroll horizontal
+  (truncamento com ellipsis em Min/Max), seletor de projeto migrado da tela
+  `/` isolada pra `Topbar` (visível em qualquer página, `ProjectContext` +
+  `ProjectSelector`, rotas perderam o prefixo `/p/:projectId`), e
+  `AuthGate` — tela de login com senha hardcoded (`senha123`) e sessão em
+  `sessionStorage`. Ver nota de dívida técnica no Backlog.
+- **Esta sessão (PR #13)**: `GET /projects/{id}/validate` ganhou
+  `is_native` (compara `project_id` com `client.project`, mesma fonte já
+  usada no fix do 403). Badge na topbar — verde "Projeto nativo" / amarelo
+  "Projeto externo" — com tooltip. Spec `catalog.md` bump pra v1.4.
 
-### Descoberta 1: backend de dev estava travado em commit pré-Fase 2
-`gcloud run services describe backend --project observability-hub-dev`
-mostrou a imagem rodando na tag `4c4b5ef` — um commit **anterior** a todo o
-catalog/freshness/quality e ao `CORSMiddleware`. Causa: os commits de Fase
-2A–2D foram direto pra `main` sem passar antes por um push em branch
-não-main (único gatilho do `backend-deploy-dev.yml`), então dev nunca
-recebeu esse deploy (só prod, via merge em `main`).
-Corrigido: bump `apps/backend/pyproject.toml` 0.1.0 → 0.2.0 (+ `uv lock`)
-numa branch feature, disparando `backend-deploy-dev.yml` com o código atual
-da main.
+### IAM cross-project (esta sessão, fora de qualquer PR — aplicado via `gcloud` direto)
+O usuário rodou manualmente (com aprovação explícita a cada comando, via
+`!`) bindings cruzados entre os dois projetos:
+- `backend-run@observability-hub-prod` ganhou `metadataViewer` +
+  `jobUser` + `dataViewer` em `observability-hub-dev`.
+- `backend-run@observability-hub-dev` ganhou as mesmas três roles em
+  `observability-hub-prod`.
 
-### Descoberta 2: WIF de prod incompatível com `terraform-plan.yml` em PR
-Ao abrir o PR #1 (primeiro PR real deste repositório), o job `Plan (prod)`
-falhou no passo de auth: `"credential is rejected by the attribute
-condition"`. Causa: `infra/terraform/bootstrap/prod` tem
-`attribute_condition = 'assertion.repository == "..." &&
-assertion.ref == "refs/heads/main"'` — só autentica em push direto pra
-`main`, nunca em `pull_request` (roda em `refs/pull/N/merge`). O de dev não
-tem essa restrição de `ref`, por isso `Plan (dev)` sempre passou.
-Decisão (com o usuário): remover o job `Plan (prod)` de `terraform-plan.yml`
-em vez de afrouxar o WIF de prod pra aceitar PRs (trade-off de segurança
-real, mesmo em repo privado). `terraform plan` de prod continua sendo
-revisão manual antes de merges que tocam `infra/terraform/**`. `CLAUDE.md`
-atualizado pra não prometer mais plan de prod automatizado em PR.
-
-### IAM das runtime SAs do backend (aplicado manualmente por fora do Terraform, dev e prod)
-Nenhuma das duas SAs (`backend-run@observability-hub-{dev,prod}`) tinha
-papel de BigQuery. Todo `gcloud add-iam-policy-binding` foi bloqueado pelo
-classificador de auto mode quando tentado pelo assistant — rodados pelo
-usuário via `!` na sessão, com aprovação explícita a cada comando:
-- `roles/bigquery.metadataViewer` — não foi suficiente sozinho.
-- `roles/bigquery.jobUser` — necessário porque `discover_regions()` roda uma
-  query real (`INFORMATION_SCHEMA.SCHEMATA`), que exige `bigquery.jobs.create`,
-  não coberto por `metadataViewer`.
-Confirmado nos dois ambientes depois dos dois papéis:
-- dev: `GET /api/v1/projects/observability-hub-dev/validate` →
-  `200 {"accessible":true,"total_datasets":3}`.
-- prod: `GET /api/v1/projects/observability-hub-prod/validate` →
-  `200 {"accessible":true,"total_datasets":0}` (0 é esperado — não há
-  datasets mock em prod, só em dev).
-**Nota:** esses bindings foram aplicados via `gcloud` direto, fora do
-Terraform — não existe um módulo `secret-manager`/IAM dedicado ainda.
-Considerar formalizar em Terraform numa fase futura, se o padrão se repetir
-pra outros domínios (lineage/access vão precisar de Cloud Logging IAM
-similar).
-
-### Commits desta sessão (branch `feature/frontend-cloud-run-deploy`, mergeada em `main` via PR #1)
-- `feat(infra): adiciona Cloud Run do frontend e workflows de deploy` (`b1df46f`)
-- `chore(backend): bump versão pra 0.2.0 e força redeploy em dev` (`64afca6`)
-- `chore: atualiza SESSIONLOG.md com deploy do frontend em dev` (`92b223f`)
-- `fix(ci): remove job Plan (prod) do terraform-plan.yml` (`b8b0e56`)
-- Merge commit `4f76ad3` — PR #1 mergeado em `main`
+Ambas as direções foram confirmadas como **intencionais** pelo usuário
+depois de eu (assistant) sinalizar o trade-off de segurança: dev faz deploy
+automático em qualquer push sem gate de revisão, então a SA de dev agora
+consegue ler dados reais de prod (potencialmente com PII, dado o escopo do
+produto) a partir de qualquer branch nova. Ver "Backlog" — considerar
+revisitar se o risco incomodar mais adiante.
 
 ---
 
-## Decisões importantes tomadas nesta sessão
+## Erros encontrados e resolvidos (Sprint 2)
 
-1. Reaproveitar o módulo `cloud-run` genérico em vez de duplicar em
-   `cloud-run-frontend/` — segue a regra do CLAUDE.md de checar módulo
-   reutilizável antes de duplicar.
-2. `moved` block dentro do próprio módulo (não no environment) — assim
-   qualquer instância futura do módulo herda o remapeamento automaticamente.
-3. CORS em dev inclui `http://localhost:5173` além da URL real do frontend —
-   mantém o Vite dev server local utilizável contra o backend de dev. Em
-   prod, só a URL real do frontend.
-4. `wait-for-terraform` replicado nos workflows de frontend em **dev e prod**
-   (o backend só tinha em prod) — o primeiro push que cria o Cloud Run do
-   frontend via Terraform e adiciona o workflow de deploy no mesmo commit
-   pode disparar os dois em paralelo, mesma corrida que já mordeu o backend
-   em prod uma vez.
-5. IAM da SA de runtime não é gerenciado pelo módulo `cloud-run` (que só cria
-   a SA, sem papéis) — papéis de BigQuery/Logging entram sob demanda,
-   conforme cada domínio precisa, aplicados manualmente por enquanto.
-6. `Plan (prod)` removido de `terraform-plan.yml` em vez de afrouxar o WIF —
-   prioriza a postura de segurança já decidida no bootstrap sobre a
-   conveniência de plan automatizado em PR.
+- **500 em vez de 403 no profiling**: `Forbidden` do BigQuery vazando sem
+  tratamento — corrigido capturando e relançando `ProjectAccessDeniedError`
+  (PR #3).
+- **CORS quebrando só na URL alternativa do Cloud Run**: cada serviço
+  responde em duas URLs válidas simultâneas, só uma estava na allowlist
+  (PR #2).
+- **`TABLESAMPLE SYSTEM` não suportado em views**: profiling de view dava
+  "Failed to fetch" — query builder passou a omitir `TABLESAMPLE` quando
+  `is_view=True` (PR #8).
+- **`sm:max-w-sm` do shadcn vencendo `max-w-[...]` customizado**: duas
+  rodadas (PR #4, #5) pareceram corrigir a largura do modal de profiling
+  sem resolver de fato — causa raiz só foi achada na terceira (PR #6),
+  inspecionando o CSS compilado: a ordem das regras no stylesheet gerado
+  pelo Tailwind v4, não a ordem no `className`, decide o empate de
+  especificidade. Resolvido com `!important` explícito.
+- **Dev ficando defasado de `main` silenciosamente**: deploy automático só
+  dispara em push que toca os paths do workflow — commits direto em `main`
+  (ou merge de branch cortada de um ponto antigo) não disparam redeploy de
+  dev. Aconteceu de novo nesta sprint (PR #10/#11), mesma causa já registrada
+  no encerramento da sessão anterior. Ainda não virou automação — continua
+  sendo descoberto manualmente comparando a tag da imagem rodando contra
+  `git log`.
+- **Binding de IAM cruzado aplicado sem intenção clara**: nesta sessão, o
+  usuário rodou um `add-iam-policy-binding` que dava à SA de prod acesso ao
+  BigQuery de dev — comando idêntico ao exemplo estático hardcoded na spec
+  `catalog.md` (SA de prod, uma role só), não ao `fix` real que a API
+  retornaria (três roles, SA do ambiente que fez a chamada). Esclarecido
+  com o usuário, que confirmou a intenção real (Hub observando o outro
+  ambiente como projeto-alvo) e pediu pra completar com as roles que
+  faltavam nas duas direções.
+- **Prod achado com 0 datasets nas sessões anteriores, agora com 3**:
+  verificado ao vivo nesta sessão (`GET /projects/observability-hub-prod/
+  validate` → `total_datasets: 3`) — a suposição antiga ("0 é esperado, sem
+  mock em prod") não é mais verdade. Não investigado a fundo — só uma
+  correção de estado registrada aqui pra não repropagar a suposição velha.
 
 ---
 
@@ -138,28 +167,26 @@ similar).
    não tem o *nome* da coluna de particionamento — usar
    `COLUMNS.is_partitioning_column`.
 2. `TABLE_STORAGE.storage_last_modified_time` é o campo correto (não
-   `last_modified_time`, `modified_time` nem `last_altered`).
+   `last_modified_time`, `modified_time` nem `last_altered`) — mas ver PR
+   #12 acima: catalog/freshness por tabela não usam mais `TABLE_STORAGE`,
+   só as visões agregadas por projeto ainda dependem disso.
 3. `COLUMN_FIELD_PATHS` é a fonte de `description` de colunas, não `COLUMNS`.
 4. `SelectValue` do shadcn/base-ui precisa de render-prop explícito pro
    label — não deriva automaticamente dos `SelectItem` filhos.
 5. Antes de qualquer afirmação sobre configuração do BigQuery neste projeto,
-   validar ao vivo contra `observability-hub-dev`.
-
----
-
-## Erros corrigidos nesta sessão (para não repetir)
-
-- Comandos `gcloud ... add-iam-policy-binding` (e outras mudanças de IAM) são
-  bloqueados pelo classificador de auto mode quando o assistant tenta
-  rodá-los — sempre passar o comando pronto pro usuário rodar via `!`.
-- Colar dois comandos prefixados com `!` no mesmo bloco só aplica o prefixo
-  no primeiro; o segundo é executado literalmente pelo bash (`!gcloud:
-  command not found`) — sempre um comando `!` por vez.
-- Antes de assumir que um ambiente (dev ou prod) está com o código mais
-  recente só porque `main` está atualizado, checar a tag da imagem
-  (`gcloud run services describe ... --format='value(spec.template.spec.containers[0].image)'`)
-  contra `git log` — deploy automático só dispara em quem tocou os paths do
-  workflow, não em "está tudo commitado".
+   validar ao vivo contra `observability-hub-dev` (ou, quando relevante,
+   `observability-hub-prod` — ver erro do "0 datasets" acima).
+6. Comandos `gcloud ... add-iam-policy-binding` (e outras mudanças de IAM)
+   são bloqueados pelo classificador de auto mode quando o assistant tenta
+   rodá-los — sempre passar o comando pronto pro usuário rodar via `!`, um
+   comando por vez (colar dois comandos com `!` no mesmo bloco só aplica o
+   prefixo no primeiro).
+7. Chromium headless não roda neste sandbox (falta `libnspr4.so`, sem
+   `sudo` disponível) — recorrente em várias sessões (PR #6, #7, #8, #9,
+   #13). Verificação de UI fica limitada a: `tsc`/`vite build`, `biome
+   check`, inspeção do CSS/bundle compilado, e teste da API real que o
+   componente consome. Sempre declarar explicitamente essa limitação em vez
+   de alegar verificação visual que não aconteceu.
 
 ---
 
@@ -167,53 +194,119 @@ similar).
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ imagem atual (0.2.0), CORS liberado
-├── Cloud Run: frontend ✅ https://frontend-46qbggr2oa-uc.a.run.app (200)
+├── Cloud Run: backend ✅ tag 18a9707 (main atual, PR #12+#13 inclusos)
+├── Cloud Run: frontend ✅ tag 18a9707 (main atual)
+│   https://frontend-995219021404.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM backend-run SA: bigquery.metadataViewer + bigquery.jobUser ✅
-│   (aplicados via gcloud direto, fora do Terraform)
-├── Pipeline validado ponta a ponta: frontend → backend → BigQuery
-│   (GET /api/v1/projects/observability-hub-dev/validate → 200, 3 datasets)
+├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer no
+│   próprio projeto (PR #3) + as mesmas três em observability-hub-prod
+│   (esta sessão, cross-project)
+├── IAM backend-run@...-prod: as mesmas três roles em observability-hub-dev
+│   (esta sessão, cross-project — ver "IAM cross-project" acima)
+├── Pipeline validado ponta a ponta: 190 testes backend, ruff limpo, biome+
+│   tsc+vite build limpos, curl direto no Cloud Run confirmando is_native,
+│   volumetria em tempo real e classificação de SLA
 └── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ imagem atual (0.2.0), CORS liberado
-├── Cloud Run: frontend ✅ https://frontend-4j3il2grfq-uc.a.run.app (200)
+├── Cloud Run: backend ✅ tag 5aa7179 (merge commit do PR #13 — main atual)
+├── Cloud Run: frontend ✅ tag 5aa7179
+│   https://frontend-906161007412.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM backend-run SA: bigquery.metadataViewer + bigquery.jobUser ✅
-│   (aplicados via gcloud direto, fora do Terraform)
-├── Pipeline validado ponta a ponta: frontend → backend → BigQuery
-│   (GET /api/v1/projects/observability-hub-prod/validate → 200, 0 datasets
-│   — esperado, sem dados mock em prod)
+├── IAM: ver bloco de dev acima — simétrico nas duas direções
+├── total_datasets: 3 (confirmado ao vivo nesta sessão — ver "Erros
+│   encontrados", suposição antiga de "0 datasets" está desatualizada)
 └── WIF: attribute_condition restrito a refs/heads/main (só push direto,
-    nunca PR) — ver "Descoberta 2" acima
+    nunca PR) — plan de prod continua revisão manual
 
 GitHub Secrets
 ├── WIF_PROVIDER_DEV ✅
 ├── WIF_SA_DEV ✅
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
+
+Dev e prod estão em sincronia — mesmo código (commit 5aa7179 na linha de
+main), ambos os workflows de deploy verdes nos dois ambientes.
 ```
 
 ---
 
-## Próximas fases
+## PRs mergeados na Sprint 2
+
+| PR | Branch | Resumo |
+|---|---|---|
+| #2 | `fix/cors-frontend-alt-url` | CORS pra segunda URL do Cloud Run |
+| #3 | `fix/profiling-forbidden-403` | 403 limpo no profiling (Forbidden → ProjectAccessDeniedError) |
+| #4 | `fix/profiling-modal-scroll` | Scroll no modal de profiling e na área de SQL |
+| #5 | `fix/profiling-modal-layout` | Modal mais largo, SQL colapsável, KPIs com card |
+| #6 | `fix/profiling-modal-layout-v2` | Largura real do modal (causa raiz: especificidade do Tailwind v4) |
+| #7 | `fix/ux-improvements` | Tabela sem scroll, tipos lógicos, seletor de projeto na topbar, login |
+| #8 | `fix/profiling-view-support` | Profiling em views, contagem separada tabelas/views |
+| #9 | `feat/profiling-schema-preview` | Schema da tabela no modal antes de estimar/executar |
+| #10 | `chore/frontend-dev-redeploy` | Bump de versão pra forçar redeploy em dev |
+| #11 | `chore/backend-dev-redeploy` | Bump de versão pra forçar redeploy em dev |
+| #12 | `feat/realtime-metadata` | `client.get_table()` pra volumetria/freshness por tabela (esta sessão) |
+| #13 | `feature/native-project-badge` | Badge nativo/externo na topbar (esta sessão) |
+
+(PR #1, deploy do frontend no Cloud Run, foi mergeado na sessão anterior e
+já estava documentado no encerramento daquela sessão.)
+
+---
+
+## Backlog / dívida técnica identificada
 
 ```
-Fase 3 — Discovery (lineage, PII, mapa de acesso)  [pendente]
-Fase 4 — FinOps                                    [pendente]
+Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 
-Itens soltos, não bloqueantes, pra considerar quando aparecer necessidade:
-- Formalizar IAM (bigquery.metadataViewer/jobUser) em Terraform em vez de
-  gcloud manual, se mais domínios precisarem de papéis (lineage/access vão
-  precisar de Cloud Logging).
-- Revisitar a restrição de WIF de prod (refs/heads/main) se algum dia for
-  necessário automatizar terraform plan de prod em PR.
-- Datasets com apenas views não exibem indicador de freshness na sidebar
-  (bolinha de status). Views não têm modified_time de dados, só de
-  definição. Melhoria futura: exibir ícone neutro (ex: traço ou ícone de
-  view) em vez de ausência de bolinha para datasets sem tabelas físicas.
+1. Datasets com apenas views não exibem indicador de freshness na sidebar
+   (bolinha de status) — views não têm modified_time de dados, só de
+   definição. Melhoria: ícone neutro em vez de ausência de bolinha.
+   [registrado desde antes desta sprint, ainda pendente]
+
+2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer, incluindo os
+   bindings cross-project desta sessão) em Terraform em vez de gcloud
+   manual — mais urgente agora que existem 6 bindings manuais por projeto
+   (3 roles x 2 SAs) em vez de 2. Fica mais fácil de perder rastro sem IaC.
+
+3. Senha de login hardcoded no frontend (`AuthGate.tsx`, "senha123",
+   client-side, sessionStorage) — não é autenticação de verdade, qualquer
+   um que leia o bundle JS vê a senha. Aceitável como paywall informal de
+   MVP, mas vale substituir antes de expor o Hub além do time interno.
+
+4. Acesso cross-project entre dev e prod (IAM desta sessão): dev faz deploy
+   automático em qualquer push sem review, e agora a SA de dev lê dados
+   reais de prod. Risco aceito conscientemente pelo usuário nesta sessão —
+   revisitar se algum dia incomodar (ex: exigir review antes de deploy em
+   dev, ou restringir o binding).
+
+5. Revisitar a restrição de WIF de prod (refs/heads/main) se algum dia for
+   necessário automatizar terraform plan de prod em PR.
+
+6. Bundle do frontend passou de 500kB no build (524.80 kB / gzip 166kB) —
+   aviso do Vite sobre code-splitting. Não é bloqueante no tamanho atual,
+   mas cresce a cada domínio novo (lineage/PII/access vêm na Sprint 3).
+
+7. Actions do CI (`actions/checkout@v4`, `google-github-actions/auth@v2`,
+   `google-github-actions/setup-gcloud@v2`) alvo de Node.js 20, GitHub já
+   forçando pra Node 24 com aviso de depreciação — sem ação necessária
+   agora, mas vale atualizar as actions antes que vire erro.
 ```
+
+---
+
+## Próxima sprint
+
+```
+Sprint 3 — Discovery (Fase 3 do CLAUDE.md): lineage, PII, mapa de acesso
+  [não iniciada — nenhum código, spec ou branch criada ainda]
+
+Fase 4 — FinOps [pendente, depois da Sprint 3]
+```
+
+Antes de começar: seguir o checklist do contexto "Backend" do CLAUDE.md —
+ler/criar a spec em `docs/specs/lineage.md` (ou `pii.md`/`access.md`,
+conforme o que for priorizado primeiro) antes de implementar qualquer
+domínio novo. Nenhuma dessas specs existe ainda em `docs/specs/`.
 
 ---
 
@@ -221,7 +314,7 @@ Itens soltos, não bloqueantes, pra considerar quando aparecer necessidade:
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. Confirma próximo passo com o usuário antes de executar
-4. Trocar pra `main` e `git pull` — a branch local ainda pode estar em
-   `feature/frontend-cloud-run-deploy` (já mergeada via PR #1, pode apagar
-   depois de confirmar com o usuário).
+3. Confirma com o usuário qual dos três domínios da Sprint 3 (lineage, PII,
+   mapa de acesso) entra primeiro, antes de escrever qualquer spec ou código
+4. Branch local já em `main`, sincronizada com `origin/main` (commit
+   `5aa7179`) — sem branch de feature pendente desta sprint
