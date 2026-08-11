@@ -44,16 +44,26 @@ def handle_project_access_denied(request: Request, exc: ProjectAccessDeniedError
     # hardcoded — client.project reflete o projeto ADC do runtime atual.
     runtime_project = get_client().project
     sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    # As três roles cobrem os dois modos de acesso que os domínios usam:
+    # metadataViewer + jobUser dão conta de INFORMATION_SCHEMA (catalog,
+    # freshness, discover_regions); dataViewer é o que profiling precisa a
+    # mais pra rodar query real (mesmo um dry run) contra dados de tabela —
+    # nenhuma das duas primeiras cobre isso. A exceção não carrega qual
+    # permissão faltou especificamente, então sugerimos as três de uma vez;
+    # add-iam-policy-binding é idempotente, rodar as três é seguro mesmo
+    # quando só uma estava faltando.
+    roles = ["bigquery.metadataViewer", "bigquery.jobUser", "bigquery.dataViewer"]
     return JSONResponse(
         status_code=403,
         content={
             "error": "access_denied",
             "message": "A service account do Hub não tem acesso a este projeto.",
-            "fix": (
+            "fix": [
                 f"gcloud projects add-iam-policy-binding {exc.project_id} "
                 f"--member='serviceAccount:{sa_email}' "
-                "--role='roles/bigquery.metadataViewer'"
-            ),
+                f"--role='roles/{role}'"
+                for role in roles
+            ],
         },
     )
 

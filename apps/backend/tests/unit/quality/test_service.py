@@ -212,7 +212,7 @@ def test_estimate_profiling_returns_dry_run_bytes_and_cost(monkeypatch):
             {"column_name": "lead_status", "data_type": "STRING", "is_nullable": True}
         ],
     )
-    monkeypatch.setattr(service.repository, "dry_run", lambda client, sql: 849813)
+    monkeypatch.setattr(service.repository, "dry_run", lambda client, project_id, sql: 849813)
 
     result = service.estimate_profiling(
         client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
@@ -303,7 +303,9 @@ def test_run_profiling_builds_full_response(monkeypatch):
         "revenue__stddev": 50.0,
     }
     monkeypatch.setattr(
-        service.repository, "execute_main_query", lambda client, sql, timeout: main_result
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, timeout: main_result,
     )
     monkeypatch.setattr(
         service.repository,
@@ -313,7 +315,7 @@ def test_run_profiling_builds_full_response(monkeypatch):
     monkeypatch.setattr(
         service.repository,
         "execute_top_n_query",
-        lambda client, sql, timeout: [
+        lambda client, project_id, sql, timeout: [
             {"value": "lead", "count": 4200},
             {"value": "qualificado", "count": 3100},
             {"value": "proposta", "count": 1800},
@@ -368,7 +370,9 @@ def test_run_profiling_zero_rows_has_zeroed_metrics_without_error(monkeypatch):
         "revenue__stddev": None,
     }
     monkeypatch.setattr(
-        service.repository, "execute_main_query", lambda client, sql, timeout: main_result
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, timeout: main_result,
     )
     monkeypatch.setattr(
         service.repository,
@@ -408,14 +412,18 @@ def test_run_profiling_all_null_column_is_critical(monkeypatch):
         "middle_name__max": None,
     }
     monkeypatch.setattr(
-        service.repository, "execute_main_query", lambda client, sql, timeout: main_result
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, timeout: main_result,
     )
     monkeypatch.setattr(
         service.repository,
         "get_total_table_rows",
         lambda client, project_id, dataset_id, table_id, location: 1000,
     )
-    monkeypatch.setattr(service.repository, "execute_top_n_query", lambda client, sql, timeout: [])
+    monkeypatch.setattr(
+        service.repository, "execute_top_n_query", lambda client, project_id, sql, timeout: []
+    )
 
     result = service.run_profiling(
         client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
@@ -446,14 +454,18 @@ def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
         "lead_status__max": "venda",
     }
     monkeypatch.setattr(
-        service.repository, "execute_main_query", lambda client, sql, timeout: main_result
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, timeout: main_result,
     )
     monkeypatch.setattr(
         service.repository,
         "get_total_table_rows",
         lambda client, project_id, dataset_id, table_id, location: 100,
     )
-    monkeypatch.setattr(service.repository, "execute_top_n_query", lambda client, sql, timeout: [])
+    monkeypatch.setattr(
+        service.repository, "execute_top_n_query", lambda client, project_id, sql, timeout: []
+    )
 
     result = service.run_profiling(
         client,
@@ -504,7 +516,7 @@ def test_get_null_distribution_builds_series(monkeypatch):
     monkeypatch.setattr(
         service.repository,
         "execute_null_distribution_query",
-        lambda client, sql, timeout: [
+        lambda client, project_id, sql, timeout: [
             {"period": "2026-07-01", "null_count": 0, "total_rows": 450},
             {"period": "2026-07-02", "null_count": 12, "total_rows": 430},
         ],
@@ -564,7 +576,7 @@ def test_get_null_distribution_handles_zero_total_rows_period(monkeypatch):
     monkeypatch.setattr(
         service.repository,
         "execute_null_distribution_query",
-        lambda client, sql, timeout: [
+        lambda client, project_id, sql, timeout: [
             {"period": "2026-07-01", "null_count": 0, "total_rows": 0},
         ],
     )

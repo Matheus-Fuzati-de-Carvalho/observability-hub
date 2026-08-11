@@ -3,6 +3,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+from google.api_core.exceptions import Forbidden
+
+from observability_hub.core.exceptions import ProjectAccessDeniedError
 from observability_hub.domains.quality import repository
 
 
@@ -73,10 +77,20 @@ def test_dry_run_uses_dry_run_job_config_and_returns_bytes():
     client = MagicMock()
     client.query.side_effect = fake_query
 
-    result = repository.dry_run(client, "SELECT 1")
+    result = repository.dry_run(client, "proj", "SELECT 1")
 
     assert result == 849813
     assert captured["job_config"].dry_run is True
+
+
+def test_dry_run_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.dry_run(client, "proj", "SELECT 1")
+
+    assert exc_info.value.project_id == "proj"
 
 
 def test_execute_main_query_converts_row_values_to_jsonable_scalars():
@@ -90,10 +104,20 @@ def test_execute_main_query_converts_row_values_to_jsonable_scalars():
     client = MagicMock()
     client.query.return_value.result.return_value = [row]
 
-    result = repository.execute_main_query(client, "SELECT ...", timeout=60.0)
+    result = repository.execute_main_query(client, "proj", "SELECT ...", timeout=60.0)
 
     assert result["_total_sampled_rows"] == 10000
     assert result["signup_date__min"] == "2026-01-01"
+
+
+def test_execute_main_query_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.execute_main_query(client, "proj", "SELECT ...", timeout=60.0)
+
+    assert exc_info.value.project_id == "proj"
 
 
 def test_execute_top_n_query_returns_value_and_count():
@@ -101,9 +125,19 @@ def test_execute_top_n_query_returns_value_and_count():
     client = MagicMock()
     client.query.return_value.result.return_value = rows
 
-    result = repository.execute_top_n_query(client, "SELECT ...", timeout=60.0)
+    result = repository.execute_top_n_query(client, "proj", "SELECT ...", timeout=60.0)
 
     assert result == [{"value": "lead", "count": 4200}, {"value": "qualificado", "count": 3100}]
+
+
+def test_execute_top_n_query_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.execute_top_n_query(client, "proj", "SELECT ...", timeout=60.0)
+
+    assert exc_info.value.project_id == "proj"
 
 
 def test_execute_null_distribution_query_returns_period_null_count_total_rows():
@@ -111,6 +145,16 @@ def test_execute_null_distribution_query_returns_period_null_count_total_rows():
     client = MagicMock()
     client.query.return_value.result.return_value = rows
 
-    result = repository.execute_null_distribution_query(client, "SELECT ...", timeout=60.0)
+    result = repository.execute_null_distribution_query(client, "proj", "SELECT ...", timeout=60.0)
 
     assert result == [{"period": "2026-07-01", "null_count": 0, "total_rows": 450}]
+
+
+def test_execute_null_distribution_query_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.execute_null_distribution_query(client, "proj", "SELECT ...", timeout=60.0)
+
+    assert exc_info.value.project_id == "proj"

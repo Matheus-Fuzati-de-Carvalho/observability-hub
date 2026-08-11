@@ -6,7 +6,10 @@ vê SQL nem objetos do client além do que estas funções retornam.
 import datetime as dt
 from decimal import Decimal
 
+from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
+
+from observability_hub.core.exceptions import ProjectAccessDeniedError
 
 # Tipos de coluna aceitos como "coluna de data" para filtro temporal e
 # null-distribution — os únicos com os quais DATE_SUB/DATE_TRUNC/
@@ -80,37 +83,51 @@ def get_total_table_rows(
     return rows[0].total_rows if rows else None
 
 
-def dry_run(client: bigquery.Client, sql: str) -> int:
+def dry_run(client: bigquery.Client, project_id: str, sql: str) -> int:
     """Bytes que a query processaria, sem executar de fato
     (QueryJobConfig(dry_run=True) — a spec exige isso pro /estimate)."""
     job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
-    job = client.query(sql, job_config=job_config)
+    try:
+        job = client.query(sql, job_config=job_config)
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
     return job.total_bytes_processed
 
 
-def execute_main_query(client: bigquery.Client, sql: str, timeout: float) -> dict:
+def execute_main_query(client: bigquery.Client, project_id: str, sql: str, timeout: float) -> dict:
     """Query principal é sempre uma única linha agregada — mesmo tabela com
     0 linhas retorna 1 linha com contagens zeradas (COUNT(*) de nada é 0,
     não "sem linha")."""
-    rows = list(client.query(sql).result(timeout=timeout))
+    try:
+        rows = list(client.query(sql).result(timeout=timeout))
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
     row = rows[0]
     return {key: _to_jsonable_scalar(value) for key, value in row.items()}
 
 
-def execute_top_n_query(client: bigquery.Client, sql: str, timeout: float) -> list[dict]:
-    rows = client.query(sql).result(timeout=timeout)
-    return [{"value": _to_jsonable_scalar(row.value), "count": row.count} for row in rows]
+def execute_top_n_query(
+    client: bigquery.Client, project_id: str, sql: str, timeout: float
+) -> list[dict]:
+    try:
+        rows = client.query(sql).result(timeout=timeout)
+        return [{"value": _to_jsonable_scalar(row.value), "count": row.count} for row in rows]
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
 
 
 def execute_null_distribution_query(
-    client: bigquery.Client, sql: str, timeout: float
+    client: bigquery.Client, project_id: str, sql: str, timeout: float
 ) -> list[dict]:
-    rows = client.query(sql).result(timeout=timeout)
-    return [
-        {
-            "period": _to_jsonable_scalar(row.period),
-            "null_count": row.null_count,
-            "total_rows": row.total_rows,
-        }
-        for row in rows
-    ]
+    try:
+        rows = client.query(sql).result(timeout=timeout)
+        return [
+            {
+                "period": _to_jsonable_scalar(row.period),
+                "null_count": row.null_count,
+                "total_rows": row.total_rows,
+            }
+            for row in rows
+        ]
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
