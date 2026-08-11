@@ -4,12 +4,22 @@ from unittest.mock import MagicMock
 import pytest
 from google.api_core.exceptions import Forbidden, NotFound
 
-from observability_hub.core.bigquery import discover_regions, resolve_dataset_region
+from observability_hub.core import bigquery as bigquery_module
+from observability_hub.core.bigquery import (
+    discover_regions,
+    get_table_cached,
+    get_tables_metadata,
+    resolve_dataset_region,
+)
 from observability_hub.core.exceptions import (
     DatasetNotFoundError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
 )
+
+# Cache limpo entre testes por tests/conftest.py::_clear_bigquery_table_cache
+# (autouse) — necessário porque o cache é keyed só por table_ref, não por
+# client, e vários testes reusam os mesmos table_refs.
 
 
 def _row(**kwargs):
@@ -91,3 +101,69 @@ def test_resolve_dataset_region_raises_when_not_found_anywhere():
 
     with pytest.raises(DatasetNotFoundError):
         resolve_dataset_region(client, "proj", "GHOST", ["US", "EU"])
+
+
+def test_get_table_cached_calls_get_table_once_and_reuses_cache():
+    client = MagicMock()
+    client.get_table.return_value = SimpleNamespace(num_rows=10)
+
+    first = get_table_cached(client, "proj.RAW.events")
+    second = get_table_cached(client, "proj.RAW.events")
+
+    assert first is second
+    client.get_table.assert_called_once_with("proj.RAW.events")
+
+
+def test_get_table_cached_refetches_after_ttl_expires(monkeypatch):
+    client = MagicMock()
+    client.get_table.side_effect = [SimpleNamespace(num_rows=10), SimpleNamespace(num_rows=20)]
+    fake_now = [1000.0]
+    monkeypatch.setattr(bigquery_module.time, "monotonic", lambda: fake_now[0])
+
+    first = get_table_cached(client, "proj.RAW.events")
+    fake_now[0] += bigquery_module._TABLE_CACHE_TTL_SECONDS + 1
+    second = get_table_cached(client, "proj.RAW.events")
+
+    assert first.num_rows == 10
+    assert second.num_rows == 20
+    assert client.get_table.call_count == 2
+
+
+def test_get_tables_metadata_returns_empty_dict_for_empty_input():
+    client = MagicMock()
+
+    result = get_tables_metadata(client, [])
+
+    assert result == {}
+    client.get_table.assert_not_called()
+
+
+def test_get_tables_metadata_fetches_each_ref_and_keys_result_by_ref():
+    client = MagicMock()
+    tables_by_ref = {
+        "proj.RAW.a": SimpleNamespace(num_rows=1),
+        "proj.RAW.b": SimpleNamespace(num_rows=2),
+    }
+    client.get_table.side_effect = lambda ref: tables_by_ref[ref]
+
+    result = get_tables_metadata(client, ["proj.RAW.a", "proj.RAW.b"])
+
+    assert result["proj.RAW.a"].num_rows == 1
+    assert result["proj.RAW.b"].num_rows == 2
+    assert client.get_table.call_count == 2
+
+
+def test_get_tables_metadata_maps_missing_table_to_none_instead_of_raising():
+    client = MagicMock()
+
+    def fake_get_table(ref):
+        if ref == "proj.RAW.ghost":
+            raise NotFound("dropped mid-request")
+        return SimpleNamespace(num_rows=1)
+
+    client.get_table.side_effect = fake_get_table
+
+    result = get_tables_metadata(client, ["proj.RAW.a", "proj.RAW.ghost"])
+
+    assert result["proj.RAW.a"].num_rows == 1
+    assert result["proj.RAW.ghost"] is None

@@ -5,10 +5,14 @@ client do BigQuery além do que essas funções retornam.
 
 from google.cloud import bigquery
 
-# Re-exportado para manter repository.resolve_dataset_region (usado por
-# service.py e pelos testes existentes) — implementação mora em core/bigquery
-# porque é compartilhada entre domínios (ver core/exceptions.py).
-from observability_hub.core.bigquery import resolve_dataset_region  # noqa: F401
+# resolve_dataset_region é re-exportado para manter repository.resolve_dataset_region
+# (usado por service.py e pelos testes existentes) — implementação mora em
+# core/bigquery porque é compartilhada entre domínios (ver core/exceptions.py).
+from observability_hub.core.bigquery import (
+    get_table_cached,
+    get_tables_metadata,
+    resolve_dataset_region,  # noqa: F401
+)
 from observability_hub.core.exceptions import TableNotFoundError
 
 # INFORMATION_SCHEMA.TABLES usa "BASE TABLE" e "MATERIALIZED VIEW" (com
@@ -72,17 +76,23 @@ def get_datasets_summary(
     return datasets
 
 
-def _row_to_table_dict(row, location: str) -> dict:
+def _row_to_table_dict(row, location: str, bq_table: bigquery.Table | None) -> dict:
+    """bq_table vem de client.get_table() (core.bigquery.get_tables_metadata) —
+    num_rows/num_bytes/modified em tempo real, sem o lag de até 24h de
+    TABLE_STORAGE. None quando a tabela sumiu entre a query de listagem e a
+    chamada da API (race) ou quando client.get_table() não retorna o campo
+    (ex: VIEW não tem num_rows/num_bytes)."""
     clustering_columns = list(row.clustering_columns or [])
     partition_column = row.partition_column
+    size_bytes = bq_table.num_bytes if bq_table is not None else None
     return {
         "table_id": row.table_name,
         "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
         "creation_time": row.creation_time,
-        "last_modified_time": row.last_modified_time,
-        "size_bytes": row.size_bytes,
-        "size_gb": _bytes_to_gb(row.size_bytes),
-        "row_count": row.row_count,
+        "last_modified_time": bq_table.modified if bq_table is not None else None,
+        "size_bytes": size_bytes,
+        "size_gb": _bytes_to_gb(size_bytes),
+        "row_count": bq_table.num_rows if bq_table is not None else None,
         "column_count": row.column_count,
         "is_partitioned": partition_column is not None,
         "partition_column": partition_column,
@@ -111,7 +121,14 @@ def get_tables_summary(
     (só expõe pares chave/valor como require_partition_filter, sem o nome da
     coluna). COLUMNS.is_partitioning_column resolve isso de forma confiável
     em qualquer região, e a tabela já estava sendo consultada para as
-    colunas de clustering."""
+    colunas de clustering.
+
+    num_rows/size_bytes/last_modified_time vêm de client.get_table() (uma
+    chamada por tabela, em paralelo, cacheada 5min em core.bigquery) em vez
+    de INFORMATION_SCHEMA.TABLE_STORAGE — TABLE_STORAGE tem lag de até 24h
+    após criação/atualização das tabelas, client.get_table() é tempo real.
+    Como size_bytes não vem mais do SQL, o ORDER BY size_bytes DESC NULLS
+    LAST da spec é replicado em Python depois do merge."""
     query_params = [bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id)]
     where_extra = ""
     if table_type is not None:
@@ -141,24 +158,29 @@ def get_tables_summary(
           t.table_name,
           t.table_type,
           t.creation_time,
-          ts.storage_last_modified_time                     AS last_modified_time,
-          ts.total_rows                                    AS row_count,
-          ts.total_logical_bytes                            AS size_bytes,
           ANY_VALUE(COALESCE(ca.column_count, 0))           AS column_count,
           ANY_VALUE(ca.partition_column)                    AS partition_column,
           ANY_VALUE(COALESCE(ca.clustering_columns, []))    AS clustering_columns
         FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES` t
-        LEFT JOIN `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLE_STORAGE` ts
-          ON ts.table_name = t.table_name AND ts.table_schema = t.table_schema
         LEFT JOIN columns_agg ca
           ON ca.table_name = t.table_name AND ca.table_schema = t.table_schema
         WHERE t.table_schema = @dataset_id{where_extra}
-        GROUP BY 1, 2, 3, 4, 5, 6
-        ORDER BY size_bytes DESC NULLS LAST
+        GROUP BY 1, 2, 3
     """
     job_config = bigquery.QueryJobConfig(query_parameters=query_params)
-    rows = client.query(query, job_config=job_config).result()
-    return [_row_to_table_dict(row, location) for row in rows]
+    rows = list(client.query(query, job_config=job_config).result())
+
+    table_refs = [f"{project_id}.{dataset_id}.{row.table_name}" for row in rows]
+    metadata_by_ref = get_tables_metadata(client, table_refs)
+
+    tables = [
+        _row_to_table_dict(
+            row, location, metadata_by_ref.get(f"{project_id}.{dataset_id}.{row.table_name}")
+        )
+        for row in rows
+    ]
+    tables.sort(key=lambda t: (t["size_bytes"] is None, -(t["size_bytes"] or 0)))
+    return tables
 
 
 def get_table_columns(
@@ -208,14 +230,17 @@ def get_table_detail(
     colunas completas + labels/description. labels/description vêm de
     client.get_table() (API tipada do BigQuery) em vez de parsear o literal
     SQL bruto de INFORMATION_SCHEMA.TABLE_OPTIONS — mesma fonte de dado
-    (metadados, custo $0), leitura muito mais confiável."""
+    (metadados, custo $0), leitura muito mais confiável. Usa o mesmo cache
+    TTL de get_tables_summary (core.bigquery.get_table_cached) — como
+    get_tables_summary acabou de rodar para a mesma tabela, esta chamada é
+    um cache hit, sem round-trip extra à API."""
     tables = get_tables_summary(client, project_id, dataset_id, location)
     matching = next((t for t in tables if t["table_id"] == table_id), None)
     if matching is None:
         raise TableNotFoundError(project_id, dataset_id, table_id)
 
     columns = get_table_columns(client, project_id, dataset_id, table_id, location)
-    bq_table = client.get_table(f"{project_id}.{dataset_id}.{table_id}")
+    bq_table = get_table_cached(client, f"{project_id}.{dataset_id}.{table_id}")
 
     return {
         **matching,

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from google.api_core.exceptions import NotFound
 
 from observability_hub.core.exceptions import TableNotFoundError
 from observability_hub.domains.catalog import repository
@@ -70,15 +71,13 @@ def test_row_to_table_dict_derives_partitioned_and_clustered():
         table_name="events",
         table_type="BASE TABLE",
         creation_time="2026-06-08T18:38:40Z",
-        last_modified_time="2026-06-08T18:38:40Z",
-        row_count=10000,
-        size_bytes=576920,
         column_count=8,
         partition_column="_PARTITIONTIME",
         clustering_columns=["event_name", "user_id"],
     )
+    bq_table = SimpleNamespace(num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z")
 
-    result = repository._row_to_table_dict(row, "US")
+    result = repository._row_to_table_dict(row, "US", bq_table)
 
     assert result["table_id"] == "events"
     assert result["table_type"] == "TABLE"
@@ -86,6 +85,7 @@ def test_row_to_table_dict_derives_partitioned_and_clustered():
     assert result["is_clustered"] is True
     assert result["clustering_columns"] == ["event_name", "user_id"]
     assert result["size_gb"] == round(576920 / 1_000_000_000, 4)
+    assert result["row_count"] == 10000
 
 
 def test_row_to_table_dict_handles_unpartitioned_unclustered_table():
@@ -93,20 +93,37 @@ def test_row_to_table_dict_handles_unpartitioned_unclustered_table():
         table_name="events_view",
         table_type="VIEW",
         creation_time="2026-06-08T18:38:40Z",
-        last_modified_time="2026-06-08T18:38:40Z",
-        row_count=None,
-        size_bytes=None,
         column_count=5,
         partition_column=None,
         clustering_columns=[],
     )
+    bq_table = SimpleNamespace(num_rows=None, num_bytes=None, modified="2026-06-08T18:38:40Z")
 
-    result = repository._row_to_table_dict(row, "US")
+    result = repository._row_to_table_dict(row, "US", bq_table)
 
     assert result["table_type"] == "VIEW"
     assert result["is_partitioned"] is False
     assert result["is_clustered"] is False
     assert result["size_gb"] is None
+
+
+def test_row_to_table_dict_handles_missing_metadata():
+    """bq_table é None quando a tabela sumiu entre a query de listagem e a
+    chamada de client.get_table() (race) — não deve levantar exceção."""
+    row = _row(
+        table_name="ghost",
+        table_type="BASE TABLE",
+        creation_time="2026-06-08T18:38:40Z",
+        column_count=1,
+        partition_column=None,
+        clustering_columns=[],
+    )
+
+    result = repository._row_to_table_dict(row, "US", None)
+
+    assert result["row_count"] is None
+    assert result["size_bytes"] is None
+    assert result["last_modified_time"] is None
 
 
 def test_get_table_columns_maps_is_nullable_yes_no():
@@ -172,20 +189,68 @@ def test_get_tables_summary_row_to_dict_reads_partition_column_from_columns_agg(
             table_name="ga4_events",
             table_type="BASE TABLE",
             creation_time="2026-06-08T18:38:40Z",
-            last_modified_time="2026-06-08T18:38:40Z",
-            row_count=10000,
-            size_bytes=576920,
             column_count=8,
             partition_column="event_date",
             clustering_columns=["event_name"],
         )
     ]
     client = _client_returning([rows])
+    client.get_table.return_value = SimpleNamespace(
+        num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z"
+    )
 
     result = repository.get_tables_summary(client, "proj", "RAW", "US")
 
     assert result[0]["partition_column"] == "event_date"
     assert result[0]["is_partitioned"] is True
+    assert result[0]["row_count"] == 10000
+    client.get_table.assert_called_once_with("proj.RAW.ga4_events")
+
+
+def test_get_tables_summary_fetches_metadata_via_get_table_and_sorts_by_size_desc():
+    rows = [
+        _row(
+            table_name="small",
+            table_type="BASE TABLE",
+            creation_time="2026-06-08T18:38:40Z",
+            column_count=1,
+            partition_column=None,
+            clustering_columns=[],
+        ),
+        _row(
+            table_name="big",
+            table_type="BASE TABLE",
+            creation_time="2026-06-08T18:38:40Z",
+            column_count=1,
+            partition_column=None,
+            clustering_columns=[],
+        ),
+        _row(
+            table_name="no_metadata",
+            table_type="VIEW",
+            creation_time="2026-06-08T18:38:40Z",
+            column_count=1,
+            partition_column=None,
+            clustering_columns=[],
+        ),
+    ]
+    client = _client_returning([rows])
+    bq_tables = {
+        "proj.RAW.small": SimpleNamespace(num_rows=1, num_bytes=100, modified=None),
+        "proj.RAW.big": SimpleNamespace(num_rows=2, num_bytes=9000, modified=None),
+    }
+
+    def fake_get_table(ref):
+        if ref not in bq_tables:
+            raise NotFound(ref)
+        return bq_tables[ref]
+
+    client.get_table.side_effect = fake_get_table
+
+    result = repository.get_tables_summary(client, "proj", "RAW", "US")
+
+    assert [t["table_id"] for t in result] == ["big", "small", "no_metadata"]
+    assert result[2]["size_bytes"] is None
 
 
 def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeypatch):

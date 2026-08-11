@@ -1,9 +1,9 @@
 # Spec — Domínio: Freshness com SLA
 
-**Versão:** 1.1 (região automática)
+**Versão:** 1.2 (freshness por tabela em tempo real via client.get_table())
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
-**Última atualização:** 2026-08-05
+**Última atualização:** 2026-08-11
 
 ---
 
@@ -96,6 +96,12 @@ Freshness detalhado de todas as tabelas de um dataset.
 
 A região é resolvida previamente via `discover_regions()` do core.
 
+### Visão de projeto — `GET /freshness/{project_id}`
+
+Continua lendo de `TABLE_STORAGE` (lag de até 24h, mas uma única query
+agregada por região em vez de uma chamada de API por tabela do projeto
+inteiro):
+
 ```sql
 SELECT
   table_schema                                           AS dataset_id,
@@ -120,8 +126,24 @@ SELECT
     ELSE 'stale'
   END                                                    AS sla_status
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE`
-WHERE table_schema = @dataset_id   -- omitir para visão do projeto inteiro
 ORDER BY hours_since_update DESC
+```
+Custo: $0
+
+### Visão de dataset — `GET /freshness/{project_id}/datasets/{dataset_id}`
+
+Lê a lista de tabelas via SQL e `last_modified_time`/`size_bytes`/`row_count`
+via `client.get_table()` (tempo real, sem o lag de `TABLE_STORAGE`) — uma
+chamada por tabela, em paralelo (`ThreadPoolExecutor`) e cacheada em memória
+por 5min (`core/bigquery.py::get_tables_metadata`, compartilhada com o
+domínio catalog). `sla_status`/`hours_since_update` são calculados em Python
+a partir de `Table.modified`, com a mesma janela de SLA e o mesmo guard para
+`modified is None` que a query acima tem para `last_modified_time IS NULL`.
+
+```sql
+SELECT table_name AS table_id, table_type
+FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLES`
+WHERE table_schema = @dataset_id
 ```
 Custo: $0
 

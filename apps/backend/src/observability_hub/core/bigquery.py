@@ -6,6 +6,8 @@ entre regiões usa threads, não asyncio — ver CLAUDE.md, convenção de
 backend, e o desvio documentado na spec docs/specs/catalog.md.
 """
 
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -19,6 +21,54 @@ from observability_hub.core.exceptions import (
     ProjectAccessDeniedError,
     ProjectNotFoundError,
 )
+
+# client.get_table() é uma chamada REST em tempo real (sem o lag de até 24h
+# de INFORMATION_SCHEMA.TABLE_STORAGE), mas é uma chamada por tabela — o
+# cache TTL evita bater a API a cada refresh de tela nos domínios que
+# renderizam listas de tabelas (catalog, freshness).
+_TABLE_CACHE_TTL_SECONDS = 300
+_table_cache: dict[str, tuple[float, bigquery.Table]] = {}
+_table_cache_lock = threading.Lock()
+
+
+def get_table_cached(client: bigquery.Client, table_ref: str) -> bigquery.Table:
+    """client.get_table() com cache TTL de 5min por tabela (table_ref no
+    formato "project.dataset.table"). Levanta NotFound se a tabela não
+    existir mais — quem chama decide como tratar (ver get_tables_metadata)."""
+    now = time.monotonic()
+    with _table_cache_lock:
+        cached = _table_cache.get(table_ref)
+    if cached is not None and now - cached[0] < _TABLE_CACHE_TTL_SECONDS:
+        return cached[1]
+    bq_table = client.get_table(table_ref)
+    with _table_cache_lock:
+        _table_cache[table_ref] = (now, bq_table)
+    return bq_table
+
+
+def get_tables_metadata(
+    client: bigquery.Client,
+    table_refs: list[str],
+    max_workers: int = 8,
+) -> dict[str, bigquery.Table | None]:
+    """Busca client.get_table() para várias tabelas em paralelo (thread pool,
+    mesma técnica de discover_regions). Usado por catalog e freshness para
+    ler num_rows/num_bytes/modified em tempo real em vez de
+    INFORMATION_SCHEMA.TABLE_STORAGE. table_refs no formato
+    "project.dataset.table"; tabelas que sumiram entre a query de listagem e
+    esta chamada (race) mapeiam para None em vez de propagar NotFound."""
+    if not table_refs:
+        return {}
+
+    def _fetch_or_none(table_ref: str) -> bigquery.Table | None:
+        try:
+            return get_table_cached(client, table_ref)
+        except NotFound:
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_or_none, ref): ref for ref in table_refs}
+        return {futures[future]: future.result() for future in as_completed(futures)}
 
 
 @lru_cache
