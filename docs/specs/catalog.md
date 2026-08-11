@@ -1,9 +1,9 @@
 # Spec — Domínio: Catálogo (catalog)
 
-**Versão:** 1.2 (região automática — sem parâmetro de região obrigatório)
+**Versão:** 1.3 (volumetria em tempo real via client.get_table())
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
-**Última atualização:** 2026-08-05
+**Última atualização:** 2026-08-11
 
 ---
 
@@ -25,9 +25,21 @@ Metadados do INFORMATION_SCHEMA — **custo $0**:
 <project>.region-<region>.INFORMATION_SCHEMA.SCHEMATA
 <project>.region-<region>.INFORMATION_SCHEMA.TABLES
 <project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE
-<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS
 <project>.region-<region>.INFORMATION_SCHEMA.COLUMNS
 ```
+
+`GET /catalog/{project_id}/datasets` (resumo por dataset) continua lendo
+`num_rows`/`total_size_bytes` de `TABLE_STORAGE` (lag de até 24h, mas uma
+única query agregada por região — evita uma chamada de API por tabela do
+projeto inteiro).
+
+`GET /catalog/{project_id}/datasets/{dataset_id}/tables` (listagem de
+tabelas de um dataset) lê `num_rows`/`size_bytes`/`last_modified_time` via
+`client.get_table()` (API REST do BigQuery, tempo real, sem o lag de
+`TABLE_STORAGE`) — uma chamada por tabela, em paralelo (`ThreadPoolExecutor`)
+e cacheada em memória por 5min (`core/bigquery.py::get_table_cached`/
+`get_tables_metadata`) para não bater a API a cada refresh de tela.
+`TABLE_PARTITIONS` não é mais usada (ver Query 3).
 
 Lista de regiões mantida em `core/config.py`:
 ```python
@@ -210,27 +222,32 @@ ORDER BY total_size_bytes DESC
 ```
 
 ### Query 3 — Tabelas de um dataset
+
+Metadados estruturais (via SQL, `INFORMATION_SCHEMA.TABLES` + `COLUMNS` —
+`TABLE_PARTITIONS` não é usada: não tem o nome da coluna de particionamento e
+não existe em US/EU; `column_count`/`partition_column`/`clustering_columns`
+vêm de `COLUMNS.is_partitioning_column`/`clustering_ordinal_position`):
+
 ```sql
 SELECT
   t.table_name,
   t.table_type,
   t.creation_time,
-  t.last_modified_time,
-  ts.total_rows          AS row_count,
-  ts.total_logical_bytes AS size_bytes,
-  COUNT(c.column_name)   AS column_count,
-  MAX(tp.partition_column) AS partition_column
+  COUNT(c.column_name)                                        AS column_count,
+  MAX(CASE WHEN c.is_partitioning_column = 'YES'
+        THEN c.column_name END)                                AS partition_column
 FROM `<project>.region-<region>.INFORMATION_SCHEMA.TABLES` t
-LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_STORAGE` ts
-  ON ts.table_name = t.table_name AND ts.table_schema = t.table_schema
 LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.COLUMNS` c
   ON c.table_name = t.table_name AND c.table_schema = t.table_schema
-LEFT JOIN `<project>.region-<region>.INFORMATION_SCHEMA.TABLE_PARTITIONS` tp
-  ON tp.table_name = t.table_name AND tp.table_schema = t.table_schema
 WHERE t.table_schema = @dataset_id
-GROUP BY 1, 2, 3, 4, 5, 6
-ORDER BY size_bytes DESC NULLS LAST
+GROUP BY 1, 2, 3
 ```
+
+`num_rows`/`size_bytes`/`last_modified_time` vêm de `client.get_table()`
+(uma chamada por `table_name` retornado acima, em paralelo, cacheada 5min —
+ver "Fonte de dados"), não de SQL. O `ORDER BY size_bytes DESC NULLS LAST` é
+aplicado em Python depois do merge, já que `size_bytes` não vem mais da
+query.
 
 ---
 
@@ -274,4 +291,6 @@ apps/backend/src/observability_hub/
 - Busca semântica por nome de tabela
 - Lineage (Fase 3)
 - Detecção de PII (Fase 3)
-- Cache de metadados
+- Cache de metadados persistente/compartilhado entre instâncias (o cache
+  TTL de 5min de `client.get_table()` é em memória, por processo — ver
+  "Fonte de dados")

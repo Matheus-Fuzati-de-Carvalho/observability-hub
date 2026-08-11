@@ -1,11 +1,19 @@
 """Queries do domínio freshness. Única camada que constrói SQL e interpreta
-linhas cruas do INFORMATION_SCHEMA — service.py nunca vê SQL nem objetos do
-client do BigQuery além do que essas funções retornam.
+linhas cruas do INFORMATION_SCHEMA (e resultados de client.get_table()) —
+service.py nunca vê SQL nem objetos do client do BigQuery além do que essas
+funções retornam.
 
-Toda leitura vem de INFORMATION_SCHEMA.TABLE_STORAGE (spec v1.1, custo $0).
+get_freshness_summary_by_dataset (visão de projeto) lê de
+INFORMATION_SCHEMA.TABLE_STORAGE (custo $0, lag de até 24h). get_table_freshness
+(visão de dataset) lê last_modified_time/size_bytes/row_count via
+client.get_table() (tempo real, sem lag, custo $0) — ver core/bigquery.py.
 """
 
+from datetime import UTC, datetime
+
 from google.cloud import bigquery
+
+from observability_hub.core.bigquery import get_tables_metadata
 
 # TABLE_STORAGE.table_type usa os mesmos valores brutos de TABLES ("BASE
 # TABLE", "MATERIALIZED VIEW" com espaço); a API expõe os valores
@@ -16,6 +24,33 @@ _RAW_TABLE_TYPE_TO_API = {
     "EXTERNAL": "EXTERNAL",
     "MATERIALIZED VIEW": "MATERIALIZED_VIEW",
 }
+
+# Mesmos limiares de _sla_status_case_sql (usada por
+# get_freshness_summary_by_dataset, que continua em TABLE_STORAGE), mas em
+# Python — get_table_freshness lê last_modified_time de client.get_table()
+# (core.bigquery.get_tables_metadata), não mais do SQL.
+_SLA_THRESHOLDS_HOURS = [
+    (12, "ok"),
+    (24, "warning_12_24"),
+    (48, "warning_24_48"),
+    (168, "warning_48_7d"),
+    (720, "warning_7d_1m"),
+]
+
+
+def _hours_since(modified: datetime | None) -> float | None:
+    if modified is None:
+        return None
+    return (datetime.now(UTC) - modified).total_seconds() / 3600
+
+
+def _sla_status(hours_since_update: float | None) -> str | None:
+    if hours_since_update is None:
+        return None
+    for threshold, status in _SLA_THRESHOLDS_HOURS:
+        if hours_since_update <= threshold:
+            return status
+    return "stale"
 
 
 # TABLE_STORAGE.storage_last_modified_time pode ser null (metadados de
@@ -94,38 +129,42 @@ def get_table_freshness(
     client: bigquery.Client, project_id: str, dataset_id: str, location: str
 ) -> list[dict]:
     """Visão por dataset (GET /freshness/{project_id}/datasets/{dataset_id}).
-    Sem JOIN — se o dataset existe mas não tem tabelas em TABLE_STORAGE
-    ainda, retorna lista vazia (dataset_id já foi validado antes via
-    resolve_dataset_region, então "vazio" aqui é dado real, não erro)."""
-    sla_status_sql = _sla_status_case_sql("storage_last_modified_time")
+    Lista as tabelas via INFORMATION_SCHEMA.TABLES e busca
+    last_modified_time/size_bytes/row_count via client.get_table() (uma
+    chamada por tabela, em paralelo, cacheada 5min em core.bigquery) em vez
+    de INFORMATION_SCHEMA.TABLE_STORAGE — TABLE_STORAGE tem lag de até 24h,
+    client.get_table() é tempo real, base do cálculo de SLA. Se o dataset
+    existe mas não tem tabelas, retorna lista vazia (dataset_id já foi
+    validado antes via resolve_dataset_region, então "vazio" aqui é dado
+    real, não erro)."""
     query = f"""
-        SELECT
-          table_name                                        AS table_id,
-          table_type,
-          storage_last_modified_time                        AS last_modified_time,
-          TIMESTAMP_DIFF(
-            CURRENT_TIMESTAMP(), storage_last_modified_time, HOUR
-          )                                                  AS hours_since_update,
-          total_logical_bytes                                AS size_bytes,
-          total_rows                                          AS row_count,
-          {sla_status_sql} AS sla_status
-        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLE_STORAGE`
+        SELECT table_name AS table_id, table_type
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES`
         WHERE table_schema = @dataset_id
-        ORDER BY hours_since_update DESC NULLS LAST
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id)]
     )
-    rows = client.query(query, job_config=job_config).result()
-    return [
-        {
-            "table_id": row.table_id,
-            "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
-            "last_modified_time": row.last_modified_time,
-            "hours_since_update": row.hours_since_update,
-            "sla_status": row.sla_status,
-            "size_bytes": row.size_bytes,
-            "row_count": row.row_count,
-        }
-        for row in rows
-    ]
+    rows = list(client.query(query, job_config=job_config).result())
+
+    table_refs = [f"{project_id}.{dataset_id}.{row.table_id}" for row in rows]
+    metadata_by_ref = get_tables_metadata(client, table_refs)
+
+    tables = []
+    for row in rows:
+        bq_table = metadata_by_ref.get(f"{project_id}.{dataset_id}.{row.table_id}")
+        modified = bq_table.modified if bq_table is not None else None
+        hours_since_update = _hours_since(modified)
+        tables.append(
+            {
+                "table_id": row.table_id,
+                "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
+                "last_modified_time": modified,
+                "hours_since_update": hours_since_update,
+                "sla_status": _sla_status(hours_since_update),
+                "size_bytes": bq_table.num_bytes if bq_table is not None else None,
+                "row_count": bq_table.num_rows if bq_table is not None else None,
+            }
+        )
+    tables.sort(key=lambda t: (t["hours_since_update"] is None, -(t["hours_since_update"] or 0)))
+    return tables
