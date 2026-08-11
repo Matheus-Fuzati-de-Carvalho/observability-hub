@@ -21,6 +21,7 @@ import { Separator } from '@/components/ui/separator'
 import { useTableDetail } from '@/features/catalog/hooks'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
+import { SchemaTable } from '@/features/quality/SchemaTable'
 import { SqlPreview } from '@/features/quality/SqlPreview'
 import { formatNumber, formatPercent } from '@/lib/format'
 import { ApiError } from '@/lib/http-client'
@@ -74,8 +75,18 @@ export function ProfilingDialog({
     runMutation.reset()
   }, [tableId])
 
+  const partitionColumn = tableDetailQuery.data?.partition_column ?? null
   const dateColumns =
     tableDetailQuery.data?.columns.filter((c) => DATE_TYPES.has(c.data_type.toUpperCase())) ?? []
+  // Coluna de partição do tipo data aparece primeiro na lista, como opção
+  // recomendada — geralmente é o melhor candidato pra filtro temporal.
+  const orderedDateColumns =
+    partitionColumn && dateColumns.some((c) => c.column_name === partitionColumn)
+      ? [
+          ...dateColumns.filter((c) => c.column_name === partitionColumn),
+          ...dateColumns.filter((c) => c.column_name !== partitionColumn),
+        ]
+      : dateColumns
   const isView = Boolean(tableDetailQuery.data && VIEW_TYPES.has(tableDetailQuery.data.table_type))
 
   function buildRequest() {
@@ -118,6 +129,18 @@ export function ProfilingDialog({
             Amostragem, unicidade e completude coluna a coluna, com estimativa de custo antes de
             executar.
           </DialogDescription>
+          {(tableDetailQuery.data?.is_partitioned || tableDetailQuery.data?.is_clustered) && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {tableDetailQuery.data?.is_partitioned && (
+                <Badge>Particionada por {tableDetailQuery.data.partition_column}</Badge>
+              )}
+              {tableDetailQuery.data?.is_clustered && (
+                <Badge variant="outline">
+                  Clusterizada por {tableDetailQuery.data.clustering_columns.join(', ')}
+                </Badge>
+              )}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="flex flex-wrap items-end gap-4">
@@ -169,9 +192,10 @@ export function ProfilingDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NO_DATE_COLUMN}>Nenhuma</SelectItem>
-                {dateColumns.map((column) => (
+                {orderedDateColumns.map((column) => (
                   <SelectItem key={column.column_name} value={column.column_name}>
                     {column.column_name}
+                    {column.column_name === partitionColumn ? ' (recomendada)' : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -226,7 +250,7 @@ export function ProfilingDialog({
           </div>
         )}
 
-        {runMutation.data && (
+        {runMutation.data ? (
           <>
             <Separator />
             <div className="flex flex-wrap gap-4">
@@ -272,6 +296,15 @@ export function ProfilingDialog({
             )}
 
             <ColumnResultsTable columns={runMutation.data.columns} />
+          </>
+        ) : (
+          <>
+            <Separator />
+            <SchemaTable
+              columns={tableDetailQuery.data?.columns ?? []}
+              isLoading={tableDetailQuery.isLoading}
+              partitionColumn={partitionColumn}
+            />
           </>
         )}
 
