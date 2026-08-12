@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import type { TableSummary } from '@/types/catalog'
@@ -20,8 +21,21 @@ interface AssetsTableProps {
   tables: TableSummary[]
 }
 
+function PartitionCell({ value }: { value: string | number | null }) {
+  if (value !== null) return <>{value}</>
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="cursor-help text-muted-foreground">N/D</span>} />
+      <TooltipContent>
+        Metadados de partição não disponíveis para datasets em multi-região (US/EU)
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) {
   const [profilingTarget, setProfilingTarget] = useState<string | null>(null)
+  const showPartitionColumns = tables.some((table) => table.is_partitioned)
 
   return (
     <>
@@ -36,6 +50,13 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
             <TableHead className="text-right">Linhas</TableHead>
             <TableHead className="text-right">Volume</TableHead>
             <TableHead>Região</TableHead>
+            {showPartitionColumns && (
+              <>
+                <TableHead>Partição mais antiga</TableHead>
+                <TableHead>Partição mais recente</TableHead>
+                <TableHead className="text-right">Qtd partições</TableHead>
+              </>
+            )}
             <TableHead />
           </TableRow>
         </TableHeader>
@@ -52,6 +73,19 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
               <TableCell className="text-right">{formatNumber(table.row_count)}</TableCell>
               <TableCell className="text-right">{formatBytes(table.size_bytes)}</TableCell>
               <TableCell>{table.location}</TableCell>
+              {showPartitionColumns && (
+                <>
+                  <TableCell>
+                    {table.is_partitioned ? <PartitionCell value={table.min_partition} /> : null}
+                  </TableCell>
+                  <TableCell>
+                    {table.is_partitioned ? <PartitionCell value={table.max_partition} /> : null}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {table.is_partitioned ? <PartitionCell value={table.partition_count} /> : null}
+                  </TableCell>
+                </>
+              )}
               <TableCell>
                 <Button
                   size="sm"

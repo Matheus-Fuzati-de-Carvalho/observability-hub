@@ -294,6 +294,50 @@ def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeyp
     client.get_table.assert_called_once_with("proj.RAW.ga4_events")
 
 
+@pytest.mark.parametrize("region", ["US", "EU"])
+def test_get_partition_stats_returns_nd_for_multi_region_without_querying(region):
+    client = MagicMock()
+
+    result = repository.get_partition_stats(client, "proj", "RAW", "events", region)
+
+    assert result == {"min_partition": None, "max_partition": None, "partition_count": None}
+    client.query.assert_not_called()
+
+
+def test_get_partition_stats_queries_dataset_qualified_partitions_view():
+    rows = [_row(min_partition="20260101", max_partition="20260812", partition_count=224)]
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        captured["params"] = job_config.query_parameters if job_config else []
+        job = MagicMock()
+        job.result.return_value = rows
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.get_partition_stats(client, "proj", "RAW", "events", "us-central1")
+
+    assert "proj.RAW.INFORMATION_SCHEMA.PARTITIONS" in captured["sql"]
+    param_values = {p.name: p.value for p in captured["params"]}
+    assert param_values["table_id"] == "events"
+    assert result == {
+        "min_partition": "20260101",
+        "max_partition": "20260812",
+        "partition_count": 224,
+    }
+
+
+def test_get_partition_stats_returns_nd_when_no_partitions_found():
+    client = _client_returning([[_row(min_partition=None, max_partition=None, partition_count=0)]])
+
+    result = repository.get_partition_stats(client, "proj", "RAW", "events", "us-central1")
+
+    assert result == {"min_partition": None, "max_partition": None, "partition_count": None}
+
+
 def test_get_table_detail_raises_when_table_missing(monkeypatch):
     monkeypatch.setattr(repository, "get_tables_summary", lambda *a, **k: [])
 

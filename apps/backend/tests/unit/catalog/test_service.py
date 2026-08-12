@@ -160,6 +160,70 @@ def test_list_tables_resolves_region_and_builds_response(monkeypatch):
     assert result.tables[0].table_id == "ga4_events"
 
 
+def test_list_tables_fills_partition_stats_only_for_partitioned_tables(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "resolve_dataset_region",
+        lambda client, project_id, dataset_id, candidate_regions: "us-central1",
+    )
+    raw = [
+        {
+            "table_id": "events",
+            "table_type": "TABLE",
+            "creation_time": "2026-06-08T18:38:40Z",
+            "last_modified_time": "2026-06-08T18:38:40Z",
+            "size_bytes": 576920,
+            "size_gb": 0.0005,
+            "row_count": 10000,
+            "column_count": 8,
+            "is_partitioned": True,
+            "partition_column": "event_date",
+            "is_clustered": False,
+            "clustering_columns": [],
+            "location": "us-central1",
+        },
+        {
+            "table_id": "dim_users",
+            "table_type": "TABLE",
+            "creation_time": "2026-06-08T18:38:40Z",
+            "last_modified_time": "2026-06-08T18:38:40Z",
+            "size_bytes": 1000,
+            "size_gb": 0.0001,
+            "row_count": 10,
+            "column_count": 3,
+            "is_partitioned": False,
+            "partition_column": None,
+            "is_clustered": False,
+            "clustering_columns": [],
+            "location": "us-central1",
+        },
+    ]
+    monkeypatch.setattr(
+        service.repository,
+        "get_tables_summary",
+        lambda client, project_id, dataset_id, location, table_type=None: raw,
+    )
+    calls = []
+
+    def fake_get_partition_stats(client, project_id, dataset_id, table_id, location):
+        calls.append(table_id)
+        return {"min_partition": "20260101", "max_partition": "20260812", "partition_count": 224}
+
+    monkeypatch.setattr(service.repository, "get_partition_stats", fake_get_partition_stats)
+
+    result = service.list_tables(client, "observability-hub-dev", "RAW")
+
+    assert calls == ["events"]
+    events = next(t for t in result.tables if t.table_id == "events")
+    dim_users = next(t for t in result.tables if t.table_id == "dim_users")
+    assert events.min_partition == "20260101"
+    assert events.partition_count == 224
+    assert dim_users.min_partition is None
+    assert dim_users.partition_count is None
+
+
 def test_list_tables_propagates_dataset_not_found(monkeypatch):
     client = _fake_client()
     monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])

@@ -25,6 +25,10 @@ _RAW_TABLE_TYPE_TO_API = {
 }
 _API_TABLE_TYPE_TO_RAW = {v: k for k, v in _RAW_TABLE_TYPE_TO_API.items()}
 
+# INFORMATION_SCHEMA.PARTITIONS não existe para datasets multi-região —
+# get_partition_stats devolve N/D (None) direto pra essas sem tentar a query.
+_MULTI_REGIONS = {"US", "EU"}
+
 
 def _bytes_to_gb(size_bytes: int | None) -> float | None:
     if size_bytes is None:
@@ -181,6 +185,43 @@ def get_tables_summary(
     ]
     tables.sort(key=lambda t: (t["size_bytes"] is None, -(t["size_bytes"] or 0)))
     return tables
+
+
+def get_partition_stats(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    region: str,
+) -> dict:
+    """Min/max/contagem de partição via INFORMATION_SCHEMA.PARTITIONS
+    (dataset-qualified, metadado gratuito). Indisponível em datasets
+    multi-região (US/EU) — os três campos voltam None nesse caso, sem
+    tentar a query (o frontend exibe "N/D" com tooltip explicando)."""
+    if region in _MULTI_REGIONS:
+        return {"min_partition": None, "max_partition": None, "partition_count": None}
+
+    query = f"""
+        SELECT
+          MIN(partition_id) AS min_partition,
+          MAX(partition_id) AS max_partition,
+          COUNT(*)          AS partition_count
+        FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.PARTITIONS`
+        WHERE table_name = @table_id
+          AND partition_id NOT IN ('__NULL__', '__UNPARTITIONED__')
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("table_id", "STRING", table_id)]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+    if not rows or not rows[0].partition_count:
+        return {"min_partition": None, "max_partition": None, "partition_count": None}
+    row = rows[0]
+    return {
+        "min_partition": row.min_partition,
+        "max_partition": row.max_partition,
+        "partition_count": row.partition_count,
+    }
 
 
 def get_table_columns(

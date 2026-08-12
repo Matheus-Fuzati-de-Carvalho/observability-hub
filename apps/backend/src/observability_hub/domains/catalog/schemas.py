@@ -63,6 +63,12 @@ class TableSummary(BaseModel):
     is_clustered: bool
     clustering_columns: list[str]
     location: str
+    # None quando a tabela não é particionada, ou quando é particionada mas
+    # está em dataset multi-região (US/EU) — INFORMATION_SCHEMA.PARTITIONS
+    # não existe nesses casos (ver repository.get_partition_stats).
+    min_partition: str | None = None
+    max_partition: str | None = None
+    partition_count: int | None = None
 
 
 class TablesListResponse(BaseModel):
