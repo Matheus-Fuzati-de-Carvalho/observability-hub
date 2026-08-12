@@ -7,13 +7,44 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-11 — **encerramento da Sprint 2**
-**Fase atual:** Sprint 2 concluída. Backend e frontend com MVP completo dos
-domínios catalog, freshness e quality/profiling, deployados e validados
-ponta a ponta em dev e prod (ambos em sincronia, commit `5aa7179`).
-**Próximo passo:** Iniciar **Sprint 3 — Discovery** (Fase 3 do CLAUDE.md):
+**Última atualização:** 2026-08-12 — Sprint 2.2, Funcionalidade 1 em andamento
+**Fase atual:** Sprint 2.2 (três funcionalidades extras antes da Sprint 3):
+metadados de partição no catálogo (Funcionalidade 1), botão de refresh
+(Funcionalidade 2), busca reversa tabela→datasets (Funcionalidade 3).
+Funcionalidade 1 implementada, testada em dev (branch
+`feature/partition-metadata`, commit `ea64c8d`), PR ainda não aberto.
+**Próximo passo:** Abrir PR da Funcionalidade 1 para `main` (aprovação
+pendente do usuário), depois seguir para a Funcionalidade 2 (botão de
+refresh). Depois disso, retomar **Sprint 3 — Discovery** (Fase 3 do
+CLAUDE.md):
 lineage, PII, mapa de acesso. Nenhuma implementação desses domínios foi
 começada ainda. Local e `origin/main` já sincronizados nesta sessão.
+
+---
+
+## Sprint 2.2 — Funcionalidade 1 (metadados de partição)
+
+`get_partition_stats()` (`domains/catalog/repository.py`) consulta
+`INFORMATION_SCHEMA.PARTITIONS` (dataset-qualified: `project.dataset.
+INFORMATION_SCHEMA.PARTITIONS`) para min/max/contagem de partição, chamado
+em paralelo (`ThreadPoolExecutor`, `domains/catalog/service.py::
+_fill_partition_stats`) só para tabelas com `is_partitioned=True`.
+
+**Confirmado ao vivo em dev** (`observability-hub-dev`, branch
+`feature/partition-metadata`): `RAW.events` e `TRUSTED.ga4_events` — ambas
+particionadas, região `US` — retornam `min_partition`/`max_partition`/
+`partition_count` como `null` (N/D), como esperado, porque
+`INFORMATION_SCHEMA.PARTITIONS` não está disponível em datasets
+multi-região (US/EU). O código evita até tentar a query nesse caso
+(checa `location in {"US", "EU"}` antes). `TRUSTED.sessions` (também
+particionada, mesma região) confirmou o mesmo comportamento.
+
+**Não testado ao vivo:** o caminho de região específica (ex:
+`us-central1`), porque todos os datasets em dev/prod estão em `US`. A
+query em si segue a forma documentada oficialmente do BigQuery
+(dataset-qualified, filtrando por `table_name`), mas só tem cobertura de
+teste unitário (mockado) para esse ramo — vale confirmar com uma tabela
+real em região específica se/quando existir uma.
 
 ---
 
