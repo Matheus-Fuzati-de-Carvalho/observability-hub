@@ -75,13 +75,20 @@ def test_row_to_table_dict_derives_partitioned_and_clustered():
         partition_column="_PARTITIONTIME",
         clustering_columns=["event_name", "user_id"],
     )
-    bq_table = SimpleNamespace(num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z")
+    bq_table = SimpleNamespace(
+        num_rows=10000,
+        num_bytes=576920,
+        modified="2026-06-08T18:38:40Z",
+        time_partitioning=SimpleNamespace(type_="DAY"),
+        range_partitioning=None,
+    )
 
     result = repository._row_to_table_dict(row, "US", bq_table)
 
     assert result["table_id"] == "events"
     assert result["table_type"] == "TABLE"
     assert result["is_partitioned"] is True
+    assert result["partition_type"] == "_PARTITIONTIME (DAY)"
     assert result["is_clustered"] is True
     assert result["clustering_columns"] == ["event_name", "user_id"]
     assert result["size_gb"] == round(576920 / 1_000_000_000, 4)
@@ -196,7 +203,11 @@ def test_get_tables_summary_row_to_dict_reads_partition_column_from_columns_agg(
     ]
     client = _client_returning([rows])
     client.get_table.return_value = SimpleNamespace(
-        num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z"
+        num_rows=10000,
+        num_bytes=576920,
+        modified="2026-06-08T18:38:40Z",
+        time_partitioning=SimpleNamespace(type_="DAY"),
+        range_partitioning=None,
     )
 
     result = repository.get_tables_summary(client, "proj", "RAW", "US")
@@ -294,23 +305,35 @@ def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeyp
     client.get_table.assert_called_once_with("proj.RAW.ga4_events")
 
 
-@pytest.mark.parametrize("region", ["US", "EU"])
-def test_get_partition_stats_returns_nd_for_multi_region_without_querying(region):
-    client = MagicMock()
+def test_partition_type_label_formats_field_and_time_partitioning_type():
+    bq_table = SimpleNamespace(
+        time_partitioning=SimpleNamespace(type_="DAY"), range_partitioning=None
+    )
 
-    result = repository.get_partition_stats(client, "proj", "RAW", "events", region)
-
-    assert result == {"min_partition": None, "max_partition": None, "partition_count": None}
-    client.query.assert_not_called()
+    assert repository._partition_type_label("event_date", bq_table) == "event_date (DAY)"
 
 
-def test_get_partition_stats_queries_dataset_qualified_partitions_view():
-    rows = [_row(min_partition="20260101", max_partition="20260812", partition_count=224)]
+def test_partition_type_label_formats_range_partitioning():
+    bq_table = SimpleNamespace(time_partitioning=None, range_partitioning=SimpleNamespace())
+
+    assert repository._partition_type_label("user_id", bq_table) == "user_id (RANGE)"
+
+
+def test_partition_type_label_none_when_not_partitioned_or_missing_bq_table():
+    bq_table = SimpleNamespace(time_partitioning=None, range_partitioning=None)
+
+    assert repository._partition_type_label(None, bq_table) is None
+    assert repository._partition_type_label("event_date", None) is None
+    assert repository._partition_type_label("event_date", bq_table) == "event_date"
+
+
+def test_get_partition_stats_queries_min_max_distinct_on_partition_field(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition="2026-08-03", max_partition="2026-08-12", partition_count=10)]
     captured = {}
 
     def fake_query(sql, job_config=None):
         captured["sql"] = sql
-        captured["params"] = job_config.query_parameters if job_config else []
         job = MagicMock()
         job.result.return_value = rows
         return job
@@ -318,24 +341,38 @@ def test_get_partition_stats_queries_dataset_qualified_partitions_view():
     client = MagicMock()
     client.query.side_effect = fake_query
 
-    result = repository.get_partition_stats(client, "proj", "RAW", "events", "us-central1")
+    result = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
 
-    assert "proj.RAW.INFORMATION_SCHEMA.PARTITIONS" in captured["sql"]
-    param_values = {p.name: p.value for p in captured["params"]}
-    assert param_values["table_id"] == "events"
+    assert "proj.RAW.events" in captured["sql"]
+    assert "COUNT(DISTINCT `event_date`)" in captured["sql"]
+    assert "INFORMATION_SCHEMA" not in captured["sql"]
     assert result == {
-        "min_partition": "20260101",
-        "max_partition": "20260812",
-        "partition_count": 224,
+        "min_partition": "2026-08-03",
+        "max_partition": "2026-08-12",
+        "partition_count": 10,
     }
 
 
-def test_get_partition_stats_returns_nd_when_no_partitions_found():
-    client = _client_returning([[_row(min_partition=None, max_partition=None, partition_count=0)]])
+def test_get_partition_stats_stringifies_min_max_and_handles_null(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition=None, max_partition=None, partition_count=0)]
+    client = _client_returning([rows])
 
-    result = repository.get_partition_stats(client, "proj", "RAW", "events", "us-central1")
+    result = repository.get_partition_stats(client, "proj", "RAW", "empty", "event_date")
 
-    assert result == {"min_partition": None, "max_partition": None, "partition_count": None}
+    assert result == {"min_partition": None, "max_partition": None, "partition_count": 0}
+
+
+def test_get_partition_stats_caches_by_table_ref(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition="2026-08-03", max_partition="2026-08-12", partition_count=10)]
+    client = _client_returning([rows])
+
+    first = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
+    second = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
+
+    assert first == second
+    assert client.query.call_count == 1
 
 
 def test_get_table_detail_raises_when_table_missing(monkeypatch):

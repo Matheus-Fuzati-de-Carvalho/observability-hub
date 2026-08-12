@@ -52,12 +52,13 @@ def _fill_partition_stats(
     client: bigquery.Client,
     project_id: str,
     dataset_id: str,
-    location: str,
     raw_tables: list[dict],
 ) -> None:
     """Busca min/max/contagem de partição em paralelo (uma chamada por
     tabela particionada, não por todas as tabelas do dataset) e mescla o
-    resultado nos dicts de raw_tables in-place."""
+    resultado nos dicts de raw_tables in-place. partition_column já veio de
+    get_tables_summary (COLUMNS.is_partitioning_column) — funciona em
+    qualquer região, ao contrário de INFORMATION_SCHEMA.PARTITIONS."""
     partitioned = [t for t in raw_tables if t["is_partitioned"]]
     if not partitioned:
         return
@@ -70,7 +71,7 @@ def _fill_partition_stats(
                 project_id,
                 dataset_id,
                 table["table_id"],
-                location,
+                table["partition_column"],
             ): table
             for table in partitioned
         }
@@ -89,7 +90,7 @@ def list_tables(
     raw_tables = repository.get_tables_summary(
         client, project_id, dataset_id, location, table_type=table_type
     )
-    _fill_partition_stats(client, project_id, dataset_id, location, raw_tables)
+    _fill_partition_stats(client, project_id, dataset_id, raw_tables)
     return TablesListResponse(
         project_id=project_id,
         dataset_id=dataset_id,

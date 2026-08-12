@@ -34,6 +34,7 @@ export interface TableSummary {
   is_clustered: boolean
   clustering_columns: string[]
   location: string
+  partition_type: string | null
   min_partition: string | null
   max_partition: string | null
   partition_count: number | null

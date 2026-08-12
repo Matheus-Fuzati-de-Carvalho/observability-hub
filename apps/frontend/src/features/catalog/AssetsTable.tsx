@@ -10,7 +10,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import type { TableSummary } from '@/types/catalog'
@@ -21,16 +20,8 @@ interface AssetsTableProps {
   tables: TableSummary[]
 }
 
-function PartitionCell({ value }: { value: string | number | null }) {
-  if (value !== null) return <>{value}</>
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="cursor-help text-muted-foreground">N/D</span>} />
-      <TooltipContent>
-        Metadados de partição não disponíveis para datasets em multi-região (US/EU)
-      </TooltipContent>
-    </Tooltip>
-  )
+function formatOrDash(value: string | null): string {
+  return value ?? '—'
 }
 
 export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) {
@@ -52,6 +43,7 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
             <TableHead>Região</TableHead>
             {showPartitionColumns && (
               <>
+                <TableHead>Tipo de partição</TableHead>
                 <TableHead>Partição mais antiga</TableHead>
                 <TableHead>Partição mais recente</TableHead>
                 <TableHead className="text-right">Qtd partições</TableHead>
@@ -76,13 +68,16 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
               {showPartitionColumns && (
                 <>
                   <TableCell>
-                    {table.is_partitioned ? <PartitionCell value={table.min_partition} /> : null}
+                    {table.is_partitioned ? formatOrDash(table.partition_type) : null}
                   </TableCell>
                   <TableCell>
-                    {table.is_partitioned ? <PartitionCell value={table.max_partition} /> : null}
+                    {table.is_partitioned ? formatOrDash(table.min_partition) : null}
+                  </TableCell>
+                  <TableCell>
+                    {table.is_partitioned ? formatOrDash(table.max_partition) : null}
                   </TableCell>
                   <TableCell className="text-right">
-                    {table.is_partitioned ? <PartitionCell value={table.partition_count} /> : null}
+                    {table.is_partitioned ? formatNumber(table.partition_count) : null}
                   </TableCell>
                 </>
               )}

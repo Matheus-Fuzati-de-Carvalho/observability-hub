@@ -207,15 +207,15 @@ def test_list_tables_fills_partition_stats_only_for_partitioned_tables(monkeypat
     )
     calls = []
 
-    def fake_get_partition_stats(client, project_id, dataset_id, table_id, location):
-        calls.append(table_id)
+    def fake_get_partition_stats(client, project_id, dataset_id, table_id, partition_field):
+        calls.append((table_id, partition_field))
         return {"min_partition": "20260101", "max_partition": "20260812", "partition_count": 224}
 
     monkeypatch.setattr(service.repository, "get_partition_stats", fake_get_partition_stats)
 
     result = service.list_tables(client, "observability-hub-dev", "RAW")
 
-    assert calls == ["events"]
+    assert calls == [("events", "event_date")]
     events = next(t for t in result.tables if t.table_id == "events")
     dim_users = next(t for t in result.tables if t.table_id == "dim_users")
     assert events.min_partition == "20260101"

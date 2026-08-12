@@ -63,9 +63,11 @@ class TableSummary(BaseModel):
     is_clustered: bool
     clustering_columns: list[str]
     location: str
-    # None quando a tabela não é particionada, ou quando é particionada mas
-    # está em dataset multi-região (US/EU) — INFORMATION_SCHEMA.PARTITIONS
-    # não existe nesses casos (ver repository.get_partition_stats).
+    # "{coluna} (DAY)" etc — None quando a tabela não é particionada (ver
+    # repository._partition_type_label).
+    partition_type: str | None = None
+    # Min/max/contagem distinct real da coluna de partição (repository.
+    # get_partition_stats) — None quando a tabela não é particionada.
     min_partition: str | None = None
     max_partition: str | None = None
     partition_count: int | None = None

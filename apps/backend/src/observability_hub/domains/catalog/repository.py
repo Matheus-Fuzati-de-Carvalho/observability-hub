@@ -3,6 +3,9 @@ linhas cruas do INFORMATION_SCHEMA — service.py nunca vê SQL nem objetos do
 client do BigQuery além do que essas funções retornam.
 """
 
+import threading
+import time
+
 from google.cloud import bigquery
 
 # resolve_dataset_region é re-exportado para manter repository.resolve_dataset_region
@@ -25,9 +28,11 @@ _RAW_TABLE_TYPE_TO_API = {
 }
 _API_TABLE_TYPE_TO_RAW = {v: k for k, v in _RAW_TABLE_TYPE_TO_API.items()}
 
-# INFORMATION_SCHEMA.PARTITIONS não existe para datasets multi-região —
-# get_partition_stats devolve N/D (None) direto pra essas sem tentar a query.
-_MULTI_REGIONS = {"US", "EU"}
+# get_partition_stats roda uma query real (custo != $0, ver função) — cacheada
+# por tabela pra não repetir a cada refresh de tela.
+_PARTITION_STATS_CACHE_TTL_SECONDS = 300
+_partition_stats_cache: dict[str, tuple[float, dict]] = {}
+_partition_stats_cache_lock = threading.Lock()
 
 
 def _bytes_to_gb(size_bytes: int | None) -> float | None:
@@ -80,6 +85,23 @@ def get_datasets_summary(
     return datasets
 
 
+def _partition_type_label(
+    partition_column: str | None, bq_table: bigquery.Table | None
+) -> str | None:
+    """Formata como "{coluna} ({TIPO})", ex: "event_date (DAY)" — TIPO vem de
+    table.time_partitioning.type_ (DAY/HOUR/MONTH/YEAR ou particionamento por
+    ingestão, _PARTITIONTIME/_PARTITIONDATE) ou "RANGE" para
+    table.range_partitioning. None se a tabela não é particionada ou se
+    bq_table não foi resolvido (race, ver _row_to_table_dict)."""
+    if partition_column is None or bq_table is None:
+        return None
+    if bq_table.time_partitioning is not None and bq_table.time_partitioning.type_:
+        return f"{partition_column} ({bq_table.time_partitioning.type_})"
+    if bq_table.range_partitioning is not None:
+        return f"{partition_column} (RANGE)"
+    return partition_column
+
+
 def _row_to_table_dict(row, location: str, bq_table: bigquery.Table | None) -> dict:
     """bq_table vem de client.get_table() (core.bigquery.get_tables_metadata) —
     num_rows/num_bytes/modified em tempo real, sem o lag de até 24h de
@@ -100,6 +122,7 @@ def _row_to_table_dict(row, location: str, bq_table: bigquery.Table | None) -> d
         "column_count": row.column_count,
         "is_partitioned": partition_column is not None,
         "partition_column": partition_column,
+        "partition_type": _partition_type_label(partition_column, bq_table),
         "is_clustered": len(clustering_columns) > 0,
         "clustering_columns": clustering_columns,
         "location": location,
@@ -192,36 +215,38 @@ def get_partition_stats(
     project_id: str,
     dataset_id: str,
     table_id: str,
-    region: str,
+    partition_field: str,
 ) -> dict:
-    """Min/max/contagem de partição via INFORMATION_SCHEMA.PARTITIONS
-    (dataset-qualified, metadado gratuito). Indisponível em datasets
-    multi-região (US/EU) — os três campos voltam None nesse caso, sem
-    tentar a query (o frontend exibe "N/D" com tooltip explicando)."""
-    if region in _MULTI_REGIONS:
-        return {"min_partition": None, "max_partition": None, "partition_count": None}
+    """Min/max/contagem (DISTINCT) real da coluna de partição — ao contrário
+    de INFORMATION_SCHEMA (metadado gratuito), esta é uma query de dados de
+    verdade e tem custo: INFORMATION_SCHEMA.PARTITIONS não existe em
+    datasets multi-região (US/EU) e por isso não serve como fonte única.
+    Custo é limitado por ler só a coluna de partição, sem filtro — mesmo
+    assim, cacheado 5min por tabela (não por instância do Hub) pra não
+    repetir a cada refresh de tela."""
+    table_ref = f"{project_id}.{dataset_id}.{table_id}"
+    now = time.monotonic()
+    with _partition_stats_cache_lock:
+        cached = _partition_stats_cache.get(table_ref)
+    if cached is not None and now - cached[0] < _PARTITION_STATS_CACHE_TTL_SECONDS:
+        return cached[1]
 
     query = f"""
         SELECT
-          MIN(partition_id) AS min_partition,
-          MAX(partition_id) AS max_partition,
-          COUNT(*)          AS partition_count
-        FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.PARTITIONS`
-        WHERE table_name = @table_id
-          AND partition_id NOT IN ('__NULL__', '__UNPARTITIONED__')
+          MIN(`{partition_field}`)            AS min_partition,
+          MAX(`{partition_field}`)            AS max_partition,
+          COUNT(DISTINCT `{partition_field}`) AS partition_count
+        FROM `{table_ref}`
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("table_id", "STRING", table_id)]
-    )
-    rows = list(client.query(query, job_config=job_config).result())
-    if not rows or not rows[0].partition_count:
-        return {"min_partition": None, "max_partition": None, "partition_count": None}
-    row = rows[0]
-    return {
-        "min_partition": row.min_partition,
-        "max_partition": row.max_partition,
+    row = next(iter(client.query(query).result()))
+    result = {
+        "min_partition": None if row.min_partition is None else str(row.min_partition),
+        "max_partition": None if row.max_partition is None else str(row.max_partition),
         "partition_count": row.partition_count,
     }
+    with _partition_stats_cache_lock:
+        _partition_stats_cache[table_ref] = (now, result)
+    return result
 
 
 def get_table_columns(
