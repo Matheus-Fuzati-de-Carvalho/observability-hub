@@ -7,25 +7,21 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-12 — Sprint 2.2, Funcionalidade 1 corrigida
-**Fase atual:** Sprint 2.2 (três funcionalidades extras antes da Sprint 3):
-metadados de partição no catálogo (Funcionalidade 1), botão de refresh
-(Funcionalidade 2), busca reversa tabela→datasets (Funcionalidade 3).
-Funcionalidade 1 reimplementada (a primeira versão, baseada em
-`INFORMATION_SCHEMA.PARTITIONS`, retornava N/D pra todo dataset em US/EU —
-que é onde estão todos os datasets de dev/prod hoje; o usuário pediu
-correção pra usar uma query real na coluna de partição em vez disso — ver
-"Sprint 2.2 — Funcionalidade 1" abaixo). Testada em dev (branch
-`feature/partition-metadata`, commit `ea31bd6`). Um PR (#14) chegou a ser
-aberto pra essa branch com a versão N/D e foi fechado pelo usuário sem
-merge, por estar incorreto — nenhum PR aberto no momento.
-**Próximo passo:** Aguardar validação do usuário sobre os valores reais
-retornados em dev antes de qualquer novo passo — usuário pediu
-explicitamente para **não abrir PR** e **não iniciar Funcionalidade 2 nem
-3** até isso acontecer. Prod só recebe as três funcionalidades quando
-totalmente validadas em dev. Depois de tudo aprovado, retomar **Sprint 3 —
-Discovery** (Fase 3 do CLAUDE.md): lineage, PII, mapa de acesso — nenhuma
-implementação desses domínios foi começada ainda.
+**Última atualização:** 2026-08-13 — Sprint 2.2 concluída e validada em dev
+**Fase atual:** Sprint 2.2 completa — as três funcionalidades (metadados de
+partição + botão "Ver partições", botão de refresh, busca reversa
+tabela→datasets) implementadas, testadas em dev e **validadas pelo
+usuário**. Tudo na branch `feature/partition-metadata`
+(commits `ea64c8d`..`50526e9`, ver "Sprint 2.2" abaixo para o detalhe de
+cada funcionalidade). Um PR (#14) chegou a ser aberto ainda na primeira
+versão (incorreta) da Funcionalidade 1 e foi fechado pelo usuário sem
+merge — **nenhum PR aberto no momento**, main e prod inalterados.
+**Próximo passo:** Iniciar **Sprint 2.3** (4 melhorias + documentação —
+escopo ainda não detalhado pelo usuário nesta sessão). Antes de abrir PR
+da Sprint 2.2 para `main`, confirmar com o usuário — instrução até aqui
+foi explicitamente não abrir PR ainda. Depois de Sprint 2.3 e do PR da
+2.2, retomar **Sprint 3 — Discovery** (Fase 3 do CLAUDE.md): lineage, PII,
+mapa de acesso — nenhuma implementação desses domínios foi começada ainda.
 
 ---
 
@@ -77,6 +73,69 @@ Chromium headless não roda neste sandbox (limitação já registrada em
 sessões anteriores, ver "Decisões e erros de sessões anteriores" #7).
 Validado só via `tsc`/`vite build`/`biome check` limpos e a API real via
 `curl`.
+
+Além dos 3 campos, ganhou também `partition_type` na tabela de ativos e um
+botão **"Ver partições"** (linhas particionadas) que abre um modal com a
+lista completa de partições distintas + contagem de linhas — novo
+endpoint `GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/
+tables/{table_id}/partitions` (`TableNotPartitionedError` → 400 pra tabela
+não particionada). Testado ao vivo em `RAW.events`: 3 partições, ordem
+decrescente, valores batendo com a query direta. Commit `a0696fb`.
+
+---
+
+## Sprint 2.2 — Funcionalidade 2 (botão de refresh)
+
+Só frontend. `RefreshButton` (`src/components/RefreshButton.tsx`,
+`RotateCcw` do lucide, `animate-spin` + `disabled` durante fetch) nos
+headers de `CatalogDatasetPage` (refetch de tables/datasets/freshness — as
+três alimentam a página) e `FreshnessPage` (refetch de freshness). Não
+entrou em `CatalogOverviewPage` (placeholder sem dados, dataset ainda não
+selecionado) nem no modal de profiling, como pedido. Commit `a4083fc`.
+Validado pelo usuário em dev (comportamento visual — spin/disable/reload
+— não pôde ser confirmado neste sandbox, ver limitação de Chromium
+headless acima).
+
+---
+
+## Sprint 2.2 — Funcionalidade 3 (busca reversa tabela → datasets)
+
+Novo endpoint `GET /api/v1/catalog/{project_id}/search?q=&mode=exact|
+contains` — busca em `INFORMATION_SCHEMA.TABLES` de todas as regiões do
+projeto em paralelo (`repository.search_tables`, mesma técnica de
+`discover_regions`). Resultado agrupado em `datasets_with_match` (com
+`last_modified_time` real via `client.get_table()`, reaproveitando
+`core.bigquery.get_tables_metadata`) e `datasets_without_match`.
+
+`datasets_without_match` **não** lista todo dataset do projeto sem a
+tabela — só os que têm outra tabela da mesma série: prefixo derivado
+removendo o sufixo numérico final de `q` (`repository.
+derive_search_prefix`, ex: `"events_20260812"` → `"events_"`), buscado via
+`GROUP BY` + `MAX(table_name)` por dataset. Sem sufixo numérico em `q`,
+`datasets_without_match` fica vazio — não há "série" pra comparar.
+
+Frontend: nova seção "Busca" na sidebar (ícone `Search`), campo + toggle
+Exato/Contém (dois `Button`, sem novo componente shadcn), busca como
+`useMutation` (não `useQuery` — é sob demanda, não reativa), mensagem de
+loading, dois grupos de resultado (✅ encontrado / ❌ ausente com motivo) e
+mensagem de vazio pra `contains` sem resultado. Commit `50526e9`.
+
+**Confirmado ao vivo em dev** (`observability-hub-dev`) — importante: os
+dados mock mudaram desde a spec original da Sprint 2.2 (que previa "RAW
+como único dataset com match"). Dev agora tem 3 datasets
+`analytics_100001/2/3`, cada um com tabelas `events_YYYYMMDD` sharded por
+nome (cenário GA4 real, não só `RAW.events` particionado por coluna):
+
+| Busca | Resultado |
+|---|---|
+| `q=events_20260812&mode=exact` | 3 matches (`analytics_100001/2/3`) |
+| `q=events_20260813&mode=exact` (data ainda não carregada) | 0 matches, 3 `datasets_without_match` com `reason=prefix_exists` e `latest_partition=events_20260812` — cenário exato da spec |
+| `q=crm&mode=contains` | 1 match (`RAW.crm_leads`) |
+| `q=zzz_nao_existe&mode=contains` | Vazio, `200 OK` |
+
+`RAW.events` nunca aparece nessas buscas — é uma tabela só, particionada
+por coluna (`event_date`), não por nome sharded, então não bate com busca
+por nome de tabela. Validado pelo usuário.
 
 ---
 
