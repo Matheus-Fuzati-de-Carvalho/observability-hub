@@ -1,12 +1,15 @@
 import { LogOut } from 'lucide-react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCurrentUser, useLogout } from '@/features/auth/hooks'
+import { LogoutDialog } from '@/features/auth/LogoutDialog'
 import { ProjectSelector } from '@/features/projects/ProjectSelector'
 
 export function Topbar() {
   const userQuery = useCurrentUser()
   const logoutMutation = useLogout()
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b-2 border-primary bg-background px-4">
@@ -25,8 +28,7 @@ export function Topbar() {
             <Button
               variant="ghost"
               className="ml-auto gap-2 text-muted-foreground"
-              disabled={logoutMutation.isPending}
-              onClick={() => logoutMutation.mutate()}
+              onClick={() => setConfirmOpen(true)}
               aria-label="Sair"
             />
           }
@@ -44,8 +46,20 @@ export function Topbar() {
           )}
           <LogOut size={16} />
         </TooltipTrigger>
-        <TooltipContent>Sair{userQuery.data && ` — ${userQuery.data.email}`}</TooltipContent>
+        <TooltipContent>
+          <div className="flex flex-col">
+            {userQuery.data && <span>{userQuery.data.email}</span>}
+            <span className="text-xs opacity-70">Clique para sair</span>
+          </div>
+        </TooltipContent>
       </Tooltip>
+
+      <LogoutDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        isLoggingOut={logoutMutation.isPending}
+        onConfirm={() => logoutMutation.mutate()}
+      />
     </header>
   )
 }
