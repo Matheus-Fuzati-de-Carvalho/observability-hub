@@ -8,6 +8,7 @@ import { CatalogOverviewPage } from '@/features/catalog/CatalogOverviewPage'
 import { SearchPage } from '@/features/catalog/SearchPage'
 import { DatasetFreshnessPage } from '@/features/freshness/DatasetFreshnessPage'
 import { FreshnessPage } from '@/features/freshness/FreshnessPage'
+import { OrphansPage } from '@/features/lineage/OrphansPage'
 
 export function AppRoutes() {
   return (
@@ -20,6 +21,7 @@ export function AppRoutes() {
           <Route path="datasets/:datasetId" element={<CatalogDatasetPage />} />
           <Route path="freshness" element={<FreshnessPage />} />
           <Route path="freshness/:datasetId" element={<DatasetFreshnessPage />} />
+          <Route path="orphans" element={<OrphansPage />} />
           <Route path="search" element={<SearchPage />} />
         </Route>
       </Route>
