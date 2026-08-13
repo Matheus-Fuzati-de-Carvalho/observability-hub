@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -348,6 +349,7 @@ def _stub_columns_for_run(monkeypatch):
 def test_run_profiling_builds_full_response(monkeypatch):
     client = _fake_client()
     _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(service.history_repository, "save_run", lambda *a, **kw: None)
     _stub_columns_for_run(monkeypatch)
 
     main_result = {
@@ -386,7 +388,13 @@ def test_run_profiling_builds_full_response(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
+        client,
+        MagicMock(),
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert result.table_summary.total_sampled_rows == 10000
@@ -415,6 +423,7 @@ def test_run_profiling_builds_full_response(monkeypatch):
 def test_run_profiling_zero_rows_has_zeroed_metrics_without_error(monkeypatch):
     client = _fake_client()
     _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(service.history_repository, "save_run", lambda *a, **kw: None)
     _stub_columns_for_run(monkeypatch)
 
     main_result = {
@@ -443,7 +452,13 @@ def test_run_profiling_zero_rows_has_zeroed_metrics_without_error(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "empty_table", ProfilingRequest()
+        client,
+        MagicMock(),
+        "observability-hub-dev",
+        "RAW",
+        "empty_table",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert result.table_summary.total_sampled_rows == 0
@@ -458,6 +473,7 @@ def test_run_profiling_zero_rows_has_zeroed_metrics_without_error(monkeypatch):
 def test_run_profiling_all_null_column_is_critical(monkeypatch):
     client = _fake_client()
     _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(service.history_repository, "save_run", lambda *a, **kw: None)
     monkeypatch.setattr(
         service.repository,
         "get_table_columns",
@@ -488,7 +504,13 @@ def test_run_profiling_all_null_column_is_critical(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
+        client,
+        MagicMock(),
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     col = result.columns[0]
@@ -500,6 +522,7 @@ def test_run_profiling_all_null_column_is_critical(monkeypatch):
 def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
     client = _fake_client()
     _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(service.history_repository, "save_run", lambda *a, **kw: None)
     monkeypatch.setattr(
         service.repository,
         "get_table_columns",
@@ -531,10 +554,12 @@ def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
 
     result = service.run_profiling(
         client,
+        MagicMock(),
         "observability-hub-dev",
         "RAW",
         "crm_leads",
         ProfilingRequest(uniqueness_method=UniquenessMethod.EXACT),
+        "a@dp6.com.br",
     )
 
     assert result.columns[0].distinct_count == 4
@@ -543,6 +568,7 @@ def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
 def test_run_profiling_omits_tablesample_for_view(monkeypatch):
     client = _fake_client()
     _stub_region_resolution(monkeypatch, is_view=True)
+    monkeypatch.setattr(service.history_repository, "save_run", lambda *a, **kw: None)
     monkeypatch.setattr(
         service.repository,
         "get_table_columns",
@@ -577,7 +603,13 @@ def test_run_profiling_omits_tablesample_for_view(monkeypatch):
     monkeypatch.setattr(service.repository, "execute_top_n_query", fake_execute_top_n_query)
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads_view", ProfilingRequest()
+        client,
+        MagicMock(),
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads_view",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert "TABLESAMPLE" not in result.sql
@@ -699,3 +731,116 @@ def test_get_null_distribution_handles_zero_total_rows_period(monkeypatch):
     )
 
     assert result.series[0].null_pct == 0.0
+
+
+# --- run_profiling salva no histórico ---------------------------------------
+
+
+def test_run_profiling_saves_run_to_history(monkeypatch):
+    client = _fake_client()
+    firestore_client = MagicMock()
+    _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(
+        service.repository,
+        "get_table_columns",
+        lambda client, project_id, dataset_id, table_id, location: [
+            {"column_name": "email", "data_type": "STRING", "is_nullable": True},
+        ],
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, budget: {
+            "_total_sampled_rows": 10,
+            "_approx_distinct_rows": 10,
+            "email__count_filled": 10,
+            "email__approx_distinct": 10,
+            "email__min": "a@dp6.com.br",
+            "email__max": "z@dp6.com.br",
+        },
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_total_table_rows",
+        lambda client, project_id, dataset_id, table_id, location: 10,
+    )
+    monkeypatch.setattr(
+        service.repository, "execute_top_n_query", lambda client, project_id, sql, timeout: []
+    )
+    save_calls = []
+    monkeypatch.setattr(
+        service.history_repository,
+        "save_run",
+        lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    service.run_profiling(
+        client,
+        firestore_client,
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
+    )
+
+    assert len(save_calls) == 1
+    args, kwargs = save_calls[0]
+    assert args[0] is firestore_client
+    assert args[1:4] == ("observability-hub-dev", "RAW", "crm_leads")
+    assert kwargs["executed_by"] == "a@dp6.com.br"
+    assert kwargs["overall_density"] == 100.0
+    assert kwargs["estimated_duplicate_pct"] == 0.0
+    assert kwargs["columns"] == [
+        {"column_name": "email", "completeness_pct": 100.0, "quality_flag": "ok"}
+    ]
+
+
+# --- get_quality_history -----------------------------------------------------
+
+
+def test_get_quality_history_returns_empty_when_never_profiled(monkeypatch):
+    firestore_client = MagicMock()
+    monkeypatch.setattr(service.history_repository, "list_runs", lambda *a, **kw: [])
+
+    result = service.get_quality_history(
+        firestore_client, "observability-hub-dev", "RAW", "crm_leads"
+    )
+
+    assert result.runs == []
+    assert result.project_id == "observability-hub-dev"
+    assert result.dataset_id == "RAW"
+    assert result.table_id == "crm_leads"
+
+
+def test_get_quality_history_maps_raw_runs_to_response(monkeypatch):
+    firestore_client = MagicMock()
+    executed_at = datetime(2026, 8, 10, tzinfo=UTC)
+    monkeypatch.setattr(
+        service.history_repository,
+        "list_runs",
+        lambda *a, **kw: [
+            {
+                "executed_at": executed_at,
+                "executed_by": "a@dp6.com.br",
+                "overall_density": 91.3,
+                "estimated_duplicate_pct": 1.5,
+                "columns": [
+                    {"column_name": "email", "completeness_pct": 91.3, "quality_flag": "ok"}
+                ],
+            }
+        ],
+    )
+
+    result = service.get_quality_history(
+        firestore_client, "observability-hub-dev", "RAW", "crm_leads"
+    )
+
+    assert len(result.runs) == 1
+    run = result.runs[0]
+    assert run.executed_at == executed_at
+    assert run.executed_by == "a@dp6.com.br"
+    assert run.overall_density == 91.3
+    assert run.estimated_duplicate_pct == 1.5
+    assert run.columns[0].column_name == "email"
+    assert run.columns[0].quality_flag == QualityFlag.OK

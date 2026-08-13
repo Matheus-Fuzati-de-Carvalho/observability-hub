@@ -10,6 +10,7 @@ from observability_hub.api.v1 import (
     history,
     profiling,
     projects,
+    quality,
 )
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
@@ -47,6 +48,7 @@ app.include_router(freshness.router)
 app.include_router(profiling.router)
 app.include_router(favorites.router)
 app.include_router(history.router)
+app.include_router(quality.router)
 
 
 @app.get("/health")

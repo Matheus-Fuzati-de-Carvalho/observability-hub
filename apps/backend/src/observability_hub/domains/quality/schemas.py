@@ -108,3 +108,24 @@ class NullDistributionResponse(BaseModel):
     date_column: str
     granularity: Granularity
     series: list[NullDistributionPoint]
+
+
+class HistoryColumnSnapshot(BaseModel):
+    column_name: str
+    completeness_pct: float
+    quality_flag: QualityFlag
+
+
+class ProfilingHistoryRun(BaseModel):
+    executed_at: datetime
+    executed_by: str
+    overall_density: float
+    estimated_duplicate_pct: float
+    columns: list[HistoryColumnSnapshot]
+
+
+class ProfilingHistoryResponse(BaseModel):
+    project_id: str
+    dataset_id: str
+    table_id: str
+    runs: list[ProfilingHistoryRun]
