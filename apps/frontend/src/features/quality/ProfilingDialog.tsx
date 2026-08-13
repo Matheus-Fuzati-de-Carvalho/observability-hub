@@ -115,206 +115,220 @@ export function ProfilingDialog({
   // sm:max-w-sm do DialogContent base vence w-[90vw]/max-w-[1000px] na
   // cascata em qualquer tela >=640px (aparece depois no CSS gerado,
   // independente da ordem no className) — precisa de ! pra sobrepor.
+  //
+  // flex-col + overflow-hidden no lugar do antigo overflow-y-auto solto:
+  // com overflow-y definido e overflow-x ausente, o CSS computa
+  // overflow-x como "auto" também (regra do spec pra quando só um eixo é
+  // "visible") — isso fazia a tabela de schema/resultados arrastar o
+  // header e os controles fixos pro scroll horizontal junto, já que tudo
+  // era uma única caixa rolável. Agora só a região de
+  // schema/resultados (abaixo) tem overflow-y-auto próprio; o scroll
+  // horizontal de cada tabela continua isolado nela mesma (Table já tem
+  // overflow-x-auto em components/ui/table.tsx).
   return (
     <Dialog open={Boolean(tableId)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[90vw]! max-w-[1000px]! overflow-y-auto">
-        <DialogHeader>
-          <p className="text-xs font-semibold tracking-wide text-primary uppercase">
-            Módulo de qualidade
-          </p>
-          <DialogTitle className="text-lg">
-            {datasetId}.{tableId}
-          </DialogTitle>
-          <DialogDescription>
-            Amostragem, unicidade e completude coluna a coluna, com estimativa de custo antes de
-            executar.
-          </DialogDescription>
-          {(tableDetailQuery.data?.is_partitioned || tableDetailQuery.data?.is_clustered) && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {tableDetailQuery.data?.is_partitioned && (
-                <Badge>Particionada por {tableDetailQuery.data.partition_column}</Badge>
-              )}
-              {tableDetailQuery.data?.is_clustered && (
-                <Badge variant="outline">
-                  Clusterizada por {tableDetailQuery.data.clustering_columns.join(', ')}
-                </Badge>
-              )}
-            </div>
-          )}
-        </DialogHeader>
-
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="sample-percent">Amostragem (%)</Label>
-            <Input
-              id="sample-percent"
-              type="number"
-              min={1}
-              max={100}
-              className="w-24"
-              value={samplePercent}
-              onChange={(e) => setSamplePercent(Number(e.target.value))}
-              disabled={isView}
-            />
-            {isView && (
-              <p className="text-xs text-status-warn">Amostragem não disponível para views</p>
+      <DialogContent className="flex max-h-[90vh] w-[90vw]! max-w-[1000px]! flex-col overflow-hidden">
+        <div className="flex shrink-0 flex-col gap-4">
+          <DialogHeader>
+            <p className="text-xs font-semibold tracking-wide text-primary uppercase">
+              Módulo de qualidade
+            </p>
+            <DialogTitle className="text-lg">
+              {datasetId}.{tableId}
+            </DialogTitle>
+            <DialogDescription>
+              Amostragem, unicidade e completude coluna a coluna, com estimativa de custo antes de
+              executar.
+            </DialogDescription>
+            {(tableDetailQuery.data?.is_partitioned || tableDetailQuery.data?.is_clustered) && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {tableDetailQuery.data?.is_partitioned && (
+                  <Badge>Particionada por {tableDetailQuery.data.partition_column}</Badge>
+                )}
+                {tableDetailQuery.data?.is_clustered && (
+                  <Badge variant="outline">
+                    Clusterizada por {tableDetailQuery.data.clustering_columns.join(', ')}
+                  </Badge>
+                )}
+              </div>
             )}
-          </div>
+          </DialogHeader>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Método unicidade</Label>
-            <Select
-              value={uniquenessMethod}
-              onValueChange={(value) => setUniquenessMethod(value as UniquenessMethod)}
-            >
-              <SelectTrigger className="w-32">
-                <SelectValue>
-                  {(value: UniquenessMethod) => UNIQUENESS_METHOD_LABELS[value]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="approx">Aproximado (HLL)</SelectItem>
-                <SelectItem value="exact">Exato</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label>Coluna de data</Label>
-            <Select
-              value={dateColumn}
-              onValueChange={(value) => setDateColumn(value ?? NO_DATE_COLUMN)}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue>
-                  {(value: string) => (value === NO_DATE_COLUMN ? 'Nenhuma' : value)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_DATE_COLUMN}>Nenhuma</SelectItem>
-                {orderedDateColumns.map((column) => (
-                  <SelectItem key={column.column_name} value={column.column_name}>
-                    {column.column_name}
-                    {column.column_name === partitionColumn ? ' (recomendada)' : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {dateColumn !== NO_DATE_COLUMN && (
+          <div className="flex flex-wrap items-end gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="date-window">Janela (dias)</Label>
+              <Label htmlFor="sample-percent">Amostragem (%)</Label>
               <Input
-                id="date-window"
+                id="sample-percent"
                 type="number"
                 min={1}
+                max={100}
                 className="w-24"
-                value={dateWindowDays}
-                onChange={(e) => setDateWindowDays(Number(e.target.value))}
+                value={samplePercent}
+                onChange={(e) => setSamplePercent(Number(e.target.value))}
+                disabled={isView}
               />
-            </div>
-          )}
-
-          <div className="ml-auto flex gap-2">
-            <Button
-              variant="outline"
-              disabled={estimateMutation.isPending}
-              onClick={() => estimateMutation.mutate(buildRequest())}
-            >
-              {estimateMutation.isPending ? 'Estimando…' : 'Estimar custo'}
-            </Button>
-            <Button
-              disabled={runMutation.isPending}
-              onClick={() => runMutation.mutate(buildRequest())}
-            >
-              {runMutation.isPending ? 'Executando…' : 'Executar profile'}
-            </Button>
-          </div>
-        </div>
-
-        {errorMessage && <p className="text-sm text-status-error">{errorMessage}</p>}
-
-        {estimateMutation.data && !runMutation.data && (
-          <div className="flex gap-6 rounded-lg border border-border bg-card p-4 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase">Bytes estimados</p>
-              <p className="text-lg font-bold">{estimateMutation.data.estimated_bytes_human}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground uppercase">Custo estimado</p>
-              <p className="text-lg font-bold">
-                US$ {estimateMutation.data.estimated_cost_usd.toFixed(8)}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {runMutation.data ? (
-          <>
-            <Separator />
-            <div className="flex flex-wrap gap-4">
-              {[
-                {
-                  label: 'Amostradas',
-                  value: formatNumber(runMutation.data.table_summary.total_sampled_rows),
-                },
-                {
-                  label: 'Total da tabela',
-                  value: formatNumber(runMutation.data.table_summary.total_table_rows),
-                },
-                {
-                  label: 'Duplicatas est.',
-                  value: formatPercent(runMutation.data.table_summary.estimated_duplicate_pct),
-                },
-                {
-                  label: 'Densidade geral',
-                  value: formatPercent(runMutation.data.table_summary.overall_density),
-                },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="min-w-[160px] flex-1 rounded-lg border border-border bg-card p-4"
-                >
-                  <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    {item.label}
-                  </p>
-                  <p className="text-2xl font-bold">{item.value}</p>
-                </div>
-              ))}
+              {isView && (
+                <p className="text-xs text-status-warn">Amostragem não disponível para views</p>
+              )}
             </div>
 
-            {runMutation.data.excluded_columns.length > 0 && (
-              <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                Colunas excluídas do profiling:
-                {runMutation.data.excluded_columns.map((excluded) => (
-                  <Badge key={excluded.column_name} variant="outline" title={excluded.reason}>
-                    {excluded.column_name}
-                  </Badge>
-                ))}
-              </p>
+            <div className="flex flex-col gap-1.5">
+              <Label>Método unicidade</Label>
+              <Select
+                value={uniquenessMethod}
+                onValueChange={(value) => setUniquenessMethod(value as UniquenessMethod)}
+              >
+                <SelectTrigger className="w-32">
+                  <SelectValue>
+                    {(value: UniquenessMethod) => UNIQUENESS_METHOD_LABELS[value]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="approx">Aproximado (HLL)</SelectItem>
+                  <SelectItem value="exact">Exato</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label>Coluna de data</Label>
+              <Select
+                value={dateColumn}
+                onValueChange={(value) => setDateColumn(value ?? NO_DATE_COLUMN)}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue>
+                    {(value: string) => (value === NO_DATE_COLUMN ? 'Nenhuma' : value)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_DATE_COLUMN}>Nenhuma</SelectItem>
+                  {orderedDateColumns.map((column) => (
+                    <SelectItem key={column.column_name} value={column.column_name}>
+                      {column.column_name}
+                      {column.column_name === partitionColumn ? ' (recomendada)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {dateColumn !== NO_DATE_COLUMN && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="date-window">Janela (dias)</Label>
+                <Input
+                  id="date-window"
+                  type="number"
+                  min={1}
+                  className="w-24"
+                  value={dateWindowDays}
+                  onChange={(e) => setDateWindowDays(Number(e.target.value))}
+                />
+              </div>
             )}
 
-            <ColumnResultsTable columns={runMutation.data.columns} />
-          </>
-        ) : (
-          <>
-            <Separator />
-            <SchemaTable
-              columns={tableDetailQuery.data?.columns ?? []}
-              isLoading={tableDetailQuery.isLoading}
-              partitionColumn={partitionColumn}
-            />
-          </>
-        )}
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="outline"
+                disabled={estimateMutation.isPending}
+                onClick={() => estimateMutation.mutate(buildRequest())}
+              >
+                {estimateMutation.isPending ? 'Estimando…' : 'Estimar custo'}
+              </Button>
+              <Button
+                disabled={runMutation.isPending}
+                onClick={() => runMutation.mutate(buildRequest())}
+              >
+                {runMutation.isPending ? 'Executando…' : 'Executar profile'}
+              </Button>
+            </div>
+          </div>
 
-        {sql && (
-          <SqlPreview
-            key={runMutation.data ? 'run' : 'estimate'}
-            sql={sql}
-            defaultOpen={!runMutation.data}
-          />
-        )}
+          {errorMessage && <p className="text-sm text-status-error">{errorMessage}</p>}
+
+          {estimateMutation.data && !runMutation.data && (
+            <div className="flex gap-6 rounded-lg border border-border bg-card p-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase">Bytes estimados</p>
+                <p className="text-lg font-bold">{estimateMutation.data.estimated_bytes_human}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase">Custo estimado</p>
+                <p className="text-lg font-bold">
+                  US$ {estimateMutation.data.estimated_cost_usd.toFixed(8)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto">
+          {runMutation.data ? (
+            <>
+              <Separator />
+              <div className="flex flex-wrap gap-4">
+                {[
+                  {
+                    label: 'Amostradas',
+                    value: formatNumber(runMutation.data.table_summary.total_sampled_rows),
+                  },
+                  {
+                    label: 'Total da tabela',
+                    value: formatNumber(runMutation.data.table_summary.total_table_rows),
+                  },
+                  {
+                    label: 'Duplicatas est.',
+                    value: formatPercent(runMutation.data.table_summary.estimated_duplicate_pct),
+                  },
+                  {
+                    label: 'Densidade geral',
+                    value: formatPercent(runMutation.data.table_summary.overall_density),
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="min-w-[160px] flex-1 rounded-lg border border-border bg-card p-4"
+                  >
+                    <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                      {item.label}
+                    </p>
+                    <p className="text-2xl font-bold">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {runMutation.data.excluded_columns.length > 0 && (
+                <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  Colunas excluídas do profiling:
+                  {runMutation.data.excluded_columns.map((excluded) => (
+                    <Badge key={excluded.column_name} variant="outline" title={excluded.reason}>
+                      {excluded.column_name}
+                    </Badge>
+                  ))}
+                </p>
+              )}
+
+              <ColumnResultsTable columns={runMutation.data.columns} />
+            </>
+          ) : (
+            <>
+              <Separator />
+              <SchemaTable
+                columns={tableDetailQuery.data?.columns ?? []}
+                isLoading={tableDetailQuery.isLoading}
+                partitionColumn={partitionColumn}
+              />
+            </>
+          )}
+
+          {sql && (
+            <SqlPreview
+              key={runMutation.data ? 'run' : 'estimate'}
+              sql={sql}
+              defaultOpen={!runMutation.data}
+            />
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )
