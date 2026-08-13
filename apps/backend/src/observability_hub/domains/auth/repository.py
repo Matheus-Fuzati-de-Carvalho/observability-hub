@@ -22,8 +22,14 @@ def _oauth_session(redirect_uri: str) -> OAuth2Session:
     )
 
 
-def build_authorize_url(redirect_uri: str, state: str) -> str:
-    url, _ = _oauth_session(redirect_uri).create_authorization_url(_AUTHORIZE_URL, state=state)
+def build_authorize_url(redirect_uri: str, state: str, prompt: str | None = None) -> str:
+    """prompt é repassado como parâmetro extra pro authorize endpoint do
+    Google sem essa função saber o que ele significa — quem decide qual
+    prompt usar (ou nenhum) é service.py."""
+    extra = {"prompt": prompt} if prompt else {}
+    url, _ = _oauth_session(redirect_uri).create_authorization_url(
+        _AUTHORIZE_URL, state=state, **extra
+    )
     return url
 
 

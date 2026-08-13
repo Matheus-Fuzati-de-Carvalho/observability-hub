@@ -37,13 +37,14 @@ def test_build_redirect_uri_falls_back_to_first_entry_without_https(monkeypatch)
     assert service.build_redirect_uri() == "http://localhost:5173/auth/callback"
 
 
-def test_build_authorize_url_delegates_to_repository(monkeypatch):
+def test_build_authorize_url_delegates_to_repository_and_forces_account_selector(monkeypatch):
     monkeypatch.setattr(service.settings, "cors_origins", "https://frontend.example.com")
     captured = {}
 
-    def fake_build_authorize_url(redirect_uri, state):
+    def fake_build_authorize_url(redirect_uri, state, prompt=None):
         captured["redirect_uri"] = redirect_uri
         captured["state"] = state
+        captured["prompt"] = prompt
         return "https://accounts.google.com/authorize?..."
 
     monkeypatch.setattr(service.repository, "build_authorize_url", fake_build_authorize_url)
@@ -54,6 +55,7 @@ def test_build_authorize_url_delegates_to_repository(monkeypatch):
     assert captured == {
         "redirect_uri": "https://frontend.example.com/auth/callback",
         "state": "state-123",
+        "prompt": "select_account",
     }
 
 

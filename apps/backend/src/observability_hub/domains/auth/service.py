@@ -46,7 +46,12 @@ def build_redirect_uri() -> str:
 
 
 def build_authorize_url(state: str) -> str:
-    return repository.build_authorize_url(build_redirect_uri(), state)
+    # select_account força o Google a sempre mostrar o seletor de contas,
+    # mesmo com uma sessão do Google já ativa no browser — sem isso, depois
+    # de um logout do Hub (que não afeta a sessão do Google em si), clicar
+    # em "Entrar com Google" de novo autentica silenciosamente com a mesma
+    # conta, sem dar a chance de escolher outra.
+    return repository.build_authorize_url(build_redirect_uri(), state, prompt="select_account")
 
 
 def _is_email_allowed(email: str, allowlist: dict) -> bool:

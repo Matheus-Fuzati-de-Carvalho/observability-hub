@@ -30,6 +30,23 @@ def test_build_authorize_url_uses_oauth_session(monkeypatch):
     )
 
 
+def test_build_authorize_url_forwards_prompt_as_extra_param(monkeypatch):
+    monkeypatch.setattr(repository.secrets, "get_oauth_client_id", lambda: "client-id")
+    monkeypatch.setattr(repository.secrets, "get_oauth_client_secret", lambda: "client-secret")
+
+    fake_session = MagicMock()
+    fake_session.create_authorization_url.return_value = ("https://accounts.google.com/...", "s")
+
+    with patch.object(repository, "OAuth2Session", return_value=fake_session):
+        repository.build_authorize_url(
+            "https://frontend.example.com/auth/callback", "state123", prompt="select_account"
+        )
+
+    fake_session.create_authorization_url.assert_called_once_with(
+        repository._AUTHORIZE_URL, state="state123", prompt="select_account"
+    )
+
+
 def test_fetch_userinfo_exchanges_code_and_returns_json(monkeypatch):
     monkeypatch.setattr(repository.secrets, "get_oauth_client_id", lambda: "client-id")
     monkeypatch.setattr(repository.secrets, "get_oauth_client_secret", lambda: "client-secret")
