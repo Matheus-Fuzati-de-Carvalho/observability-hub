@@ -7,44 +7,76 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-12 — Sprint 2.2, Funcionalidade 1 em andamento
+**Última atualização:** 2026-08-12 — Sprint 2.2, Funcionalidade 1 corrigida
 **Fase atual:** Sprint 2.2 (três funcionalidades extras antes da Sprint 3):
 metadados de partição no catálogo (Funcionalidade 1), botão de refresh
 (Funcionalidade 2), busca reversa tabela→datasets (Funcionalidade 3).
-Funcionalidade 1 implementada, testada em dev (branch
-`feature/partition-metadata`, commit `ea64c8d`), PR ainda não aberto.
-**Próximo passo:** Abrir PR da Funcionalidade 1 para `main` (aprovação
-pendente do usuário), depois seguir para a Funcionalidade 2 (botão de
-refresh). Depois disso, retomar **Sprint 3 — Discovery** (Fase 3 do
-CLAUDE.md):
-lineage, PII, mapa de acesso. Nenhuma implementação desses domínios foi
-começada ainda. Local e `origin/main` já sincronizados nesta sessão.
+Funcionalidade 1 reimplementada (a primeira versão, baseada em
+`INFORMATION_SCHEMA.PARTITIONS`, retornava N/D pra todo dataset em US/EU —
+que é onde estão todos os datasets de dev/prod hoje; o usuário pediu
+correção pra usar uma query real na coluna de partição em vez disso — ver
+"Sprint 2.2 — Funcionalidade 1" abaixo). Testada em dev (branch
+`feature/partition-metadata`, commit `ea31bd6`). Um PR (#14) chegou a ser
+aberto pra essa branch com a versão N/D e foi fechado pelo usuário sem
+merge, por estar incorreto — nenhum PR aberto no momento.
+**Próximo passo:** Aguardar validação do usuário sobre os valores reais
+retornados em dev antes de qualquer novo passo — usuário pediu
+explicitamente para **não abrir PR** e **não iniciar Funcionalidade 2 nem
+3** até isso acontecer. Prod só recebe as três funcionalidades quando
+totalmente validadas em dev. Depois de tudo aprovado, retomar **Sprint 3 —
+Discovery** (Fase 3 do CLAUDE.md): lineage, PII, mapa de acesso — nenhuma
+implementação desses domínios foi começada ainda.
 
 ---
 
 ## Sprint 2.2 — Funcionalidade 1 (metadados de partição)
 
-`get_partition_stats()` (`domains/catalog/repository.py`) consulta
-`INFORMATION_SCHEMA.PARTITIONS` (dataset-qualified: `project.dataset.
-INFORMATION_SCHEMA.PARTITIONS`) para min/max/contagem de partição, chamado
-em paralelo (`ThreadPoolExecutor`, `domains/catalog/service.py::
-_fill_partition_stats`) só para tabelas com `is_partitioned=True`.
+**Versão 1 (revertida pelo usuário):** `get_partition_stats()` consultava
+`INFORMATION_SCHEMA.PARTITIONS` (dataset-qualified, metadado gratuito),
+retornando N/D direto para datasets multi-região (US/EU) sem tentar a
+query. Como todos os datasets de dev/prod estão em `US`, isso significava
+N/D sempre — comportamento tecnicamente correto pra limitação do BQ, mas
+inútil na prática. PR #14 foi aberto com essa versão e fechado pelo
+usuário sem merge por estar incorreto.
+
+**Versão 2 (atual):** `get_partition_stats()` roda uma query real e leve
+(uma coluna só, sem filtro) direto na tabela:
+```sql
+SELECT MIN(`{campo}`) AS min_partition, MAX(`{campo}`) AS max_partition,
+       COUNT(DISTINCT `{campo}`) AS partition_count
+FROM `{project}.{dataset}.{tabela}`
+```
+Funciona em qualquer região (não depende de `INFORMATION_SCHEMA.
+PARTITIONS`), mas tem custo real de bytes escaneados (ao contrário de
+metadado do `INFORMATION_SCHEMA`) — por isso ganhou cache TTL de 5min por
+tabela (`repository._partition_stats_cache`, mesmo padrão do
+`get_table_cached` de `core/bigquery.py`, mas local ao domínio catalog).
+`campo` vem de `partition_column` (já derivado de
+`COLUMNS.is_partitioning_column`, funciona em qualquer região). Também
+ganhou `partition_type` ("event_date (DAY)"), lido de
+`bq_table.time_partitioning`/`range_partitioning` — já vinha no
+`client.get_table()` cacheado que `get_tables_summary` já chamava pra
+row_count/size/modified, sem chamada extra.
 
 **Confirmado ao vivo em dev** (`observability-hub-dev`, branch
-`feature/partition-metadata`): `RAW.events` e `TRUSTED.ga4_events` — ambas
-particionadas, região `US` — retornam `min_partition`/`max_partition`/
-`partition_count` como `null` (N/D), como esperado, porque
-`INFORMATION_SCHEMA.PARTITIONS` não está disponível em datasets
-multi-região (US/EU). O código evita até tentar a query nesse caso
-(checa `location in {"US", "EU"}` antes). `TRUSTED.sessions` (também
-particionada, mesma região) confirmou o mesmo comportamento.
+`feature/partition-metadata`, commit `ea31bd6`):
 
-**Não testado ao vivo:** o caminho de região específica (ex:
-`us-central1`), porque todos os datasets em dev/prod estão em `US`. A
-query em si segue a forma documentada oficialmente do BigQuery
-(dataset-qualified, filtrando por `table_name`), mas só tem cobertura de
-teste unitário (mockado) para esse ramo — vale confirmar com uma tabela
-real em região específica se/quando existir uma.
+| Tabela | Partitioned | Tipo | Min | Max | Count |
+|---|---|---|---|---|---|
+| `RAW.events` | true | `event_date (DAY)` | `2021-01-01` | `2021-01-30` | `3` |
+| `TRUSTED.ga4_events` | true | `event_date (DAY)` | `2021-01-01` | `2021-01-18` | `4` |
+| `TRUSTED.sessions` | true | `session_date (DAY)` | `2021-01-06` | `2021-01-31` | `7` |
+| `RAW.crm_leads` | false | — | — | — | — |
+
+Valores reais (dados mock de dev estão em jan/2021), não N/D — objetivo da
+correção alcançado. `RAW.crm_leads` (não particionada) corretamente sem
+dados de partição.
+
+**Não verificado visualmente:** renderização real da tabela no frontend —
+Chromium headless não roda neste sandbox (limitação já registrada em
+sessões anteriores, ver "Decisões e erros de sessões anteriores" #7).
+Validado só via `tsc`/`vite build`/`biome check` limpos e a API real via
+`curl`.
 
 ---
 
