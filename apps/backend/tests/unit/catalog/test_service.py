@@ -405,7 +405,7 @@ def test_search_tables_builds_response_with_match_and_prefix_without_match(monke
         "get_tables_metadata",
         lambda client, table_refs: {
             "observability-hub-dev.analytics_123.events_20260812": SimpleNamespace(
-                modified="2026-08-12T03:00:00Z"
+                modified="2026-08-12T03:00:00Z", num_rows=22096
             )
         },
     )
@@ -427,6 +427,7 @@ def test_search_tables_builds_response_with_match_and_prefix_without_match(monke
     assert (
         result.datasets_with_match[0].last_modified_time.isoformat() == "2026-08-12T03:00:00+00:00"
     )
+    assert result.datasets_with_match[0].row_count == 22096
     assert len(result.datasets_without_match) == 1
     assert result.datasets_without_match[0].dataset_id == "analytics_456"
     assert result.datasets_without_match[0].reason == "prefix_exists"
@@ -475,3 +476,54 @@ def test_search_tables_no_matches_returns_empty_lists(monkeypatch):
 
     assert result.datasets_with_match == []
     assert result.datasets_without_match == []
+
+
+def test_search_tables_not_contains_lists_datasets_with_zero_matching_tables(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "get_datasets_summary",
+        lambda client, project_id, regions: [
+            {"dataset_id": "RAW"},
+            {"dataset_id": "TRUSTED"},
+            {"dataset_id": "analytics_100001"},
+        ],
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables",
+        lambda client, project_id, regions, query, mode: [
+            {"dataset_id": "analytics_100001", "table_id": "crm_leads", "table_type": "TABLE"}
+        ],
+    )
+
+    result = service.search_tables(client, "observability-hub-dev", "crm", "not_contains")
+
+    assert result.mode == "not_contains"
+    assert result.datasets_with_match == []
+    assert {d.dataset_id for d in result.datasets_without_match} == {"RAW", "TRUSTED"}
+    assert all(d.reason == "no_match" for d in result.datasets_without_match)
+
+
+def test_search_tables_not_contains_does_not_run_prefix_search(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository, "get_datasets_summary", lambda client, project_id, regions: []
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables",
+        lambda client, project_id, regions, query, mode: [],
+    )
+    calls = []
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables_by_prefix",
+        lambda *a, **k: calls.append(1) or [],
+    )
+
+    service.search_tables(client, "observability-hub-dev", "events_20260812", "not_contains")
+
+    assert calls == []

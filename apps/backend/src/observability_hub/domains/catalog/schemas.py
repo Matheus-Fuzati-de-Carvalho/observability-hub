@@ -110,6 +110,7 @@ class TablePartitionsResponse(BaseModel):
 class SearchMode(str, Enum):
     EXACT = "exact"
     CONTAINS = "contains"
+    NOT_CONTAINS = "not_contains"
 
 
 class DatasetWithMatch(BaseModel):
@@ -117,12 +118,19 @@ class DatasetWithMatch(BaseModel):
     table_id: str
     table_type: str
     last_modified_time: datetime | None
+    # client.get_table().num_rows — mesma chamada já feita pra
+    # last_modified_time (core.bigquery.get_tables_metadata), sem query BQ
+    # extra. None em VIEW/EXTERNAL ou se a tabela sumiu entre a busca e a
+    # chamada (race, mesmo comportamento de TableSummary.row_count).
+    row_count: int | None
 
 
 class DatasetWithoutMatch(BaseModel):
     dataset_id: str
-    # Só "prefix_exists" por enquanto — dataset tem outra tabela com o
-    # mesmo prefixo (repository.derive_search_prefix) mas não a buscada.
+    # "prefix_exists": dataset tem outra tabela com o mesmo prefixo
+    # (repository.derive_search_prefix) mas não a buscada — modes exact/
+    # contains. "no_match": nenhuma tabela do dataset contém o termo —
+    # mode not_contains (ver service.search_tables).
     reason: str
     latest_partition: str | None = None
 

@@ -209,6 +209,7 @@ def test_table_search_response_matches_spec_example():
                 "table_id": "events_20260812",
                 "table_type": "TABLE",
                 "last_modified_time": "2026-08-12T03:00:00Z",
+                "row_count": 22096,
             }
         ],
         "datasets_without_match": [

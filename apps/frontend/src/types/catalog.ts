@@ -74,13 +74,14 @@ export interface TablePartitionsResponse {
   partitions: PartitionRow[]
 }
 
-export type SearchMode = 'exact' | 'contains'
+export type SearchMode = 'exact' | 'contains' | 'not_contains'
 
 export interface DatasetWithMatch {
   dataset_id: string
   table_id: string
   table_type: string
   last_modified_time: string | null
+  row_count: number | null
 }
 
 export interface DatasetWithoutMatch {

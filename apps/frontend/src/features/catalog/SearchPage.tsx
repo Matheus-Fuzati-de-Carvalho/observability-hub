@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSearchTables } from '@/features/catalog/hooks'
+import { SearchAbsentTable } from '@/features/catalog/SearchAbsentTable'
+import { SearchMatchesTable } from '@/features/catalog/SearchMatchesTable'
 import { useProjectContext } from '@/features/projects/ProjectContext'
-import { formatDate } from '@/lib/format'
 import { ApiError } from '@/lib/http-client'
 import type { SearchMode } from '@/types/catalog'
 
@@ -70,6 +71,14 @@ export function SearchPage() {
           >
             Contém
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'not_contains' ? 'default' : 'ghost'}
+            onClick={() => setMode('not_contains')}
+          >
+            Não contém
+          </Button>
         </div>
 
         <Button type="submit" disabled={!q.trim() || searchMutation.isPending}>
@@ -102,21 +111,7 @@ export function SearchPage() {
                 Encontrado em {result.datasets_with_match.length}{' '}
                 {result.datasets_with_match.length === 1 ? 'dataset' : 'datasets'}
               </h2>
-              <div className="flex flex-col gap-1">
-                {result.datasets_with_match.map((match) => (
-                  <div
-                    key={`${match.dataset_id}.${match.table_id}`}
-                    className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium">
-                      {match.dataset_id}.{match.table_id}
-                    </span>
-                    <span className="text-muted-foreground">
-                      Atualizado em {formatDate(match.last_modified_time)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <SearchMatchesTable matches={result.datasets_with_match} />
             </div>
           )}
 
@@ -127,21 +122,7 @@ export function SearchPage() {
                 Ausente em {result.datasets_without_match.length}{' '}
                 {result.datasets_without_match.length === 1 ? 'dataset' : 'datasets'}
               </h2>
-              <div className="flex flex-col gap-1">
-                {result.datasets_without_match.map((dataset) => (
-                  <div
-                    key={dataset.dataset_id}
-                    className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium">{dataset.dataset_id}</span>
-                    <span className="text-muted-foreground">
-                      {dataset.latest_partition
-                        ? `Última partição encontrada: ${dataset.latest_partition}`
-                        : 'Sem tabelas do mesmo prefixo'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <SearchAbsentTable datasets={result.datasets_without_match} />
             </div>
           )}
         </div>

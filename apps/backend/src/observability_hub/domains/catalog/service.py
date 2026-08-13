@@ -19,6 +19,7 @@ from observability_hub.domains.catalog.schemas import (
     DatasetWithoutMatch,
     PartitionRow,
     ProjectValidateResponse,
+    SearchMode,
     TableDetail,
     TablePartitionsResponse,
     TableSearchResponse,
@@ -143,6 +144,36 @@ def get_table_partitions(
     )
 
 
+def _search_not_contains(
+    client: bigquery.Client, project_id: str, regions: list[str], query: str
+) -> TableSearchResponse:
+    """mode="not_contains": datasets onde NENHUMA tabela contém query —
+    inverte a lógica dos outros modes (que procuram tabelas que batem,
+    aqui o resultado É a ausência). Reaproveita search_tables(mode=
+    "contains") pra achar quem TEM alguma tabela com o termo, e
+    get_datasets_summary (todos os datasets do projeto via SCHEMATA) pra
+    saber o universo completo — a diferença entre os dois vira o
+    resultado. datasets_with_match fica sempre vazio: não há uma tabela
+    específica pra apontar como "match" nesse mode."""
+    all_datasets = repository.get_datasets_summary(client, project_id, regions)
+    matched_dataset_ids = {
+        m["dataset_id"]
+        for m in repository.search_tables(client, project_id, regions, query, "contains")
+    }
+    datasets_without_match = [
+        DatasetWithoutMatch(dataset_id=d["dataset_id"], reason="no_match")
+        for d in all_datasets
+        if d["dataset_id"] not in matched_dataset_ids
+    ]
+    return TableSearchResponse(
+        query=query,
+        mode=SearchMode.NOT_CONTAINS,
+        project_id=project_id,
+        datasets_with_match=[],
+        datasets_without_match=datasets_without_match,
+    )
+
+
 def search_tables(
     client: bigquery.Client, project_id: str, query: str, mode: str
 ) -> TableSearchResponse:
@@ -150,27 +181,33 @@ def search_tables(
     (ou não) uma tabela com esse nome. datasets_without_match só lista
     datasets que têm outra tabela da mesma série (mesmo prefixo sem o
     sufixo numérico final de query, ver repository.derive_search_prefix) —
-    não lista todo dataset do projeto que simplesmente não bateu."""
+    não lista todo dataset do projeto que simplesmente não bateu.
+
+    mode="not_contains" é tratado à parte (ver _search_not_contains) — não
+    é uma variação da query SQL de match, é uma pergunta diferente
+    (ausência em vez de presença)."""
     regions = discover_regions(project_id, client=client)
+    if mode == "not_contains":
+        return _search_not_contains(client, project_id, regions, query)
+
     raw_matches = repository.search_tables(client, project_id, regions, query, mode)
 
     table_refs = [f"{project_id}.{m['dataset_id']}.{m['table_id']}" for m in raw_matches]
     metadata_by_ref = get_tables_metadata(client, table_refs)
 
-    def _last_modified(match: dict) -> datetime | None:
-        table_ref = f"{project_id}.{match['dataset_id']}.{match['table_id']}"
+    datasets_with_match = []
+    for m in raw_matches:
+        table_ref = f"{project_id}.{m['dataset_id']}.{m['table_id']}"
         bq_table = metadata_by_ref.get(table_ref)
-        return bq_table.modified if bq_table is not None else None
-
-    datasets_with_match = [
-        DatasetWithMatch(
-            dataset_id=m["dataset_id"],
-            table_id=m["table_id"],
-            table_type=m["table_type"],
-            last_modified_time=_last_modified(m),
+        datasets_with_match.append(
+            DatasetWithMatch(
+                dataset_id=m["dataset_id"],
+                table_id=m["table_id"],
+                table_type=m["table_type"],
+                last_modified_time=bq_table.modified if bq_table is not None else None,
+                row_count=bq_table.num_rows if bq_table is not None else None,
+            )
         )
-        for m in raw_matches
-    ]
 
     datasets_without_match: list[DatasetWithoutMatch] = []
     prefix = repository.derive_search_prefix(query)
