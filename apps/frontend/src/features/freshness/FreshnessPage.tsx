@@ -1,3 +1,4 @@
+import { RefreshButton } from '@/components/RefreshButton'
 import { DatasetFreshnessTable } from '@/features/freshness/DatasetFreshnessTable'
 import { useProjectFreshness } from '@/features/freshness/hooks'
 import { SlaRow } from '@/features/freshness/SlaRow'
@@ -36,12 +37,18 @@ export function FreshnessPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Freshness</h1>
-        <p className="text-sm text-muted-foreground">
-          {totals.total_tables} tabelas monitoradas em {freshnessQuery.data.datasets.length}{' '}
-          datasets
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Freshness</h1>
+          <p className="text-sm text-muted-foreground">
+            {totals.total_tables} tabelas monitoradas em {freshnessQuery.data.datasets.length}{' '}
+            datasets
+          </p>
+        </div>
+        <RefreshButton
+          isRefreshing={freshnessQuery.isFetching}
+          onRefresh={() => freshnessQuery.refetch()}
+        />
       </div>
 
       <SlaRow counts={totals} />

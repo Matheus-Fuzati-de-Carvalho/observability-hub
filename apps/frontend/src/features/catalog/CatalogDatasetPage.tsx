@@ -1,4 +1,5 @@
 import { useParams } from 'react-router-dom'
+import { RefreshButton } from '@/components/RefreshButton'
 import { AssetsTable } from '@/features/catalog/AssetsTable'
 import { useDatasets, useTables } from '@/features/catalog/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
@@ -27,12 +28,24 @@ export function CatalogDatasetPage() {
   const worstStatus = freshnessQuery.data?.datasets.find(
     (d) => d.dataset_id === datasetId,
   )?.worst_status
+  const isRefreshing =
+    tablesQuery.isFetching || datasetsQuery.isFetching || freshnessQuery.isFetching
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">{tablesQuery.data.dataset_id}</h1>
-        <p className="text-sm text-muted-foreground">{tablesQuery.data.total_tables} ativos</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{tablesQuery.data.dataset_id}</h1>
+          <p className="text-sm text-muted-foreground">{tablesQuery.data.total_tables} ativos</p>
+        </div>
+        <RefreshButton
+          isRefreshing={isRefreshing}
+          onRefresh={() => {
+            tablesQuery.refetch()
+            datasetsQuery.refetch()
+            freshnessQuery.refetch()
+          }}
+        />
       </div>
 
       <KpiCards
