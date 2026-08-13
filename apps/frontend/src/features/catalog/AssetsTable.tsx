@@ -1,7 +1,16 @@
-import { Layers, Sparkles, Star } from 'lucide-react'
-import { useState } from 'react'
+import { Layers, Search, Sparkles, Star } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { SortableTableHead } from '@/components/SortableTableHead'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -15,7 +24,25 @@ import { isFavoriteTable, useFavorites, useToggleFavorite } from '@/features/fav
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import type { TableSummary } from '@/types/catalog'
+import type { TableSummary, TableType } from '@/types/catalog'
+
+const TYPE_FILTER_ALL = 'all'
+const TYPE_LABELS: Record<TableType, string> = {
+  TABLE: 'TABLE',
+  VIEW: 'VIEW',
+  EXTERNAL: 'EXTERNAL',
+  MATERIALIZED_VIEW: 'MATERIALIZED_VIEW',
+}
+
+type SortKey =
+  | 'table_id'
+  | 'table_type'
+  | 'column_count'
+  | 'creation_time'
+  | 'last_modified_time'
+  | 'row_count'
+  | 'size_bytes'
+type SortDirection = 'asc' | 'desc'
 
 interface AssetsTableProps {
   projectId: string
@@ -28,26 +55,132 @@ function formatOrDash(value: string | null): string {
   return value ?? '—'
 }
 
+function compare(a: TableSummary, b: TableSummary, key: SortKey): number {
+  if (key === 'column_count') return a.column_count - b.column_count
+  if (key === 'row_count') return (a.row_count ?? -1) - (b.row_count ?? -1)
+  if (key === 'size_bytes') return (a.size_bytes ?? -1) - (b.size_bytes ?? -1)
+  if (key === 'last_modified_time') {
+    return (a.last_modified_time ?? '').localeCompare(b.last_modified_time ?? '')
+  }
+  return a[key].localeCompare(b[key])
+}
+
 export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: AssetsTableProps) {
   const [profilingTarget, setProfilingTarget] = useState<string | null>(null)
   const [partitionsTarget, setPartitionsTarget] = useState<string | null>(null)
-  const showPartitionColumns = tables.some((table) => table.is_partitioned)
+  const [nameFilter, setNameFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState<TableType | typeof TYPE_FILTER_ALL>(TYPE_FILTER_ALL)
+  const [sortKey, setSortKey] = useState<SortKey>('table_id')
+  const [sortDir, setSortDir] = useState<SortDirection>('asc')
   const favoritesQuery = useFavorites()
   const toggleFavorite = useToggleFavorite()
 
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((direction) => (direction === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
+  const visibleTables = useMemo(() => {
+    const filtered = tables.filter(
+      (table) =>
+        table.table_id.toLowerCase().includes(nameFilter.toLowerCase()) &&
+        (typeFilter === TYPE_FILTER_ALL || table.table_type === typeFilter),
+    )
+    const sign = sortDir === 'asc' ? 1 : -1
+    return [...filtered].sort((a, b) => sign * compare(a, b, sortKey))
+  }, [tables, nameFilter, typeFilter, sortKey, sortDir])
+
+  const showPartitionColumns = tables.some((table) => table.is_partitioned)
+
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search
+            size={14}
+            className="-translate-y-1/2 absolute top-1/2 left-2.5 text-muted-foreground"
+          />
+          <Input
+            value={nameFilter}
+            onChange={(e) => setNameFilter(e.target.value)}
+            placeholder="Filtrar por nome…"
+            className="pl-8"
+          />
+        </div>
+        <Select
+          value={typeFilter}
+          onValueChange={(value) => setTypeFilter((value as TableType) ?? TYPE_FILTER_ALL)}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue>
+              {(value: TableType | typeof TYPE_FILTER_ALL) =>
+                value === TYPE_FILTER_ALL ? 'Todos os tipos' : TYPE_LABELS[value]
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TYPE_FILTER_ALL}>Todos os tipos</SelectItem>
+            <SelectItem value="TABLE">TABLE</SelectItem>
+            <SelectItem value="VIEW">VIEW</SelectItem>
+            <SelectItem value="EXTERNAL">EXTERNAL</SelectItem>
+            <SelectItem value="MATERIALIZED_VIEW">MATERIALIZED_VIEW</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead />
-            <TableHead>Nome</TableHead>
-            <TableHead>Tipo</TableHead>
-            <TableHead className="text-right">Colunas</TableHead>
-            <TableHead>Criação</TableHead>
-            <TableHead>Atualização</TableHead>
-            <TableHead className="text-right">Linhas</TableHead>
-            <TableHead className="text-right">Volume</TableHead>
+            <SortableTableHead
+              label="Nome"
+              active={sortKey === 'table_id'}
+              direction={sortDir}
+              onClick={() => toggleSort('table_id')}
+            />
+            <SortableTableHead
+              label="Tipo"
+              active={sortKey === 'table_type'}
+              direction={sortDir}
+              onClick={() => toggleSort('table_type')}
+            />
+            <SortableTableHead
+              label="Colunas"
+              active={sortKey === 'column_count'}
+              direction={sortDir}
+              onClick={() => toggleSort('column_count')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Criação"
+              active={sortKey === 'creation_time'}
+              direction={sortDir}
+              onClick={() => toggleSort('creation_time')}
+            />
+            <SortableTableHead
+              label="Atualização"
+              active={sortKey === 'last_modified_time'}
+              direction={sortDir}
+              onClick={() => toggleSort('last_modified_time')}
+            />
+            <SortableTableHead
+              label="Linhas"
+              active={sortKey === 'row_count'}
+              direction={sortDir}
+              onClick={() => toggleSort('row_count')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Volume"
+              active={sortKey === 'size_bytes'}
+              direction={sortDir}
+              onClick={() => toggleSort('size_bytes')}
+              align="right"
+            />
             <TableHead>Região</TableHead>
             {showPartitionColumns && (
               <>
@@ -61,7 +194,7 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tables.map((table) => {
+          {visibleTables.map((table) => {
             const isFavorite = isFavoriteTable(
               favoritesQuery.data,
               projectId,
@@ -144,6 +277,16 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
               </TableRow>
             )
           })}
+          {visibleTables.length === 0 && (
+            <TableRow>
+              <TableCell
+                colSpan={showPartitionColumns ? 13 : 9}
+                className="text-center text-muted-foreground"
+              >
+                Nenhuma tabela encontrada com esse filtro.
+              </TableCell>
+            </TableRow>
+          )}
         </TableBody>
       </Table>
 

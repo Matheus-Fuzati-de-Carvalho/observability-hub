@@ -31,7 +31,7 @@ export function DatasetFreshnessTable({ datasets }: { datasets: DatasetFreshness
         {datasets.map((dataset) => (
           <TableRow key={dataset.dataset_id}>
             <TableCell className="font-medium">
-              <Link to={`/datasets/${dataset.dataset_id}`} className="hover:text-primary">
+              <Link to={`/freshness/${dataset.dataset_id}`} className="hover:text-primary">
                 {dataset.dataset_id}
               </Link>
             </TableCell>
