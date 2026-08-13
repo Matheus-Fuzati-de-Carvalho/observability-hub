@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { RefreshButton } from '@/components/RefreshButton'
 import { AssetsTable } from '@/features/catalog/AssetsTable'
 import { useDatasets, useTables } from '@/features/catalog/hooks'
@@ -11,6 +11,8 @@ import { formatNumber } from '@/lib/format'
 export function CatalogDatasetPage() {
   const { projectId } = useProjectContext()
   const { datasetId } = useParams<{ datasetId: string }>()
+  const location = useLocation()
+  const highlightTableId = (location.state as { highlightTable?: string } | null)?.highlightTable
 
   const tablesQuery = useTables(projectId, datasetId)
   const datasetsQuery = useDatasets(projectId)
@@ -67,6 +69,7 @@ export function CatalogDatasetPage() {
         projectId={projectId as string}
         datasetId={datasetId as string}
         tables={tablesQuery.data.tables}
+        highlightTableId={highlightTableId}
       />
     </div>
   )

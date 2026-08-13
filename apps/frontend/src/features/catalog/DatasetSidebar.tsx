@@ -1,6 +1,7 @@
-import { Clock, Search } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { Clock, Search, Star } from 'lucide-react'
+import { Link, NavLink } from 'react-router-dom'
 import { useDatasets } from '@/features/catalog/hooks'
+import { useFavorites } from '@/features/favorites/hooks'
 import { cn } from '@/lib/utils'
 
 interface DatasetSidebarProps {
@@ -20,6 +21,8 @@ function formatAssetCounts(totalTables: number, totalViews: number): string {
 
 export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   const datasetsQuery = useDatasets(projectId)
+  const favoritesQuery = useFavorites()
+  const projectFavorites = favoritesQuery.data?.favorites.filter((f) => f.project_id === projectId)
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
@@ -85,6 +88,29 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
           </NavLink>
         ))}
       </nav>
+
+      {projectFavorites && projectFavorites.length > 0 && (
+        <>
+          <p className="mt-4 mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Favoritos
+          </p>
+          <nav className="flex flex-col gap-0.5">
+            {projectFavorites.map((favorite) => (
+              <Link
+                key={`${favorite.dataset_id}.${favorite.table_id}`}
+                to={`/datasets/${favorite.dataset_id}`}
+                state={{ highlightTable: favorite.table_id }}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+              >
+                <Star size={12} className="shrink-0 fill-primary text-primary" />
+                <span className="truncate">
+                  {favorite.dataset_id}.{favorite.table_id}
+                </span>
+              </Link>
+            ))}
+          </nav>
+        </>
+      )}
     </aside>
   )
 }
