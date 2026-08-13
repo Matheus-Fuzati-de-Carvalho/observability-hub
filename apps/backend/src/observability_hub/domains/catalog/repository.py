@@ -3,6 +3,11 @@ linhas cruas do INFORMATION_SCHEMA — service.py nunca vê SQL nem objetos do
 client do BigQuery além do que essas funções retornam.
 """
 
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from google.cloud import bigquery
 
 # resolve_dataset_region é re-exportado para manter repository.resolve_dataset_region
@@ -24,6 +29,17 @@ _RAW_TABLE_TYPE_TO_API = {
     "MATERIALIZED VIEW": "MATERIALIZED_VIEW",
 }
 _API_TABLE_TYPE_TO_RAW = {v: k for k, v in _RAW_TABLE_TYPE_TO_API.items()}
+
+# get_partition_stats roda uma query real (custo != $0, ver função) — cacheada
+# por tabela pra não repetir a cada refresh de tela.
+_PARTITION_STATS_CACHE_TTL_SECONDS = 300
+_partition_stats_cache: dict[str, tuple[float, dict]] = {}
+_partition_stats_cache_lock = threading.Lock()
+
+# Usado por derive_search_prefix — tabelas com sufixo numérico (ex:
+# events_20260812, sharded/particionadas por nome) tratadas como uma série;
+# o prefixo sem o sufixo identifica a série (events_).
+_TRAILING_DIGITS_RE = re.compile(r"\d+$")
 
 
 def _bytes_to_gb(size_bytes: int | None) -> float | None:
@@ -76,6 +92,117 @@ def get_datasets_summary(
     return datasets
 
 
+def derive_search_prefix(query: str) -> str | None:
+    """Remove o sufixo numérico final de query (ex: "events_20260812" ->
+    "events_"). None se query não termina em dígito — sem sufixo numérico
+    não há uma "série" de tabelas pra comparar (usado pela busca reversa
+    pra explicar datasets sem a tabela buscada, ver search_tables_by_prefix)."""
+    match = _TRAILING_DIGITS_RE.search(query)
+    if match is None:
+        return None
+    prefix = query[: match.start()]
+    return prefix or None
+
+
+def search_tables(
+    client: bigquery.Client,
+    project_id: str,
+    regions: list[str],
+    query: str,
+    mode: str,
+    max_workers: int = 8,
+) -> list[dict]:
+    """Busca table_name = query (mode="exact") ou table_name LIKE '%query%'
+    (mode="contains") em INFORMATION_SCHEMA.TABLES de todas as regiões do
+    projeto, uma query por região em paralelo (mesma técnica de
+    core.bigquery.discover_regions)."""
+    if not regions:
+        return []
+
+    def _search_region(region: str) -> list[dict]:
+        if mode == "exact":
+            where = "table_name = @q"
+            params = [bigquery.ScalarQueryParameter("q", "STRING", query)]
+        else:
+            where = "table_name LIKE @q"
+            params = [bigquery.ScalarQueryParameter("q", "STRING", f"%{query}%")]
+        sql = f"""
+            SELECT table_schema AS dataset_id, table_name AS table_id, table_type
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.TABLES`
+            WHERE {where}
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        rows = client.query(sql, job_config=job_config).result()
+        return [
+            {
+                "dataset_id": row.dataset_id,
+                "table_id": row.table_id,
+                "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
+            }
+            for row in rows
+        ]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_search_region, regions))
+    matches = [row for region_rows in results for row in region_rows]
+    matches.sort(key=lambda m: (m["dataset_id"], m["table_id"]))
+    return matches
+
+
+def search_tables_by_prefix(
+    client: bigquery.Client,
+    project_id: str,
+    regions: list[str],
+    prefix: str,
+    exclude_dataset_ids: set[str],
+    max_workers: int = 8,
+) -> list[dict]:
+    """Pra cada dataset com pelo menos uma tabela começando com prefix,
+    retorna a última (MAX table_name) — usado pra explicar datasets sem a
+    tabela exata buscada mas que têm a mesma série (ex: events_20260810 num
+    dataset que não tem events_20260812 ainda). Datasets em
+    exclude_dataset_ids (os que já bateram no match exato) são omitidos."""
+    if not regions:
+        return []
+
+    def _search_region(region: str) -> list[dict]:
+        sql = f"""
+            SELECT table_schema AS dataset_id, MAX(table_name) AS latest_table
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.TABLES`
+            WHERE table_name LIKE @prefix
+            GROUP BY 1
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("prefix", "STRING", f"{prefix}%")]
+        )
+        rows = client.query(sql, job_config=job_config).result()
+        return [{"dataset_id": row.dataset_id, "latest_table": row.latest_table} for row in rows]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_search_region, regions))
+    rows = [row for region_rows in results for row in region_rows]
+    rows = [row for row in rows if row["dataset_id"] not in exclude_dataset_ids]
+    rows.sort(key=lambda r: r["dataset_id"])
+    return rows
+
+
+def _partition_type_label(
+    partition_column: str | None, bq_table: bigquery.Table | None
+) -> str | None:
+    """Formata como "{coluna} ({TIPO})", ex: "event_date (DAY)" — TIPO vem de
+    table.time_partitioning.type_ (DAY/HOUR/MONTH/YEAR ou particionamento por
+    ingestão, _PARTITIONTIME/_PARTITIONDATE) ou "RANGE" para
+    table.range_partitioning. None se a tabela não é particionada ou se
+    bq_table não foi resolvido (race, ver _row_to_table_dict)."""
+    if partition_column is None or bq_table is None:
+        return None
+    if bq_table.time_partitioning is not None and bq_table.time_partitioning.type_:
+        return f"{partition_column} ({bq_table.time_partitioning.type_})"
+    if bq_table.range_partitioning is not None:
+        return f"{partition_column} (RANGE)"
+    return partition_column
+
+
 def _row_to_table_dict(row, location: str, bq_table: bigquery.Table | None) -> dict:
     """bq_table vem de client.get_table() (core.bigquery.get_tables_metadata) —
     num_rows/num_bytes/modified em tempo real, sem o lag de até 24h de
@@ -96,6 +223,7 @@ def _row_to_table_dict(row, location: str, bq_table: bigquery.Table | None) -> d
         "column_count": row.column_count,
         "is_partitioned": partition_column is not None,
         "partition_column": partition_column,
+        "partition_type": _partition_type_label(partition_column, bq_table),
         "is_clustered": len(clustering_columns) > 0,
         "clustering_columns": clustering_columns,
         "location": location,
@@ -181,6 +309,70 @@ def get_tables_summary(
     ]
     tables.sort(key=lambda t: (t["size_bytes"] is None, -(t["size_bytes"] or 0)))
     return tables
+
+
+def get_partition_stats(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    partition_field: str,
+) -> dict:
+    """Min/max/contagem (DISTINCT) real da coluna de partição — ao contrário
+    de INFORMATION_SCHEMA (metadado gratuito), esta é uma query de dados de
+    verdade e tem custo: INFORMATION_SCHEMA.PARTITIONS não existe em
+    datasets multi-região (US/EU) e por isso não serve como fonte única.
+    Custo é limitado por ler só a coluna de partição, sem filtro — mesmo
+    assim, cacheado 5min por tabela (não por instância do Hub) pra não
+    repetir a cada refresh de tela."""
+    table_ref = f"{project_id}.{dataset_id}.{table_id}"
+    now = time.monotonic()
+    with _partition_stats_cache_lock:
+        cached = _partition_stats_cache.get(table_ref)
+    if cached is not None and now - cached[0] < _PARTITION_STATS_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    query = f"""
+        SELECT
+          MIN(`{partition_field}`)            AS min_partition,
+          MAX(`{partition_field}`)            AS max_partition,
+          COUNT(DISTINCT `{partition_field}`) AS partition_count
+        FROM `{table_ref}`
+    """
+    row = next(iter(client.query(query).result()))
+    result = {
+        "min_partition": None if row.min_partition is None else str(row.min_partition),
+        "max_partition": None if row.max_partition is None else str(row.max_partition),
+        "partition_count": row.partition_count,
+    }
+    with _partition_stats_cache_lock:
+        _partition_stats_cache[table_ref] = (now, result)
+    return result
+
+
+def get_table_partitions(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    partition_field: str,
+) -> list[dict]:
+    """Lista as partições distintas de uma tabela particionada com a
+    contagem de linhas de cada uma — query real de dados (não metadado),
+    ordenada da mais recente pra mais antiga. GROUP BY já garante um valor
+    distinto por linha, sem precisar de DISTINCT."""
+    query = f"""
+        SELECT `{partition_field}` AS partition_value, COUNT(*) AS row_count
+        FROM `{project_id}.{dataset_id}.{table_id}`
+        GROUP BY 1
+        ORDER BY 1 DESC
+    """
+    rows = client.query(query).result()
+    return [
+        {"value": str(row.partition_value), "row_count": row.row_count}
+        for row in rows
+        if row.partition_value is not None
+    ]
 
 
 def get_table_columns(

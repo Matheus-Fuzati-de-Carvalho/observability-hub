@@ -1,9 +1,9 @@
 # Spec — Domínio: Profiling (quality)
 
-**Versão:** 1.1 (região automática)
+**Versão:** 1.2 (suporte a views, tipo lógico por tipo físico, schema preview)
 **Status:** Aprovada
 **Fase:** 2 — MVP v1
-**Última atualização:** 2026-08-05
+**Última atualização:** 2026-08-13
 
 ---
 
@@ -19,12 +19,40 @@ execução. A região é resolvida automaticamente via metadados do dataset.
 
 ```
 1. Usuário clica em "Analisar" em uma tabela do catálogo
-2. Modal abre com colunas da tabela já carregadas
+2. Modal abre com o schema da tabela já carregado (GET .../tables/{table_id}
+   do domínio catalog, reaproveitado — ver "Schema preview" abaixo),
+   destacando coluna de partição e badges "Particionada por"/"Clusterizada por"
 3. Configura: amostragem %, método unicidade, coluna de data, janela
+   (amostragem desabilitada se a tabela for VIEW/MATERIALIZED VIEW — ver
+   "Suporte a views")
 4. "Estimar Custo" → dry run retorna volume e custo USD + SQL gerado
 5. "Executar Profile" → métricas por coluna e resumo da tabela
 6. Opcional: drill down "Distribuição de nulos ao longo do tempo"
 ```
+
+### Schema preview (frontend, antes de estimar/executar)
+
+O modal carrega o schema completo da tabela (`GET /api/v1/catalog/
+{project_id}/datasets/{dataset_id}/tables/{table_id}`, endpoint do domínio
+catalog — não é um endpoint novo de profiling) antes de qualquer
+estimativa ou execução, numa tabela Nome/Tipo/Nullable
+(`SchemaTable.tsx`). Colunas `STRUCT`/`ARRAY` aparecem com badge
+"Complexo" (mesmo critério de exclusão do profiling, `sql_builder.
+is_excluded_type` — prefixo `STRUCT<`/`ARRAY<` no `data_type`), mas
+**mostradas no schema mesmo assim**, sem métricas — só o profiling em si
+as exclui e reporta em `excluded_columns` (ver "Casos de borda"). Colunas
+de data ganham destaque visual. Header do modal mostra badges "Particionada
+por {coluna}"/"Clusterizada por {colunas}" quando aplicável.
+
+### Suporte a views
+
+`TABLESAMPLE SYSTEM` não é suportado pelo BigQuery em `VIEW`/
+`MATERIALIZED VIEW` — `is_view` (resolvido via `INFORMATION_SCHEMA.TABLES.
+table_type`, `domains/quality/repository.py::is_view`) é passado para
+`sql_builder.build_main_query`/`build_top_n_query`, que omitem a cláusula
+`TABLESAMPLE` (e ignoram `sample_percent`) quando `is_view=true`. O
+frontend desabilita o campo de amostragem com um aviso quando a tabela é
+view.
 
 ---
 
@@ -176,22 +204,39 @@ ORDER BY count DESC
 LIMIT 10
 ```
 
+Ambas as queries acima omitem `TABLESAMPLE SYSTEM (...)` (e ignoram
+`sample_percent`) quando a tabela é `VIEW`/`MATERIALIZED VIEW` — ver
+"Suporte a views".
+
 ---
 
 ## Regras das métricas
 
 ### Tipo lógico inferido (sem custo extra — usa min/max/top_values já retornados)
 
-| Tipo | Critério |
-|---|---|
-| `id` | distinct_pct > 90% |
-| `categorical` | distinct_count < 50 |
-| `email` | min ou max contém `@` |
-| `date_string` | STRING com padrão `YYYY-MM-DD` |
-| `numeric_string` | STRING onde min e max são numéricos |
-| `boolean` | distinct_count = 2 |
-| `free_text` | STRING com distinct_pct > 50% sem padrão |
-| `unknown` | nenhum padrão identificado |
+Checado nesta ordem — **tipo físico primeiro**, heurísticas de
+cardinalidade só como fallback quando o tipo físico não decide sozinho
+(a ordem da v1.1 desta spec — puramente por cardinalidade — era
+auto-contraditória: `distinct_count < 50` é sempre verdade quando
+`distinct_count == 2`, então `boolean` nunca seria alcançável antes de
+`categorical`):
+
+| Ordem | Tipo | Critério |
+|---|---|---|
+| 1 | `date` | tipo físico `DATE` |
+| 2 | `timestamp` | tipo físico `DATETIME`/`TIMESTAMP` |
+| 3 | `numeric` | tipo físico `INTEGER`/`INT64`/`FLOAT64`/`NUMERIC`/`BIGNUMERIC` |
+| 4 | `id` | distinct_pct > 90% |
+| 5 | `boolean` | distinct_count = 2 |
+| 6 | `email` | STRING, min ou max contém `@` |
+| 7 | `date_string` | STRING com padrão `YYYY-MM-DD` em min e max |
+| 8 | `numeric_string` | STRING onde min e max são numéricos |
+| 9 | `categorical` | distinct_count < 50 |
+| 10 | `free_text` | STRING com distinct_pct > 50% |
+| 11 | `unknown` | nenhum padrão identificado |
+
+Colunas com tipo físico numérico/data/timestamp nunca passam pelas
+heurísticas 4–11 — o tipo já responde a pergunta.
 
 ### Quality flag
 

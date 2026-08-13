@@ -75,13 +75,20 @@ def test_row_to_table_dict_derives_partitioned_and_clustered():
         partition_column="_PARTITIONTIME",
         clustering_columns=["event_name", "user_id"],
     )
-    bq_table = SimpleNamespace(num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z")
+    bq_table = SimpleNamespace(
+        num_rows=10000,
+        num_bytes=576920,
+        modified="2026-06-08T18:38:40Z",
+        time_partitioning=SimpleNamespace(type_="DAY"),
+        range_partitioning=None,
+    )
 
     result = repository._row_to_table_dict(row, "US", bq_table)
 
     assert result["table_id"] == "events"
     assert result["table_type"] == "TABLE"
     assert result["is_partitioned"] is True
+    assert result["partition_type"] == "_PARTITIONTIME (DAY)"
     assert result["is_clustered"] is True
     assert result["clustering_columns"] == ["event_name", "user_id"]
     assert result["size_gb"] == round(576920 / 1_000_000_000, 4)
@@ -196,7 +203,11 @@ def test_get_tables_summary_row_to_dict_reads_partition_column_from_columns_agg(
     ]
     client = _client_returning([rows])
     client.get_table.return_value = SimpleNamespace(
-        num_rows=10000, num_bytes=576920, modified="2026-06-08T18:38:40Z"
+        num_rows=10000,
+        num_bytes=576920,
+        modified="2026-06-08T18:38:40Z",
+        time_partitioning=SimpleNamespace(type_="DAY"),
+        range_partitioning=None,
     )
 
     result = repository.get_tables_summary(client, "proj", "RAW", "US")
@@ -292,6 +303,237 @@ def test_get_table_detail_combines_summary_columns_and_bq_table_metadata(monkeyp
     assert result["description"] == "Eventos GA4"
     assert result["columns"][0]["column_name"] == "event_date"
     client.get_table.assert_called_once_with("proj.RAW.ga4_events")
+
+
+def test_partition_type_label_formats_field_and_time_partitioning_type():
+    bq_table = SimpleNamespace(
+        time_partitioning=SimpleNamespace(type_="DAY"), range_partitioning=None
+    )
+
+    assert repository._partition_type_label("event_date", bq_table) == "event_date (DAY)"
+
+
+def test_partition_type_label_formats_range_partitioning():
+    bq_table = SimpleNamespace(time_partitioning=None, range_partitioning=SimpleNamespace())
+
+    assert repository._partition_type_label("user_id", bq_table) == "user_id (RANGE)"
+
+
+def test_partition_type_label_none_when_not_partitioned_or_missing_bq_table():
+    bq_table = SimpleNamespace(time_partitioning=None, range_partitioning=None)
+
+    assert repository._partition_type_label(None, bq_table) is None
+    assert repository._partition_type_label("event_date", None) is None
+    assert repository._partition_type_label("event_date", bq_table) == "event_date"
+
+
+def test_get_partition_stats_queries_min_max_distinct_on_partition_field(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition="2026-08-03", max_partition="2026-08-12", partition_count=10)]
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        job = MagicMock()
+        job.result.return_value = rows
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
+
+    assert "proj.RAW.events" in captured["sql"]
+    assert "COUNT(DISTINCT `event_date`)" in captured["sql"]
+    assert "INFORMATION_SCHEMA" not in captured["sql"]
+    assert result == {
+        "min_partition": "2026-08-03",
+        "max_partition": "2026-08-12",
+        "partition_count": 10,
+    }
+
+
+def test_get_partition_stats_stringifies_min_max_and_handles_null(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition=None, max_partition=None, partition_count=0)]
+    client = _client_returning([rows])
+
+    result = repository.get_partition_stats(client, "proj", "RAW", "empty", "event_date")
+
+    assert result == {"min_partition": None, "max_partition": None, "partition_count": 0}
+
+
+def test_get_partition_stats_caches_by_table_ref(monkeypatch):
+    monkeypatch.setattr(repository, "_partition_stats_cache", {})
+    rows = [_row(min_partition="2026-08-03", max_partition="2026-08-12", partition_count=10)]
+    client = _client_returning([rows])
+
+    first = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
+    second = repository.get_partition_stats(client, "proj", "RAW", "events", "event_date")
+
+    assert first == second
+    assert client.query.call_count == 1
+
+
+def test_get_table_partitions_queries_group_by_ordered_desc():
+    rows = [
+        _row(partition_value="2026-08-12", row_count=1800),
+        _row(partition_value="2026-08-11", row_count=1500),
+    ]
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        job = MagicMock()
+        job.result.return_value = rows
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.get_table_partitions(client, "proj", "RAW", "events", "event_date")
+
+    assert "proj.RAW.events" in captured["sql"]
+    assert "GROUP BY 1" in captured["sql"]
+    assert "ORDER BY 1 DESC" in captured["sql"]
+    assert result == [
+        {"value": "2026-08-12", "row_count": 1800},
+        {"value": "2026-08-11", "row_count": 1500},
+    ]
+
+
+def test_get_table_partitions_skips_null_partition_value():
+    rows = [
+        _row(partition_value=None, row_count=5),
+        _row(partition_value="2026-08-12", row_count=1800),
+    ]
+    client = _client_returning([rows])
+
+    result = repository.get_table_partitions(client, "proj", "RAW", "events", "event_date")
+
+    assert result == [{"value": "2026-08-12", "row_count": 1800}]
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("events_20260812", "events_"),
+        ("ga4_events", None),
+        ("20260812", None),
+        ("crm", None),
+    ],
+)
+def test_derive_search_prefix(query, expected):
+    assert repository.derive_search_prefix(query) == expected
+
+
+def test_search_tables_returns_empty_without_querying_when_no_regions():
+    client = MagicMock()
+
+    result = repository.search_tables(client, "proj", [], "events", "exact")
+
+    assert result == []
+    client.query.assert_not_called()
+
+
+def test_search_tables_exact_mode_uses_equality_param():
+    captured = []
+
+    def fake_query(sql, job_config=None):
+        captured.append((sql, job_config.query_parameters[0].value))
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.search_tables(client, "proj", ["US"], "events_20260812", "exact")
+
+    sql, param_value = captured[0]
+    assert "table_name = @q" in sql
+    assert param_value == "events_20260812"
+
+
+def test_search_tables_contains_mode_uses_like_wildcard():
+    captured = []
+
+    def fake_query(sql, job_config=None):
+        captured.append((sql, job_config.query_parameters[0].value))
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.search_tables(client, "proj", ["US"], "events", "contains")
+
+    sql, param_value = captured[0]
+    assert "table_name LIKE @q" in sql
+    assert param_value == "%events%"
+
+
+def test_search_tables_aggregates_regions_and_sorts_by_dataset_then_table():
+    def fake_query(sql, job_config=None):
+        job = MagicMock()
+        if "region-US" in sql:
+            job.result.return_value = [
+                _row(dataset_id="TRUSTED", table_id="events", table_type="BASE TABLE"),
+                _row(dataset_id="RAW", table_id="events", table_type="BASE TABLE"),
+            ]
+        else:
+            job.result.return_value = [
+                _row(dataset_id="RAW", table_id="events_eu", table_type="VIEW"),
+            ]
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.search_tables(client, "proj", ["US", "EU"], "events", "contains")
+
+    assert [r["dataset_id"] for r in result] == ["RAW", "RAW", "TRUSTED"]
+    assert {"dataset_id": "RAW", "table_id": "events_eu", "table_type": "VIEW"} in result
+
+
+def test_search_tables_by_prefix_returns_empty_without_querying_when_no_regions():
+    client = MagicMock()
+
+    result = repository.search_tables_by_prefix(client, "proj", [], "events_", set())
+
+    assert result == []
+    client.query.assert_not_called()
+
+
+def test_search_tables_by_prefix_excludes_matched_datasets_and_uses_max_per_dataset():
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        captured["prefix_param"] = job_config.query_parameters[0].value
+        job = MagicMock()
+        job.result.return_value = [
+            _row(dataset_id="analytics_456", latest_table="events_20260810"),
+            _row(dataset_id="analytics_789", latest_table="events_20260809"),
+            _row(dataset_id="analytics_123", latest_table="events_20260812"),
+        ]
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.search_tables_by_prefix(
+        client, "proj", ["US"], "events_", {"analytics_123"}
+    )
+
+    assert "MAX(table_name)" in captured["sql"]
+    assert "GROUP BY 1" in captured["sql"]
+    assert captured["prefix_param"] == "events_%"
+    assert result == [
+        {"dataset_id": "analytics_456", "latest_table": "events_20260810"},
+        {"dataset_id": "analytics_789", "latest_table": "events_20260809"},
+    ]
 
 
 def test_get_table_detail_raises_when_table_missing(monkeypatch):

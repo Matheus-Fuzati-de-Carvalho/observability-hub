@@ -34,6 +34,10 @@ export interface TableSummary {
   is_clustered: boolean
   clustering_columns: string[]
   location: string
+  partition_type: string | null
+  min_partition: string | null
+  max_partition: string | null
+  partition_count: number | null
 }
 
 export interface TablesListResponse {
@@ -55,4 +59,41 @@ export interface TableDetail extends TableSummary {
   columns: ColumnDetail[]
   labels: Record<string, string>
   description: string | null
+}
+
+export interface PartitionRow {
+  value: string
+  row_count: number
+}
+
+export interface TablePartitionsResponse {
+  table_id: string
+  partition_column: string
+  partition_type: string
+  total_partitions: number
+  partitions: PartitionRow[]
+}
+
+export type SearchMode = 'exact' | 'contains' | 'not_contains'
+
+export interface DatasetWithMatch {
+  dataset_id: string
+  table_id: string
+  table_type: string
+  last_modified_time: string | null
+  row_count: number | null
+}
+
+export interface DatasetWithoutMatch {
+  dataset_id: string
+  reason: string
+  latest_partition: string | null
+}
+
+export interface TableSearchResponse {
+  query: string
+  mode: SearchMode
+  project_id: string
+  datasets_with_match: DatasetWithMatch[]
+  datasets_without_match: DatasetWithoutMatch[]
 }

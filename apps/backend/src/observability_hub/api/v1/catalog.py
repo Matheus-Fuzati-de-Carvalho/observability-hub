@@ -5,7 +5,10 @@ from observability_hub.core.bigquery import get_client
 from observability_hub.domains.catalog import service
 from observability_hub.domains.catalog.schemas import (
     DatasetsListResponse,
+    SearchMode,
     TableDetail,
+    TablePartitionsResponse,
+    TableSearchResponse,
     TablesListResponse,
     TableType,
 )
@@ -46,3 +49,26 @@ def get_table_detail(
     client: bigquery.Client = Depends(get_client),
 ) -> TableDetail:
     return service.get_table_detail(client, project_id, dataset_id, table_id)
+
+
+@router.get(
+    "/{project_id}/datasets/{dataset_id}/tables/{table_id}/partitions",
+    response_model=TablePartitionsResponse,
+)
+def get_table_partitions(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    client: bigquery.Client = Depends(get_client),
+) -> TablePartitionsResponse:
+    return service.get_table_partitions(client, project_id, dataset_id, table_id)
+
+
+@router.get("/{project_id}/search", response_model=TableSearchResponse)
+def search_tables(
+    project_id: str,
+    q: str = Query(min_length=1),
+    mode: SearchMode = Query(default=SearchMode.EXACT),
+    client: bigquery.Client = Depends(get_client),
+) -> TableSearchResponse:
+    return service.search_tables(client, project_id, q, mode.value)

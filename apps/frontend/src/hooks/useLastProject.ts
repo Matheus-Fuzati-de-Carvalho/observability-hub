@@ -8,3 +8,19 @@ export function setLastProjectId(projectId: string): void {
     // perde o preenchimento automático do próximo acesso.
   }
 }
+
+export function getLastProjectId(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function clearLastProjectId(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ver setLastProjectId
+  }
+}

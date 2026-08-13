@@ -4,8 +4,11 @@ from observability_hub.domains.catalog.schemas import (
     ColumnDetail,
     DatasetsListResponse,
     DatasetSummary,
+    PartitionRow,
     ProjectValidateResponse,
     TableDetail,
+    TablePartitionsResponse,
+    TableSearchResponse,
     TablesListResponse,
     TableSummary,
     TableType,
@@ -177,6 +180,55 @@ def test_table_detail_matches_spec_example():
     model = TableDetail(**payload)
     assert len(model.columns) == 1
     assert model.labels == {}
+
+
+def test_table_partitions_response_matches_spec_example():
+    payload = {
+        "table_id": "events",
+        "partition_column": "event_date",
+        "partition_type": "event_date (DAY)",
+        "total_partitions": 2,
+        "partitions": [
+            {"value": "2026-08-12", "row_count": 1800},
+            {"value": "2026-08-11", "row_count": 1500},
+        ],
+    }
+    model = TablePartitionsResponse(**payload)
+    assert model.total_partitions == 2
+    assert model.partitions[0] == PartitionRow(value="2026-08-12", row_count=1800)
+
+
+def test_table_search_response_matches_spec_example():
+    payload = {
+        "query": "events_20260812",
+        "mode": "exact",
+        "project_id": "cliente-x-prod",
+        "datasets_with_match": [
+            {
+                "dataset_id": "analytics_123",
+                "table_id": "events_20260812",
+                "table_type": "TABLE",
+                "last_modified_time": "2026-08-12T03:00:00Z",
+                "row_count": 22096,
+            }
+        ],
+        "datasets_without_match": [
+            {
+                "dataset_id": "analytics_456",
+                "reason": "prefix_exists",
+                "latest_partition": "events_20260810",
+            },
+            {
+                "dataset_id": "analytics_789",
+                "reason": "prefix_exists",
+                "latest_partition": "events_20260809",
+            },
+        ],
+    }
+    model = TableSearchResponse(**payload)
+    assert model.mode.value == "exact"
+    assert len(model.datasets_with_match) == 1
+    assert len(model.datasets_without_match) == 2
 
 
 def test_table_type_enum_values():

@@ -7,13 +7,226 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-11 — **encerramento da Sprint 2**
-**Fase atual:** Sprint 2 concluída. Backend e frontend com MVP completo dos
-domínios catalog, freshness e quality/profiling, deployados e validados
-ponta a ponta em dev e prod (ambos em sincronia, commit `5aa7179`).
-**Próximo passo:** Iniciar **Sprint 3 — Discovery** (Fase 3 do CLAUDE.md):
-lineage, PII, mapa de acesso. Nenhuma implementação desses domínios foi
-começada ainda. Local e `origin/main` já sincronizados nesta sessão.
+**Última atualização:** 2026-08-13 — Sprint 2.2 e 2.3 concluídas, validadas
+em dev, documentação atualizada
+**Fase atual:** Sprint 2.2 (metadados de partição + "Ver partições",
+refresh, busca reversa) e Sprint 2.3 (sidebar sem bolinhas SLA,
+persistência de projeto via localStorage, mode `not_contains` na busca,
+resultado da busca em tabela ordenável/filtrável) — **as sete
+funcionalidades implementadas, testadas em dev e validadas pelo
+usuário**. Tudo na branch `feature/partition-metadata`
+(commits `ea64c8d`..`2630fb9`; ver seções "Sprint 2.2" e "Sprint 2.3"
+abaixo para o detalhe de cada funcionalidade). Documentação atualizada
+nesta sessão (CHANGELOG, PRD, ADR-008, specs de catalog/profiling) — ver
+"Sprint 2.2/2.3 — Documentação" abaixo. Um PR (#14) chegou a ser aberto
+ainda na primeira versão (incorreta) da Funcionalidade 1 e foi fechado
+pelo usuário sem merge — **nenhum PR aberto no momento**, main e prod
+inalterados.
+**Próximo passo:** Usuário ainda não pediu explicitamente a abertura do
+PR de `feature/partition-metadata` para `main` — confirmar antes de abrir
+(CLAUDE.md exige aprovação explícita para qualquer `git push`, e abrir PR
+é uma ação visível equivalente). Depois do PR (e merge), retomar
+**Sprint 3 — Discovery** (Fase 3 do CLAUDE.md): lineage, PII, mapa de
+acesso — nenhuma implementação desses domínios foi começada ainda; nenhum
+`docs/specs/lineage.md`/`pii.md`/`access.md` existe ainda (checklist do
+contexto "Backend" do CLAUDE.md exige spec aprovada antes de implementar).
+
+---
+
+## Sprint 2.2 — Funcionalidade 1 (metadados de partição)
+
+**Versão 1 (revertida pelo usuário):** `get_partition_stats()` consultava
+`INFORMATION_SCHEMA.PARTITIONS` (dataset-qualified, metadado gratuito),
+retornando N/D direto para datasets multi-região (US/EU) sem tentar a
+query. Como todos os datasets de dev/prod estão em `US`, isso significava
+N/D sempre — comportamento tecnicamente correto pra limitação do BQ, mas
+inútil na prática. PR #14 foi aberto com essa versão e fechado pelo
+usuário sem merge por estar incorreto.
+
+**Versão 2 (atual):** `get_partition_stats()` roda uma query real e leve
+(uma coluna só, sem filtro) direto na tabela:
+```sql
+SELECT MIN(`{campo}`) AS min_partition, MAX(`{campo}`) AS max_partition,
+       COUNT(DISTINCT `{campo}`) AS partition_count
+FROM `{project}.{dataset}.{tabela}`
+```
+Funciona em qualquer região (não depende de `INFORMATION_SCHEMA.
+PARTITIONS`), mas tem custo real de bytes escaneados (ao contrário de
+metadado do `INFORMATION_SCHEMA`) — por isso ganhou cache TTL de 5min por
+tabela (`repository._partition_stats_cache`, mesmo padrão do
+`get_table_cached` de `core/bigquery.py`, mas local ao domínio catalog).
+`campo` vem de `partition_column` (já derivado de
+`COLUMNS.is_partitioning_column`, funciona em qualquer região). Também
+ganhou `partition_type` ("event_date (DAY)"), lido de
+`bq_table.time_partitioning`/`range_partitioning` — já vinha no
+`client.get_table()` cacheado que `get_tables_summary` já chamava pra
+row_count/size/modified, sem chamada extra.
+
+**Confirmado ao vivo em dev** (`observability-hub-dev`, branch
+`feature/partition-metadata`, commit `ea31bd6`):
+
+| Tabela | Partitioned | Tipo | Min | Max | Count |
+|---|---|---|---|---|---|
+| `RAW.events` | true | `event_date (DAY)` | `2021-01-01` | `2021-01-30` | `3` |
+| `TRUSTED.ga4_events` | true | `event_date (DAY)` | `2021-01-01` | `2021-01-18` | `4` |
+| `TRUSTED.sessions` | true | `session_date (DAY)` | `2021-01-06` | `2021-01-31` | `7` |
+| `RAW.crm_leads` | false | — | — | — | — |
+
+Valores reais (dados mock de dev estão em jan/2021), não N/D — objetivo da
+correção alcançado. `RAW.crm_leads` (não particionada) corretamente sem
+dados de partição.
+
+**Não verificado visualmente:** renderização real da tabela no frontend —
+Chromium headless não roda neste sandbox (limitação já registrada em
+sessões anteriores, ver "Decisões e erros de sessões anteriores" #7).
+Validado só via `tsc`/`vite build`/`biome check` limpos e a API real via
+`curl`.
+
+Além dos 3 campos, ganhou também `partition_type` na tabela de ativos e um
+botão **"Ver partições"** (linhas particionadas) que abre um modal com a
+lista completa de partições distintas + contagem de linhas — novo
+endpoint `GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/
+tables/{table_id}/partitions` (`TableNotPartitionedError` → 400 pra tabela
+não particionada). Testado ao vivo em `RAW.events`: 3 partições, ordem
+decrescente, valores batendo com a query direta. Commit `a0696fb`.
+
+---
+
+## Sprint 2.2 — Funcionalidade 2 (botão de refresh)
+
+Só frontend. `RefreshButton` (`src/components/RefreshButton.tsx`,
+`RotateCcw` do lucide, `animate-spin` + `disabled` durante fetch) nos
+headers de `CatalogDatasetPage` (refetch de tables/datasets/freshness — as
+três alimentam a página) e `FreshnessPage` (refetch de freshness). Não
+entrou em `CatalogOverviewPage` (placeholder sem dados, dataset ainda não
+selecionado) nem no modal de profiling, como pedido. Commit `a4083fc`.
+Validado pelo usuário em dev (comportamento visual — spin/disable/reload
+— não pôde ser confirmado neste sandbox, ver limitação de Chromium
+headless acima).
+
+---
+
+## Sprint 2.2 — Funcionalidade 3 (busca reversa tabela → datasets)
+
+Novo endpoint `GET /api/v1/catalog/{project_id}/search?q=&mode=exact|
+contains` — busca em `INFORMATION_SCHEMA.TABLES` de todas as regiões do
+projeto em paralelo (`repository.search_tables`, mesma técnica de
+`discover_regions`). Resultado agrupado em `datasets_with_match` (com
+`last_modified_time` real via `client.get_table()`, reaproveitando
+`core.bigquery.get_tables_metadata`) e `datasets_without_match`.
+
+`datasets_without_match` **não** lista todo dataset do projeto sem a
+tabela — só os que têm outra tabela da mesma série: prefixo derivado
+removendo o sufixo numérico final de `q` (`repository.
+derive_search_prefix`, ex: `"events_20260812"` → `"events_"`), buscado via
+`GROUP BY` + `MAX(table_name)` por dataset. Sem sufixo numérico em `q`,
+`datasets_without_match` fica vazio — não há "série" pra comparar.
+
+Frontend: nova seção "Busca" na sidebar (ícone `Search`), campo + toggle
+Exato/Contém (dois `Button`, sem novo componente shadcn), busca como
+`useMutation` (não `useQuery` — é sob demanda, não reativa), mensagem de
+loading, dois grupos de resultado (✅ encontrado / ❌ ausente com motivo) e
+mensagem de vazio pra `contains` sem resultado. Commit `50526e9`.
+
+**Confirmado ao vivo em dev** (`observability-hub-dev`) — importante: os
+dados mock mudaram desde a spec original da Sprint 2.2 (que previa "RAW
+como único dataset com match"). Dev agora tem 3 datasets
+`analytics_100001/2/3`, cada um com tabelas `events_YYYYMMDD` sharded por
+nome (cenário GA4 real, não só `RAW.events` particionado por coluna):
+
+| Busca | Resultado |
+|---|---|
+| `q=events_20260812&mode=exact` | 3 matches (`analytics_100001/2/3`) |
+| `q=events_20260813&mode=exact` (data ainda não carregada) | 0 matches, 3 `datasets_without_match` com `reason=prefix_exists` e `latest_partition=events_20260812` — cenário exato da spec |
+| `q=crm&mode=contains` | 1 match (`RAW.crm_leads`) |
+| `q=zzz_nao_existe&mode=contains` | Vazio, `200 OK` |
+
+`RAW.events` nunca aparece nessas buscas — é uma tabela só, particionada
+por coluna (`event_date`), não por nome sharded, então não bate com busca
+por nome de tabela. Validado pelo usuário.
+
+---
+
+## Sprint 2.3 — 4 melhorias de UX (commit `2630fb9`)
+
+Implementadas em um único commit (a Sprint 2.3, diferente da 2.2, não
+pediu branch/commit por item — só documentação separada, ver abaixo).
+Todas testadas em dev e validadas pelo usuário.
+
+1. **Sidebar sem bolinhas de status SLA**: `DatasetSidebar.tsx` não busca
+   mais `useProjectFreshness` nem renderiza `STATUS_DOT_COLOR` — só nome +
+   contagem de tabelas/views. O backlog item "datasets só com views sem
+   indicador de freshness na sidebar" (ver "Backlog" abaixo) fica
+   obsoleto — não há mais indicador nenhum ali.
+
+2. **Projeto persistido em localStorage**: `hooks/useLastProject.ts` já
+   tinha `setLastProjectId` (escrita) mas nenhuma leitura — ganhou
+   `getLastProjectId`/`clearLastProjectId`. `ProjectSelector.tsx` restaura
+   e revalida automaticamente no mount; se a revalidação falhar, limpa o
+   storage e volta pro campo vazio (só no caminho de restore automático —
+   uma falha de validação manual, digitada pelo usuário, continua
+   deixando o campo preenchido pra ele corrigir, comportamento inalterado
+   nesse caso).
+
+3. **Mode `not_contains` na busca**: `SearchMode` ganhou o terceiro valor.
+   `service._search_not_contains` trata à parte — não é uma variação da
+   query SQL de match dos outros modes, é uma pergunta invertida (usa
+   `get_datasets_summary` pra saber todos os datasets do projeto e
+   `search_tables(mode="contains")` pra saber quem tem match; a diferença
+   vira o resultado). `datasets_with_match` fica sempre vazio nesse mode.
+
+4. **Resultado da busca em tabela ordenável/filtrável**: dois componentes
+   novos (`SearchMatchesTable`, `SearchAbsentTable`) com sort client-side
+   por coluna e filtro de texto em Dataset/Tabela. A coluna "Linhas"
+   pedida na spec não existia no backend (`GET /search` nunca retornou
+   `row_count`) e a spec dizia "sem mudança de backend" — conflito real,
+   perguntado ao usuário, que escolheu adicionar `row_count` ao backend
+   (reaproveita a mesma chamada `client.get_table()` já feita pra
+   `last_modified_time`, sem query BQ extra).
+
+**Confirmado ao vivo em dev** (via `curl`, backend):
+- `mode=not_contains&q=crm`: exclui corretamente `RAW` (único dataset com
+  `crm_leads`), lista os outros 5 datasets com `reason=no_match`.
+- `mode=exact&q=events_20260812`: `row_count: 1000` real em cada match.
+- `GET /projects/.../validate` seguiu funcionando (regressão check pro
+  fluxo de restore do item 2).
+
+**Não verificado visualmente**: renderização real das 4 melhorias no
+browser — mesma limitação de Chromium headless de sempre. Validação
+visual de todas as 7 funcionalidades desta sessão (2.2 + 2.3) foi feita
+pelo usuário, não por este assistente.
+
+---
+
+## Sprint 2.2/2.3 — Documentação
+
+Atualizados nesta sessão, depois das 7 funcionalidades validadas em dev
+(commit separado da Sprint 2.3, como pedido):
+- `CHANGELOG.md`: nova seção "Sprint 2.2 e 2.3" com o que foi feito, os 2
+  erros/aprendizados da sessão (reversão da estratégia de partições;
+  conflito "Linhas sem mudar backend") e tabela de próximas fases
+  atualizada (Fase 2D e Sprint 2.2/2.3 marcadas concluídas, Fase 3 como
+  próxima).
+- `docs/prd.md`: tabela de roadmap (seção 7) atualizada — Fase 1 e Fase 2
+  estavam desatualizadas (marcadas "em andamento"/"pendente" mesmo já
+  concluídas antes desta sessão).
+- `docs/adr/ADR-008-terraform-plan-prod-removido.md`: novo ADR
+  documentando por que `terraform-plan.yml` não tem job "Plan (prod)" —
+  decisão já estava implementada (o workflow já tinha um comentário
+  explicando) mas nunca formalizada em ADR. Contexto → decisão →
+  alternativas → consequências, como as demais.
+- `docs/specs/catalog.md` (v1.4 → v1.5): endpoints `/partitions` e
+  `/search` documentados, incluindo a ressalva de que `get_partition_stats`
+  não é mais metadado gratuito (é query real, ao contrário do resto da
+  spec) — e por quê (`INFORMATION_SCHEMA.PARTITIONS` não serve como fonte
+  única quando 100% do ambiente observado é multi-região).
+- `docs/specs/profiling.md` (v1.1 → v1.2): suporte a views (omissão de
+  `TABLESAMPLE`), schema preview no modal (STRUCT/ARRAY com badge
+  "Complexo" mas visível no schema, mesmo sem métricas), e a tabela de
+  tipo lógico inferido corrigida pra refletir a ordem real de checagem
+  (tipo físico antes de heurísticas de cardinalidade — a ordem antiga era
+  auto-contraditória).
+- `SESSIONLOG.md`: este arquivo, nesta seção.
 
 ---
 
@@ -258,10 +471,10 @@ já estava documentado no encerramento daquela sessão.)
 ```
 Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 
-1. Datasets com apenas views não exibem indicador de freshness na sidebar
-   (bolinha de status) — views não têm modified_time de dados, só de
-   definição. Melhoria: ícone neutro em vez de ausência de bolinha.
-   [registrado desde antes desta sprint, ainda pendente]
+1. ~~Datasets com apenas views não exibem indicador de freshness na
+   sidebar~~ — **obsoleto**: Sprint 2.3 removeu os indicadores de status
+   SLA da sidebar por completo (pedido do usuário, não relacionado a este
+   item). Não há mais bolinha de nenhum tipo ali.
 
 2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer, incluindo os
    bindings cross-project desta sessão) em Terraform em vez de gcloud
@@ -297,16 +510,21 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 ## Próxima sprint
 
 ```
+Antes de tudo: abrir o PR de feature/partition-metadata para main
+  (Sprint 2.2 + 2.3 completas, validadas em dev — usuário ainda não pediu
+  a abertura, confirmar antes)
+
 Sprint 3 — Discovery (Fase 3 do CLAUDE.md): lineage, PII, mapa de acesso
   [não iniciada — nenhum código, spec ou branch criada ainda]
 
 Fase 4 — FinOps [pendente, depois da Sprint 3]
 ```
 
-Antes de começar: seguir o checklist do contexto "Backend" do CLAUDE.md —
-ler/criar a spec em `docs/specs/lineage.md` (ou `pii.md`/`access.md`,
-conforme o que for priorizado primeiro) antes de implementar qualquer
-domínio novo. Nenhuma dessas specs existe ainda em `docs/specs/`.
+Antes de começar a Sprint 3: seguir o checklist do contexto "Backend" do
+CLAUDE.md — ler/criar a spec em `docs/specs/lineage.md` (ou
+`pii.md`/`access.md`, conforme o que for priorizado primeiro) antes de
+implementar qualquer domínio novo. Nenhuma dessas specs existe ainda em
+`docs/specs/`.
 
 ---
 
@@ -314,7 +532,11 @@ domínio novo. Nenhuma dessas specs existe ainda em `docs/specs/`.
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. Confirma com o usuário qual dos três domínios da Sprint 3 (lineage, PII,
-   mapa de acesso) entra primeiro, antes de escrever qualquer spec ou código
-4. Branch local já em `main`, sincronizada com `origin/main` (commit
-   `5aa7179`) — sem branch de feature pendente desta sprint
+3. Branch local está em `feature/partition-metadata`, à frente de `main`
+   em 9 commits (`ea64c8d`..`2630fb9` + o commit de documentação desta
+   seção) — Sprint 2.2 e 2.3 completas e validadas em dev, mas **sem PR
+   aberto**. Confirmar com o usuário se já pode abrir o PR para `main`
+   antes de qualquer outra ação.
+4. Só depois do PR (e merge): confirmar com o usuário qual dos três
+   domínios da Sprint 3 (lineage, PII, mapa de acesso) entra primeiro,
+   antes de escrever qualquer spec ou código

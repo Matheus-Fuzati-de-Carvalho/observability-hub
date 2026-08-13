@@ -1,18 +1,7 @@
-import { Clock } from 'lucide-react'
+import { Clock, Search } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useDatasets } from '@/features/catalog/hooks'
-import { useProjectFreshness } from '@/features/freshness/hooks'
 import { cn } from '@/lib/utils'
-import type { SLAStatus } from '@/types/freshness'
-
-const STATUS_DOT_COLOR: Record<SLAStatus, string> = {
-  ok: 'bg-status-ok',
-  warning_12_24: 'bg-status-ok',
-  warning_24_48: 'bg-status-warn',
-  warning_48_7d: 'bg-status-warn',
-  warning_7d_1m: 'bg-status-error',
-  stale: 'bg-status-error',
-}
 
 interface DatasetSidebarProps {
   projectId: string
@@ -31,15 +20,10 @@ function formatAssetCounts(totalTables: number, totalViews: number): string {
 
 export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   const datasetsQuery = useDatasets(projectId)
-  const freshnessQuery = useProjectFreshness(projectId)
-
-  const worstStatusByDataset = new Map(
-    freshnessQuery.data?.datasets.map((d) => [d.dataset_id, d.worst_status]) ?? [],
-  )
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col gap-0.5">
         <NavLink
           to="/freshness"
           className={({ isActive }) =>
@@ -54,6 +38,20 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
           <Clock size={16} />
           Freshness
         </NavLink>
+        <NavLink
+          to="/search"
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+              isActive
+                ? 'bg-primary font-bold text-primary-foreground'
+                : 'text-foreground hover:bg-muted',
+            )
+          }
+        >
+          <Search size={16} />
+          Busca
+        </NavLink>
       </div>
 
       <p className="mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -67,36 +65,25 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
       )}
 
       <nav className="flex flex-col gap-0.5">
-        {datasetsQuery.data?.datasets.map((dataset) => {
-          const worstStatus = worstStatusByDataset.get(dataset.dataset_id)
-
-          return (
-            <NavLink
-              key={dataset.dataset_id}
-              to={`/datasets/${dataset.dataset_id}`}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
-                  isActive
-                    ? 'bg-primary font-bold text-primary-foreground'
-                    : 'text-foreground hover:bg-muted',
-                )
-              }
-            >
-              <span className="flex items-center gap-2 truncate">
-                {worstStatus && (
-                  <span
-                    className={cn('size-2 shrink-0 rounded-full', STATUS_DOT_COLOR[worstStatus])}
-                  />
-                )}
-                <span className="truncate">{dataset.dataset_id}</span>
-              </span>
-              <span className="shrink-0 text-xs opacity-70">
-                [{formatAssetCounts(dataset.total_tables, dataset.total_views)}]
-              </span>
-            </NavLink>
-          )
-        })}
+        {datasetsQuery.data?.datasets.map((dataset) => (
+          <NavLink
+            key={dataset.dataset_id}
+            to={`/datasets/${dataset.dataset_id}`}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
+                isActive
+                  ? 'bg-primary font-bold text-primary-foreground'
+                  : 'text-foreground hover:bg-muted',
+              )
+            }
+          >
+            <span className="truncate">{dataset.dataset_id}</span>
+            <span className="shrink-0 text-xs opacity-70">
+              [{formatAssetCounts(dataset.total_tables, dataset.total_views)}]
+            </span>
+          </NavLink>
+        ))}
       </nav>
     </aside>
   )

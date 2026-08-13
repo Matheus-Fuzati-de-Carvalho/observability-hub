@@ -13,6 +13,7 @@ from observability_hub.core.exceptions import (
     ProjectAccessDeniedError,
     ProjectNotFoundError,
     TableNotFoundError,
+    TableNotPartitionedError,
 )
 
 app = FastAPI()
@@ -92,6 +93,14 @@ def handle_table_not_found(request: Request, exc: TableNotFoundError) -> JSONRes
     return JSONResponse(
         status_code=404,
         content={"error": "table_not_found", "message": str(exc)},
+    )
+
+
+@app.exception_handler(TableNotPartitionedError)
+def handle_table_not_partitioned(request: Request, exc: TableNotPartitionedError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"error": "table_not_partitioned", "message": str(exc)},
     )
 
 

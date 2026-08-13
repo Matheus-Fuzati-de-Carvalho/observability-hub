@@ -6,25 +6,52 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useValidateProject } from '@/features/projects/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
-import { setLastProjectId } from '@/hooks/useLastProject'
+import { clearLastProjectId, getLastProjectId, setLastProjectId } from '@/hooks/useLastProject'
 import { cn } from '@/lib/utils'
 
 export function ProjectSelector() {
   const { projectId, setProjectId } = useProjectContext()
   const [input, setInput] = useState('')
   const [submittedProjectId, setSubmittedProjectId] = useState<string | undefined>(undefined)
+  const [isRestoring, setIsRestoring] = useState(false)
 
   const validateQuery = useValidateProject(submittedProjectId)
+
+  // Restaura e revalida automaticamente o projeto salvo no localStorage ao
+  // carregar a página (F5) — só no mount, sem o usuário precisar digitar de
+  // novo.
+  useEffect(() => {
+    const lastProjectId = getLastProjectId()
+    if (lastProjectId) {
+      setInput(lastProjectId)
+      setSubmittedProjectId(lastProjectId)
+      setIsRestoring(true)
+    }
+  }, [])
 
   useEffect(() => {
     if (validateQuery.data?.accessible && submittedProjectId) {
       setProjectId(submittedProjectId)
       setLastProjectId(submittedProjectId)
+      setIsRestoring(false)
     }
   }, [validateQuery.data, submittedProjectId, setProjectId])
 
+  // Projeto restaurado do localStorage perdeu o acesso (ex: revogado desde
+  // a última visita) — limpa o storage e volta pro campo vazio em vez de
+  // deixar um project_id inválido preenchido.
+  useEffect(() => {
+    if (isRestoring && (validateQuery.isError || validateQuery.data?.accessible === false)) {
+      clearLastProjectId()
+      setInput('')
+      setSubmittedProjectId(undefined)
+      setIsRestoring(false)
+    }
+  }, [isRestoring, validateQuery.isError, validateQuery.data])
+
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    setIsRestoring(false)
     if (input.trim()) setSubmittedProjectId(input.trim())
   }
 

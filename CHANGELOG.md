@@ -5,6 +5,101 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Sprint 2.2 e 2.3 — Metadados de partição, refresh, busca reversa e UX (concluída)
+
+Sete funcionalidades sobre o MVP de catálogo/freshness (Fase 2 backend +
+Sprint 2 frontend, ambas já concluídas), todas na branch
+`feature/partition-metadata`, testadas em dev e validadas pelo usuário
+antes de qualquer PR para `main`.
+
+### O que foi feito — Sprint 2.2
+
+1. **Metadados de partição na tabela de ativos**: `partition_type`
+   (`"event_date (DAY)"`), `min_partition`, `max_partition`,
+   `partition_count` em `TableSummary`, buscados em paralelo só para
+   tabelas particionadas.
+2. **Botão "Ver partições"**: novo endpoint
+   `GET .../tables/{table_id}/partitions`, modal com a lista completa de
+   partições distintas + contagem de linhas.
+3. **Botão de refresh**: `RefreshButton` compartilhado (`RotateCcw`,
+   `animate-spin`), páginas de catálogo e freshness, refetch das queries
+   TanStack Query da view atual sem navegar nem limpar o projeto
+   selecionado.
+4. **Busca reversa tabela → datasets**: novo endpoint
+   `GET /catalog/{project_id}/search?q=&mode=exact|contains`, agrupando
+   `datasets_with_match`/`datasets_without_match` (este último via
+   detecção de prefixo/série, não lista todo dataset do projeto).
+
+### O que foi feito — Sprint 2.3
+
+5. Sidebar de datasets sem os indicadores de status SLA (bolinha
+   colorida) — só nome + contagem de tabelas/views.
+6. Projeto selecionado persistido em `localStorage`, restaurado e
+   revalidado automaticamente no carregamento da página; limpa o storage
+   e volta pro campo vazio se a revalidação falhar.
+7. Terceiro mode de busca, `not_contains` — inverte a lógica (datasets
+   onde nenhuma tabela contém o termo) reaproveitando `mode=contains` +
+   o universo completo de datasets do projeto. Resultado da busca
+   reescrito como tabelas ordenáveis/filtráveis client-side (`Dataset`,
+   `Tabela`, `Atualizado em`, `Linhas`) — `row_count` precisou entrar no
+   backend (`DatasetWithMatch`), reaproveitando a mesma chamada
+   `client.get_table()` já feita para `last_modified_time`.
+
+### Erros cometidos e aprendizados
+
+**Erro 1 — Reversão completa da estratégia de partições logo na primeira
+implementação**
+- O que aconteceu: a primeira versão de `get_partition_stats()` seguiu a
+  instrução original (usar `INFORMATION_SCHEMA.PARTITIONS`, metadado
+  gratuito, com fallback N/D para datasets multi-região). Tecnicamente
+  correta, mas **inútil na prática**: todos os datasets de dev e prod
+  estão em `US`, então o resultado era N/D sempre. Um PR (#14) chegou a
+  ser aberto com essa versão e foi fechado pelo usuário sem merge.
+- Correção: reimplementada do zero como uma query real (`MIN`/`MAX`/
+  `COUNT(DISTINCT)` direto na coluna de partição), com custo real de
+  bytes escaneados em vez de metadado gratuito — mitigado com cache TTL
+  de 5min por tabela.
+- Aprendizado: "tecnicamente correto pela spec" não é o mesmo que "útil
+  no ambiente real" — quando 100% dos dados de teste caem no caso
+  degradado de uma spec (aqui, multi-região → N/D), vale checar contra o
+  ambiente real antes de considerar a implementação pronta, não só
+  contra a spec escrita. `INFORMATION_SCHEMA.PARTITIONS` continua sendo
+  uma opção válida em datasets de região específica — só não serve como
+  única fonte quando todo o ambiente observado é multi-região.
+
+**Erro 2 — "Linhas" pedida numa tabela sem mudar backend**
+- O que aconteceu: a spec da Sprint 2.3 pedia uma coluna "Linhas"
+  ordenável no resultado da busca, mas também dizia explicitamente "sem
+  mudança de backend" — e o endpoint de busca nunca retornou
+  `row_count`. Contradição real, não resolvida com suposição.
+- Correção: perguntado ao usuário antes de implementar; decidido
+  adicionar `row_count` ao backend mesmo assim, reaproveitando a chamada
+  `client.get_table()` que já buscava `last_modified_time` (sem query BQ
+  extra).
+- Aprendizado: quando uma instrução pede um dado que a fonte não tem E
+  proíbe a única forma de obtê-lo, é um bloqueio real — vale perguntar
+  em vez de escolher silenciosamente um dos dois lados.
+
+### Mudanças de arquitetura
+- Nenhuma mudança estrutural — todas as adições seguem os padrões já
+  estabelecidos na Fase 2 (paralelismo com `ThreadPoolExecutor`, cache
+  TTL em memória por processo, `service.py` orquestra e `repository.py`
+  constrói SQL).
+
+### Status final
+- 219 testes unitários backend, 100% passando ✅
+- `ruff check`/`ruff format`, `biome check`, `tsc -b`, `vite build`
+  limpos em cada commit ✅
+- Validado com `curl` contra `observability-hub-dev` (dados reais,
+  incluindo o cenário GA4 completo de `not_contains`/prefixo) e pelo
+  usuário na interface real, em cada uma das 7 funcionalidades ✅
+- Renderização visual no browser **não verificada por este assistente**
+  em nenhum momento — Chromium headless não roda neste sandbox (mesma
+  limitação de sessões anteriores); toda validação visual foi feita
+  pelo usuário diretamente em dev
+
+---
+
 ## Fase 2 — Backend MVP (concluída)
 
 ### O que foi feito
@@ -184,6 +279,8 @@ Atualizado ao final de cada fase pelo Claude Code.
 |---|---|---|
 | Fase 1.5 | Dados mock no BigQuery (GA4 público) | ✅ Concluída |
 | Fase 2 | MVP: Catálogo + Freshness + Profiling (backend) | ✅ Concluída |
-| Fase 2D | Frontend MVP | 🔄 Em andamento |
-| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Pendente |
+| Fase 2D | Frontend MVP | ✅ Concluída |
+| Sprint 2.2 | Metadados de partição, "Ver partições", refresh, busca reversa | ✅ Concluída |
+| Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
+| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Próxima |
 | Fase 4 | FinOps completo | ⏳ Pendente |
