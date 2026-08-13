@@ -73,3 +73,26 @@ export interface TablePartitionsResponse {
   total_partitions: number
   partitions: PartitionRow[]
 }
+
+export type SearchMode = 'exact' | 'contains'
+
+export interface DatasetWithMatch {
+  dataset_id: string
+  table_id: string
+  table_type: string
+  last_modified_time: string | null
+}
+
+export interface DatasetWithoutMatch {
+  dataset_id: string
+  reason: string
+  latest_partition: string | null
+}
+
+export interface TableSearchResponse {
+  query: string
+  mode: SearchMode
+  project_id: string
+  datasets_with_match: DatasetWithMatch[]
+  datasets_without_match: DatasetWithoutMatch[]
+}

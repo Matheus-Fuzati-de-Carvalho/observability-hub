@@ -105,3 +105,31 @@ class TablePartitionsResponse(BaseModel):
     partition_type: str
     total_partitions: int
     partitions: list[PartitionRow]
+
+
+class SearchMode(str, Enum):
+    EXACT = "exact"
+    CONTAINS = "contains"
+
+
+class DatasetWithMatch(BaseModel):
+    dataset_id: str
+    table_id: str
+    table_type: str
+    last_modified_time: datetime | None
+
+
+class DatasetWithoutMatch(BaseModel):
+    dataset_id: str
+    # Só "prefix_exists" por enquanto — dataset tem outra tabela com o
+    # mesmo prefixo (repository.derive_search_prefix) mas não a buscada.
+    reason: str
+    latest_partition: str | None = None
+
+
+class TableSearchResponse(BaseModel):
+    query: str
+    mode: SearchMode
+    project_id: str
+    datasets_with_match: list[DatasetWithMatch]
+    datasets_without_match: list[DatasetWithoutMatch]

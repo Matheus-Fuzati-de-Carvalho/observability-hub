@@ -1,8 +1,10 @@
 import { httpClient } from '@/lib/http-client'
 import type {
   DatasetsListResponse,
+  SearchMode,
   TableDetail,
   TablePartitionsResponse,
+  TableSearchResponse,
   TablesListResponse,
 } from '@/types/catalog'
 
@@ -22,4 +24,11 @@ export const catalogApi = {
     httpClient.get<TablePartitionsResponse>(
       `/api/v1/catalog/${projectId}/datasets/${datasetId}/tables/${tableId}/partitions`,
     ),
+
+  searchTables: (projectId: string, q: string, mode: SearchMode) => {
+    const params = new URLSearchParams({ q, mode })
+    return httpClient.get<TableSearchResponse>(
+      `/api/v1/catalog/${projectId}/search?${params.toString()}`,
+    )
+  },
 }

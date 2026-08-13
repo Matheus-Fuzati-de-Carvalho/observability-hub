@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { catalogApi } from '@/lib/api/catalog'
+import type { SearchMode } from '@/types/catalog'
 
 export function useDatasets(projectId: string | undefined) {
   return useQuery({
@@ -40,5 +41,12 @@ export function useTablePartitions(
     queryFn: () =>
       catalogApi.getTablePartitions(projectId as string, datasetId as string, tableId as string),
     enabled: Boolean(projectId) && Boolean(datasetId) && Boolean(tableId),
+  })
+}
+
+export function useSearchTables() {
+  return useMutation({
+    mutationFn: ({ projectId, q, mode }: { projectId: string; q: string; mode: SearchMode }) =>
+      catalogApi.searchTables(projectId, q, mode),
   })
 }

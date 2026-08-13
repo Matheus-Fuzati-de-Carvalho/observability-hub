@@ -3,8 +3,10 @@ linhas cruas do INFORMATION_SCHEMA — service.py nunca vê SQL nem objetos do
 client do BigQuery além do que essas funções retornam.
 """
 
+import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from google.cloud import bigquery
 
@@ -33,6 +35,11 @@ _API_TABLE_TYPE_TO_RAW = {v: k for k, v in _RAW_TABLE_TYPE_TO_API.items()}
 _PARTITION_STATS_CACHE_TTL_SECONDS = 300
 _partition_stats_cache: dict[str, tuple[float, dict]] = {}
 _partition_stats_cache_lock = threading.Lock()
+
+# Usado por derive_search_prefix — tabelas com sufixo numérico (ex:
+# events_20260812, sharded/particionadas por nome) tratadas como uma série;
+# o prefixo sem o sufixo identifica a série (events_).
+_TRAILING_DIGITS_RE = re.compile(r"\d+$")
 
 
 def _bytes_to_gb(size_bytes: int | None) -> float | None:
@@ -83,6 +90,100 @@ def get_datasets_summary(
                 }
             )
     return datasets
+
+
+def derive_search_prefix(query: str) -> str | None:
+    """Remove o sufixo numérico final de query (ex: "events_20260812" ->
+    "events_"). None se query não termina em dígito — sem sufixo numérico
+    não há uma "série" de tabelas pra comparar (usado pela busca reversa
+    pra explicar datasets sem a tabela buscada, ver search_tables_by_prefix)."""
+    match = _TRAILING_DIGITS_RE.search(query)
+    if match is None:
+        return None
+    prefix = query[: match.start()]
+    return prefix or None
+
+
+def search_tables(
+    client: bigquery.Client,
+    project_id: str,
+    regions: list[str],
+    query: str,
+    mode: str,
+    max_workers: int = 8,
+) -> list[dict]:
+    """Busca table_name = query (mode="exact") ou table_name LIKE '%query%'
+    (mode="contains") em INFORMATION_SCHEMA.TABLES de todas as regiões do
+    projeto, uma query por região em paralelo (mesma técnica de
+    core.bigquery.discover_regions)."""
+    if not regions:
+        return []
+
+    def _search_region(region: str) -> list[dict]:
+        if mode == "exact":
+            where = "table_name = @q"
+            params = [bigquery.ScalarQueryParameter("q", "STRING", query)]
+        else:
+            where = "table_name LIKE @q"
+            params = [bigquery.ScalarQueryParameter("q", "STRING", f"%{query}%")]
+        sql = f"""
+            SELECT table_schema AS dataset_id, table_name AS table_id, table_type
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.TABLES`
+            WHERE {where}
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        rows = client.query(sql, job_config=job_config).result()
+        return [
+            {
+                "dataset_id": row.dataset_id,
+                "table_id": row.table_id,
+                "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
+            }
+            for row in rows
+        ]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_search_region, regions))
+    matches = [row for region_rows in results for row in region_rows]
+    matches.sort(key=lambda m: (m["dataset_id"], m["table_id"]))
+    return matches
+
+
+def search_tables_by_prefix(
+    client: bigquery.Client,
+    project_id: str,
+    regions: list[str],
+    prefix: str,
+    exclude_dataset_ids: set[str],
+    max_workers: int = 8,
+) -> list[dict]:
+    """Pra cada dataset com pelo menos uma tabela começando com prefix,
+    retorna a última (MAX table_name) — usado pra explicar datasets sem a
+    tabela exata buscada mas que têm a mesma série (ex: events_20260810 num
+    dataset que não tem events_20260812 ainda). Datasets em
+    exclude_dataset_ids (os que já bateram no match exato) são omitidos."""
+    if not regions:
+        return []
+
+    def _search_region(region: str) -> list[dict]:
+        sql = f"""
+            SELECT table_schema AS dataset_id, MAX(table_name) AS latest_table
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.TABLES`
+            WHERE table_name LIKE @prefix
+            GROUP BY 1
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("prefix", "STRING", f"{prefix}%")]
+        )
+        rows = client.query(sql, job_config=job_config).result()
+        return [{"dataset_id": row.dataset_id, "latest_table": row.latest_table} for row in rows]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_search_region, regions))
+    rows = [row for region_rows in results for row in region_rows]
+    rows = [row for row in rows if row["dataset_id"] not in exclude_dataset_ids]
+    rows.sort(key=lambda r: r["dataset_id"])
+    return rows
 
 
 def _partition_type_label(

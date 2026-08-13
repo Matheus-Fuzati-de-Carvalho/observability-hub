@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -387,3 +388,90 @@ def test_get_table_partitions_raises_when_table_not_partitioned(monkeypatch):
 
     with pytest.raises(TableNotPartitionedError):
         service.get_table_partitions(client, "observability-hub-dev", "RAW", "dim_users")
+
+
+def test_search_tables_builds_response_with_match_and_prefix_without_match(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables",
+        lambda client, project_id, regions, query, mode: [
+            {"dataset_id": "analytics_123", "table_id": "events_20260812", "table_type": "TABLE"}
+        ],
+    )
+    monkeypatch.setattr(
+        service,
+        "get_tables_metadata",
+        lambda client, table_refs: {
+            "observability-hub-dev.analytics_123.events_20260812": SimpleNamespace(
+                modified="2026-08-12T03:00:00Z"
+            )
+        },
+    )
+    monkeypatch.setattr(service.repository, "derive_search_prefix", lambda query: "events_")
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables_by_prefix",
+        lambda client, project_id, regions, prefix, exclude_dataset_ids: [
+            {"dataset_id": "analytics_456", "latest_table": "events_20260810"},
+        ],
+    )
+
+    result = service.search_tables(client, "observability-hub-dev", "events_20260812", "exact")
+
+    assert result.query == "events_20260812"
+    assert result.mode == "exact"
+    assert len(result.datasets_with_match) == 1
+    assert result.datasets_with_match[0].dataset_id == "analytics_123"
+    assert (
+        result.datasets_with_match[0].last_modified_time.isoformat() == "2026-08-12T03:00:00+00:00"
+    )
+    assert len(result.datasets_without_match) == 1
+    assert result.datasets_without_match[0].dataset_id == "analytics_456"
+    assert result.datasets_without_match[0].reason == "prefix_exists"
+    assert result.datasets_without_match[0].latest_partition == "events_20260810"
+
+
+def test_search_tables_skips_prefix_search_when_query_has_no_trailing_digits(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables",
+        lambda client, project_id, regions, query, mode: [],
+    )
+    monkeypatch.setattr(service, "get_tables_metadata", lambda client, table_refs: {})
+    calls = []
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables_by_prefix",
+        lambda *a, **k: calls.append(1) or [],
+    )
+
+    result = service.search_tables(client, "observability-hub-dev", "ga4_events", "exact")
+
+    assert result.datasets_with_match == []
+    assert result.datasets_without_match == []
+    assert calls == []
+
+
+def test_search_tables_no_matches_returns_empty_lists(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables",
+        lambda client, project_id, regions, query, mode: [],
+    )
+    monkeypatch.setattr(service, "get_tables_metadata", lambda client, table_refs: {})
+    monkeypatch.setattr(
+        service.repository,
+        "search_tables_by_prefix",
+        lambda client, project_id, regions, prefix, exclude_dataset_ids: [],
+    )
+
+    result = service.search_tables(client, "observability-hub-dev", "events_99999999", "contains")
+
+    assert result.datasets_with_match == []
+    assert result.datasets_without_match == []

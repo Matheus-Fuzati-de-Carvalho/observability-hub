@@ -8,17 +8,20 @@ from datetime import UTC, datetime
 
 from google.cloud import bigquery
 
-from observability_hub.core.bigquery import discover_regions
+from observability_hub.core.bigquery import discover_regions, get_tables_metadata
 from observability_hub.core.exceptions import TableNotFoundError, TableNotPartitionedError
 from observability_hub.domains.catalog import repository
 from observability_hub.domains.catalog.schemas import (
     ColumnDetail,
     DatasetsListResponse,
     DatasetSummary,
+    DatasetWithMatch,
+    DatasetWithoutMatch,
     PartitionRow,
     ProjectValidateResponse,
     TableDetail,
     TablePartitionsResponse,
+    TableSearchResponse,
     TablesListResponse,
     TableSummary,
 )
@@ -137,4 +140,58 @@ def get_table_partitions(
         partition_type=table["partition_type"] or table["partition_column"],
         total_partitions=len(raw_partitions),
         partitions=[PartitionRow(**p) for p in raw_partitions],
+    )
+
+
+def search_tables(
+    client: bigquery.Client, project_id: str, query: str, mode: str
+) -> TableSearchResponse:
+    """Busca reversa tabela → datasets: em quais datasets do projeto existe
+    (ou não) uma tabela com esse nome. datasets_without_match só lista
+    datasets que têm outra tabela da mesma série (mesmo prefixo sem o
+    sufixo numérico final de query, ver repository.derive_search_prefix) —
+    não lista todo dataset do projeto que simplesmente não bateu."""
+    regions = discover_regions(project_id, client=client)
+    raw_matches = repository.search_tables(client, project_id, regions, query, mode)
+
+    table_refs = [f"{project_id}.{m['dataset_id']}.{m['table_id']}" for m in raw_matches]
+    metadata_by_ref = get_tables_metadata(client, table_refs)
+
+    def _last_modified(match: dict) -> datetime | None:
+        table_ref = f"{project_id}.{match['dataset_id']}.{match['table_id']}"
+        bq_table = metadata_by_ref.get(table_ref)
+        return bq_table.modified if bq_table is not None else None
+
+    datasets_with_match = [
+        DatasetWithMatch(
+            dataset_id=m["dataset_id"],
+            table_id=m["table_id"],
+            table_type=m["table_type"],
+            last_modified_time=_last_modified(m),
+        )
+        for m in raw_matches
+    ]
+
+    datasets_without_match: list[DatasetWithoutMatch] = []
+    prefix = repository.derive_search_prefix(query)
+    if prefix:
+        matched_dataset_ids = {m["dataset_id"] for m in raw_matches}
+        prefix_rows = repository.search_tables_by_prefix(
+            client, project_id, regions, prefix, matched_dataset_ids
+        )
+        datasets_without_match = [
+            DatasetWithoutMatch(
+                dataset_id=row["dataset_id"],
+                reason="prefix_exists",
+                latest_partition=row["latest_table"],
+            )
+            for row in prefix_rows
+        ]
+
+    return TableSearchResponse(
+        query=query,
+        mode=mode,
+        project_id=project_id,
+        datasets_with_match=datasets_with_match,
+        datasets_without_match=datasets_without_match,
     )

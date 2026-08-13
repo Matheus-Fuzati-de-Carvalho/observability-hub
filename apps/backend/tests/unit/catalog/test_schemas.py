@@ -8,6 +8,7 @@ from observability_hub.domains.catalog.schemas import (
     ProjectValidateResponse,
     TableDetail,
     TablePartitionsResponse,
+    TableSearchResponse,
     TablesListResponse,
     TableSummary,
     TableType,
@@ -195,6 +196,38 @@ def test_table_partitions_response_matches_spec_example():
     model = TablePartitionsResponse(**payload)
     assert model.total_partitions == 2
     assert model.partitions[0] == PartitionRow(value="2026-08-12", row_count=1800)
+
+
+def test_table_search_response_matches_spec_example():
+    payload = {
+        "query": "events_20260812",
+        "mode": "exact",
+        "project_id": "cliente-x-prod",
+        "datasets_with_match": [
+            {
+                "dataset_id": "analytics_123",
+                "table_id": "events_20260812",
+                "table_type": "TABLE",
+                "last_modified_time": "2026-08-12T03:00:00Z",
+            }
+        ],
+        "datasets_without_match": [
+            {
+                "dataset_id": "analytics_456",
+                "reason": "prefix_exists",
+                "latest_partition": "events_20260810",
+            },
+            {
+                "dataset_id": "analytics_789",
+                "reason": "prefix_exists",
+                "latest_partition": "events_20260809",
+            },
+        ],
+    }
+    model = TableSearchResponse(**payload)
+    assert model.mode.value == "exact"
+    assert len(model.datasets_with_match) == 1
+    assert len(model.datasets_without_match) == 2
 
 
 def test_table_type_enum_values():

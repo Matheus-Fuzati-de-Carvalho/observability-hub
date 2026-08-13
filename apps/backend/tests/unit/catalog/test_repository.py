@@ -414,6 +414,128 @@ def test_get_table_partitions_skips_null_partition_value():
     assert result == [{"value": "2026-08-12", "row_count": 1800}]
 
 
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("events_20260812", "events_"),
+        ("ga4_events", None),
+        ("20260812", None),
+        ("crm", None),
+    ],
+)
+def test_derive_search_prefix(query, expected):
+    assert repository.derive_search_prefix(query) == expected
+
+
+def test_search_tables_returns_empty_without_querying_when_no_regions():
+    client = MagicMock()
+
+    result = repository.search_tables(client, "proj", [], "events", "exact")
+
+    assert result == []
+    client.query.assert_not_called()
+
+
+def test_search_tables_exact_mode_uses_equality_param():
+    captured = []
+
+    def fake_query(sql, job_config=None):
+        captured.append((sql, job_config.query_parameters[0].value))
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.search_tables(client, "proj", ["US"], "events_20260812", "exact")
+
+    sql, param_value = captured[0]
+    assert "table_name = @q" in sql
+    assert param_value == "events_20260812"
+
+
+def test_search_tables_contains_mode_uses_like_wildcard():
+    captured = []
+
+    def fake_query(sql, job_config=None):
+        captured.append((sql, job_config.query_parameters[0].value))
+        job = MagicMock()
+        job.result.return_value = []
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    repository.search_tables(client, "proj", ["US"], "events", "contains")
+
+    sql, param_value = captured[0]
+    assert "table_name LIKE @q" in sql
+    assert param_value == "%events%"
+
+
+def test_search_tables_aggregates_regions_and_sorts_by_dataset_then_table():
+    def fake_query(sql, job_config=None):
+        job = MagicMock()
+        if "region-US" in sql:
+            job.result.return_value = [
+                _row(dataset_id="TRUSTED", table_id="events", table_type="BASE TABLE"),
+                _row(dataset_id="RAW", table_id="events", table_type="BASE TABLE"),
+            ]
+        else:
+            job.result.return_value = [
+                _row(dataset_id="RAW", table_id="events_eu", table_type="VIEW"),
+            ]
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.search_tables(client, "proj", ["US", "EU"], "events", "contains")
+
+    assert [r["dataset_id"] for r in result] == ["RAW", "RAW", "TRUSTED"]
+    assert {"dataset_id": "RAW", "table_id": "events_eu", "table_type": "VIEW"} in result
+
+
+def test_search_tables_by_prefix_returns_empty_without_querying_when_no_regions():
+    client = MagicMock()
+
+    result = repository.search_tables_by_prefix(client, "proj", [], "events_", set())
+
+    assert result == []
+    client.query.assert_not_called()
+
+
+def test_search_tables_by_prefix_excludes_matched_datasets_and_uses_max_per_dataset():
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        captured["prefix_param"] = job_config.query_parameters[0].value
+        job = MagicMock()
+        job.result.return_value = [
+            _row(dataset_id="analytics_456", latest_table="events_20260810"),
+            _row(dataset_id="analytics_789", latest_table="events_20260809"),
+            _row(dataset_id="analytics_123", latest_table="events_20260812"),
+        ]
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.search_tables_by_prefix(
+        client, "proj", ["US"], "events_", {"analytics_123"}
+    )
+
+    assert "MAX(table_name)" in captured["sql"]
+    assert "GROUP BY 1" in captured["sql"]
+    assert captured["prefix_param"] == "events_%"
+    assert result == [
+        {"dataset_id": "analytics_456", "latest_table": "events_20260810"},
+        {"dataset_id": "analytics_789", "latest_table": "events_20260809"},
+    ]
+
+
 def test_get_table_detail_raises_when_table_missing(monkeypatch):
     monkeypatch.setattr(repository, "get_tables_summary", lambda *a, **k: [])
 

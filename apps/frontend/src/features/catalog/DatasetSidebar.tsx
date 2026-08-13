@@ -1,4 +1,4 @@
-import { Clock } from 'lucide-react'
+import { Clock, Search } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useDatasets } from '@/features/catalog/hooks'
 import { useProjectFreshness } from '@/features/freshness/hooks'
@@ -39,7 +39,7 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col gap-0.5">
         <NavLink
           to="/freshness"
           className={({ isActive }) =>
@@ -53,6 +53,20 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
         >
           <Clock size={16} />
           Freshness
+        </NavLink>
+        <NavLink
+          to="/search"
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+              isActive
+                ? 'bg-primary font-bold text-primary-foreground'
+                : 'text-foreground hover:bg-muted',
+            )
+          }
+        >
+          <Search size={16} />
+          Busca
         </NavLink>
       </div>
 
