@@ -1,8 +1,11 @@
-import { Clock, Search, Star } from 'lucide-react'
+import { Clock, History, Search, Star } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import { useDatasets } from '@/features/catalog/hooks'
 import { useFavorites } from '@/features/favorites/hooks'
+import { useHistory } from '@/features/history/hooks'
 import { cn } from '@/lib/utils'
+
+const MAX_RECENT_TABLES_SHOWN = 5
 
 interface DatasetSidebarProps {
   projectId: string
@@ -23,6 +26,10 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   const datasetsQuery = useDatasets(projectId)
   const favoritesQuery = useFavorites()
   const projectFavorites = favoritesQuery.data?.favorites.filter((f) => f.project_id === projectId)
+  const historyQuery = useHistory()
+  const recentTables = historyQuery.data?.recent_tables
+    .filter((t) => t.project_id === projectId)
+    .slice(0, MAX_RECENT_TABLES_SHOWN)
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
@@ -105,6 +112,29 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
                 <Star size={12} className="shrink-0 fill-primary text-primary" />
                 <span className="truncate">
                   {favorite.dataset_id}.{favorite.table_id}
+                </span>
+              </Link>
+            ))}
+          </nav>
+        </>
+      )}
+
+      {recentTables && recentTables.length > 0 && (
+        <>
+          <p className="mt-4 mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Recentes
+          </p>
+          <nav className="flex flex-col gap-0.5">
+            {recentTables.map((view) => (
+              <Link
+                key={`${view.dataset_id}.${view.table_id}.${view.viewed_at}`}
+                to={`/datasets/${view.dataset_id}`}
+                state={{ highlightTable: view.table_id }}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+              >
+                <History size={12} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">
+                  {view.dataset_id}.{view.table_id}
                 </span>
               </Link>
             ))}
