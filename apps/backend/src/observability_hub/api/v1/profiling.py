@@ -1,10 +1,8 @@
 from fastapi import APIRouter, Depends, Query
-from google.cloud import bigquery, firestore
+from google.cloud import bigquery
 
 from observability_hub.core.auth import get_current_user
 from observability_hub.core.bigquery import get_client
-from observability_hub.core.firestore import get_firestore_client
-from observability_hub.domains.auth.schemas import UserInfo
 from observability_hub.domains.quality import service
 from observability_hub.domains.quality.schemas import (
     EstimateResponse,
@@ -43,12 +41,8 @@ def run(
     table_id: str,
     request: ProfilingRequest,
     client: bigquery.Client = Depends(get_client),
-    firestore_client: firestore.Client = Depends(get_firestore_client),
-    user: UserInfo = Depends(get_current_user),
 ) -> ProfilingRunResponse:
-    return service.run_profiling(
-        client, firestore_client, project_id, dataset_id, table_id, request, user.email
-    )
+    return service.run_profiling(client, project_id, dataset_id, table_id, request)
 
 
 @router.get(

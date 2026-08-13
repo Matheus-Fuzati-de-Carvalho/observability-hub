@@ -21,9 +21,7 @@ import {
 } from '@/components/ui/table'
 import { PartitionsDialog } from '@/features/catalog/PartitionsDialog'
 import { isFavoriteTable, useFavorites, useToggleFavorite } from '@/features/favorites/hooks'
-import { useQualityScores } from '@/features/quality/hooks'
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
-import { ScoreBadge } from '@/features/quality/ScoreBadge'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { TableSummary, TableType } from '@/types/catalog'
@@ -44,7 +42,6 @@ type SortKey =
   | 'last_modified_time'
   | 'row_count'
   | 'size_bytes'
-  | 'quality_score'
 type SortDirection = 'asc' | 'desc'
 
 interface AssetsTableProps {
@@ -58,18 +55,10 @@ function formatOrDash(value: string | null): string {
   return value ?? '—'
 }
 
-function compare(
-  a: TableSummary,
-  b: TableSummary,
-  key: SortKey,
-  scoreByTableId: Map<string, number | undefined>,
-): number {
+function compare(a: TableSummary, b: TableSummary, key: SortKey): number {
   if (key === 'column_count') return a.column_count - b.column_count
   if (key === 'row_count') return (a.row_count ?? -1) - (b.row_count ?? -1)
   if (key === 'size_bytes') return (a.size_bytes ?? -1) - (b.size_bytes ?? -1)
-  if (key === 'quality_score') {
-    return (scoreByTableId.get(a.table_id) ?? -1) - (scoreByTableId.get(b.table_id) ?? -1)
-  }
   if (key === 'last_modified_time') {
     return (a.last_modified_time ?? '').localeCompare(b.last_modified_time ?? '')
   }
@@ -85,23 +74,6 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
   const [sortDir, setSortDir] = useState<SortDirection>('asc')
   const favoritesQuery = useFavorites()
   const toggleFavorite = useToggleFavorite()
-
-  const tableIds = useMemo(() => tables.map((table) => table.table_id), [tables])
-  const scoreQueries = useQualityScores(projectId, datasetId, tableIds)
-  const scoreQueryByTableId = useMemo(() => {
-    const map = new Map<string, (typeof scoreQueries)[number]>()
-    tableIds.forEach((id, index) => {
-      map.set(id, scoreQueries[index])
-    })
-    return map
-  }, [tableIds, scoreQueries])
-  const scoreByTableId = useMemo(() => {
-    const map = new Map<string, number | undefined>()
-    scoreQueryByTableId.forEach((query, id) => {
-      map.set(id, query.data?.score)
-    })
-    return map
-  }, [scoreQueryByTableId])
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
@@ -119,8 +91,8 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
         (typeFilter === TYPE_FILTER_ALL || table.table_type === typeFilter),
     )
     const sign = sortDir === 'asc' ? 1 : -1
-    return [...filtered].sort((a, b) => sign * compare(a, b, sortKey, scoreByTableId))
-  }, [tables, nameFilter, typeFilter, sortKey, sortDir, scoreByTableId])
+    return [...filtered].sort((a, b) => sign * compare(a, b, sortKey))
+  }, [tables, nameFilter, typeFilter, sortKey, sortDir])
 
   const showPartitionColumns = tables.some((table) => table.is_partitioned)
 
@@ -175,12 +147,6 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
               active={sortKey === 'table_type'}
               direction={sortDir}
               onClick={() => toggleSort('table_type')}
-            />
-            <SortableTableHead
-              label="Score"
-              active={sortKey === 'quality_score'}
-              direction={sortDir}
-              onClick={() => toggleSort('quality_score')}
             />
             <SortableTableHead
               label="Colunas"
@@ -264,12 +230,6 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
                 <TableCell>
                   <Badge variant="secondary">{table.table_type}</Badge>
                 </TableCell>
-                <TableCell>
-                  <ScoreBadge
-                    data={scoreQueryByTableId.get(table.table_id)?.data}
-                    isLoading={scoreQueryByTableId.get(table.table_id)?.isLoading ?? true}
-                  />
-                </TableCell>
                 <TableCell className="text-right">{table.column_count}</TableCell>
                 <TableCell>{formatDate(table.creation_time)}</TableCell>
                 <TableCell>{formatDate(table.last_modified_time)}</TableCell>
@@ -320,7 +280,7 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
           {visibleTables.length === 0 && (
             <TableRow>
               <TableCell
-                colSpan={showPartitionColumns ? 14 : 10}
+                colSpan={showPartitionColumns ? 13 : 9}
                 className="text-center text-muted-foreground"
               >
                 Nenhuma tabela encontrada com esse filtro.
