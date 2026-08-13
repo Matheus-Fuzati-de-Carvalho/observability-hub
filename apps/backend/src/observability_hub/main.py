@@ -2,7 +2,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from observability_hub.api.v1 import auth, catalog, favorites, freshness, profiling, projects
+from observability_hub.api.v1 import (
+    auth,
+    catalog,
+    favorites,
+    freshness,
+    history,
+    profiling,
+    projects,
+)
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
@@ -38,6 +46,7 @@ app.include_router(catalog.router)
 app.include_router(freshness.router)
 app.include_router(profiling.router)
 app.include_router(favorites.router)
+app.include_router(history.router)
 
 
 @app.get("/health")
