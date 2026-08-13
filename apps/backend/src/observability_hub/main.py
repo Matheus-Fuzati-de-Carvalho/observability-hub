@@ -8,6 +8,7 @@ from observability_hub.api.v1 import (
     favorites,
     freshness,
     history,
+    lineage,
     profiling,
     projects,
     quality,
@@ -19,6 +20,7 @@ from observability_hub.core.exceptions import (
     InvalidDateColumnError,
     InvalidSamplePercentError,
     InvalidSessionError,
+    LoggingAccessDeniedError,
     OAuthEmailNotAllowedError,
     OAuthExchangeError,
     OAuthStateMismatchError,
@@ -49,6 +51,7 @@ app.include_router(profiling.router)
 app.include_router(favorites.router)
 app.include_router(history.router)
 app.include_router(quality.router)
+app.include_router(lineage.router)
 
 
 @app.get("/health")
@@ -81,6 +84,26 @@ def handle_project_access_denied(request: Request, exc: ProjectAccessDeniedError
                 f"--member='serviceAccount:{sa_email}' "
                 f"--role='roles/{role}'"
                 for role in roles
+            ],
+        },
+    )
+
+
+@app.exception_handler(LoggingAccessDeniedError)
+def handle_logging_access_denied(request: Request, exc: LoggingAccessDeniedError) -> JSONResponse:
+    runtime_project = get_client().project
+    sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "logging_access_denied",
+            "message": "A service account do Hub não tem acesso aos audit logs deste projeto.",
+            "fix": [
+                (
+                    f"gcloud projects add-iam-policy-binding {exc.project_id} "
+                    f"--member='serviceAccount:{sa_email}' "
+                    "--role='roles/logging.viewer'"
+                )
             ],
         },
     )
