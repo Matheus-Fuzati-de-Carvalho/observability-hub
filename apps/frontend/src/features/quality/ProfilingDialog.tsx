@@ -21,6 +21,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTableDetail } from '@/features/catalog/hooks'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
+import { HistoryTab } from '@/features/quality/HistoryTab'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
 import { SchemaTable } from '@/features/quality/SchemaTable'
 import { SqlPreview } from '@/features/quality/SqlPreview'
@@ -33,6 +34,7 @@ const DATE_TYPES = new Set(['DATE', 'DATETIME', 'TIMESTAMP'])
 const VIEW_TYPES = new Set(['VIEW', 'MATERIALIZED_VIEW'])
 const SCHEMA_TAB = 'schema'
 const ANALYSIS_TAB = 'analysis'
+const HISTORY_TAB = 'history'
 
 // SelectValue não deriva o rótulo a partir dos SelectItem filhos nesta
 // versão do base-ui — precisa de um render-prop mapeando valor -> rótulo.
@@ -165,6 +167,7 @@ export function ProfilingDialog({
                 </>
               )}
             </TabsTrigger>
+            <TabsTrigger value={HISTORY_TAB}>Histórico</TabsTrigger>
           </TabsList>
 
           <TabsContent value={SCHEMA_TAB} className="flex min-h-0 flex-1 flex-col gap-3">
@@ -363,6 +366,10 @@ export function ProfilingDialog({
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value={HISTORY_TAB} className="min-h-0 flex-1 overflow-y-auto">
+            <HistoryTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
           </TabsContent>
         </Tabs>
       </DialogContent>
