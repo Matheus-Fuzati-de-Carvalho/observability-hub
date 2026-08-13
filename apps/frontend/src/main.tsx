@@ -2,7 +2,6 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { AuthGate } from '@/app/AuthGate'
 import { queryClient } from '@/app/query-client'
 import { AppRoutes } from '@/app/router'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,11 +17,9 @@ createRoot(rootElement).render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BrowserRouter>
-          <AuthGate>
-            <ProjectProvider>
-              <AppRoutes />
-            </ProjectProvider>
-          </AuthGate>
+          <ProjectProvider>
+            <AppRoutes />
+          </ProjectProvider>
         </BrowserRouter>
         <Toaster />
       </TooltipProvider>
