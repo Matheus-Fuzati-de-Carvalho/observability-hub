@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from google.cloud import bigquery
 
+from observability_hub.core.auth import get_current_user
 from observability_hub.core.bigquery import get_client
 from observability_hub.domains.quality import service
 from observability_hub.domains.quality.schemas import (
@@ -11,7 +12,9 @@ from observability_hub.domains.quality.schemas import (
     ProfilingRunResponse,
 )
 
-router = APIRouter(prefix="/api/v1/profiling", tags=["profiling"])
+router = APIRouter(
+    prefix="/api/v1/profiling", tags=["profiling"], dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post(

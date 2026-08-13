@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { useSearchTables } from '@/features/catalog/hooks'
 import { SearchAbsentTable } from '@/features/catalog/SearchAbsentTable'
 import { SearchMatchesTable } from '@/features/catalog/SearchMatchesTable'
+import { useHistory, useRecordSearch } from '@/features/history/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
 import { ApiError } from '@/lib/http-client'
 import type { SearchMode } from '@/types/catalog'
@@ -14,12 +15,37 @@ export function SearchPage() {
   const { projectId } = useProjectContext()
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<SearchMode>('exact')
+  const [inputFocused, setInputFocused] = useState(false)
   const searchMutation = useSearchTables()
+  const recordSearch = useRecordSearch()
+  const historyQuery = useHistory()
+  const recentSearches = historyQuery.data?.recent_searches.filter(
+    (s) => s.project_id === projectId,
+  )
+  const showRecentSearches = inputFocused && !q.trim() && Boolean(recentSearches?.length)
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     if (!projectId || !q.trim()) return
-    searchMutation.mutate({ projectId, q: q.trim(), mode })
+    searchMutation.mutate(
+      { projectId, q: q.trim(), mode },
+      {
+        onSuccess: () => recordSearch.mutate({ query: q.trim(), mode, projectId }),
+      },
+    )
+  }
+
+  function handleRecentSearchClick(query: string, recentMode: string) {
+    setQ(query)
+    setMode(recentMode as SearchMode)
+    setInputFocused(false)
+    if (!projectId) return
+    searchMutation.mutate(
+      { projectId, q: query, mode: recentMode as SearchMode },
+      {
+        onSuccess: () => recordSearch.mutate({ query, mode: recentMode, projectId }),
+      },
+    )
   }
 
   const errorMessage =
@@ -44,14 +70,42 @@ export function SearchPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
-        <div className="flex min-w-[240px] flex-1 flex-col gap-1.5">
+        <div className="relative flex min-w-[240px] flex-1 flex-col gap-1.5">
           <Label htmlFor="search-q">Nome da tabela ou partição</Label>
           <Input
             id="search-q"
             placeholder="ex: events_20260812, ga4_events, crm"
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            autoComplete="off"
           />
+          {showRecentSearches && (
+            <div className="absolute top-full left-0 z-10 mt-1 w-full rounded-md border border-border bg-popover p-1 shadow-md">
+              <p className="px-2 py-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                Buscas recentes
+              </p>
+              {recentSearches?.map((search) => (
+                <button
+                  key={`${search.query}.${search.mode}.${search.searched_at}`}
+                  type="button"
+                  // preventDefault no mousedown (não no click): sem isso o
+                  // input perde foco (blur) antes do onClick disparar, e
+                  // showRecentSearches já fecha o dropdown no blur.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleRecentSearchClick(search.query, search.mode)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                >
+                  <SearchIcon size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{search.query}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {search.mode}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-1 rounded-md border border-border p-1">

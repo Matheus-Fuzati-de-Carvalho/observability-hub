@@ -2,13 +2,25 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from observability_hub.api.v1 import catalog, freshness, profiling, projects
+from observability_hub.api.v1 import (
+    auth,
+    catalog,
+    favorites,
+    freshness,
+    history,
+    profiling,
+    projects,
+)
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
     DatasetNotFoundError,
     InvalidDateColumnError,
     InvalidSamplePercentError,
+    InvalidSessionError,
+    OAuthEmailNotAllowedError,
+    OAuthExchangeError,
+    OAuthStateMismatchError,
     ProfilingTimeoutError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
@@ -28,10 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(catalog.router)
 app.include_router(freshness.router)
 app.include_router(profiling.router)
+app.include_router(favorites.router)
+app.include_router(history.router)
 
 
 @app.get("/health")
@@ -129,4 +144,38 @@ def handle_profiling_timeout(request: Request, exc: ProfilingTimeoutError) -> JS
     return JSONResponse(
         status_code=504,
         content={"error": "profiling_timeout", "message": str(exc)},
+    )
+
+
+@app.exception_handler(OAuthStateMismatchError)
+def handle_oauth_state_mismatch(request: Request, exc: OAuthStateMismatchError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"error": "oauth_state_mismatch", "message": str(exc)},
+    )
+
+
+@app.exception_handler(OAuthExchangeError)
+def handle_oauth_exchange_error(request: Request, exc: OAuthExchangeError) -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={"error": "oauth_exchange_failed", "message": str(exc)},
+    )
+
+
+@app.exception_handler(OAuthEmailNotAllowedError)
+def handle_oauth_email_not_allowed(
+    request: Request, exc: OAuthEmailNotAllowedError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"error": "email_not_allowed", "message": str(exc)},
+    )
+
+
+@app.exception_handler(InvalidSessionError)
+def handle_invalid_session(request: Request, exc: InvalidSessionError) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"error": "invalid_session", "message": str(exc)},
     )

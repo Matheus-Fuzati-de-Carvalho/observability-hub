@@ -1,6 +1,7 @@
-import { Clock } from 'lucide-react'
-import { Fragment } from 'react'
+import { ChevronDown, ChevronRight, ChevronUp, Clock } from 'lucide-react'
+import { Fragment, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -78,76 +79,127 @@ interface SchemaTableProps {
 }
 
 export function SchemaTable({ columns, isLoading, partitionColumn }: SchemaTableProps) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="text-xs">Nome</TableHead>
-          <TableHead className="text-xs">Tipo</TableHead>
-          <TableHead className="text-xs">Nullable</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {isLoading
-          ? SKELETON_ROW_IDS.map((id) => (
-              <TableRow key={id}>
-                <TableCell>
-                  <Skeleton className="h-4 w-32" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-4 w-24" />
-                </TableCell>
-                <TableCell>
-                  <Skeleton className="h-4 w-10" />
-                </TableCell>
-              </TableRow>
-            ))
-          : columns.map((column) => {
-              const complex = isComplexType(column.data_type)
-              const dateColumn = isDateType(column.data_type)
-              const isPartition = column.column_name === partitionColumn
-              const subfields = complex ? parseStructFields(column.data_type) : []
+  // Nível 2: seção inteira, expandida por padrão (mesmo padrão do "SQL
+  // gerado" — SqlPreview.tsx).
+  const [sectionOpen, setSectionOpen] = useState(true)
+  // Nível 1: cada coluna STRUCT/ARRAY colapsada por padrão, estado
+  // independente por coluna.
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set())
 
-              return (
-                <Fragment key={column.column_name}>
-                  <TableRow>
-                    <TableCell
-                      className={cn('text-xs font-medium', dateColumn && 'text-status-info')}
-                    >
-                      <span className="flex items-center gap-2">
-                        {dateColumn && <Clock size={12} className="shrink-0" />}
-                        {column.column_name}
-                        {isPartition && <Badge>Partição</Badge>}
-                      </span>
+  function toggleColumn(columnName: string) {
+    setExpandedColumns((prev) => {
+      const next = new Set(prev)
+      if (next.has(columnName)) {
+        next.delete(columnName)
+      } else {
+        next.add(columnName)
+      }
+      return next
+    })
+  }
+
+  return (
+    <div className="rounded-md bg-background p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          Schema
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => setSectionOpen((v) => !v)}>
+          {sectionOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {sectionOpen ? 'Ocultar schema' : 'Ver schema'}
+        </Button>
+      </div>
+
+      {sectionOpen && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-xs">Nome</TableHead>
+              <TableHead className="text-xs">Tipo</TableHead>
+              <TableHead className="text-xs">Nullable</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading
+              ? SKELETON_ROW_IDS.map((id) => (
+                  <TableRow key={id}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-32" />
                     </TableCell>
-                    <TableCell
-                      className={cn(
-                        'text-xs',
-                        dateColumn ? 'text-status-info' : 'text-muted-foreground',
-                      )}
-                    >
-                      <span className="flex items-center gap-2">
-                        {column.data_type}
-                        {complex && <Badge variant="outline">Complexo</Badge>}
-                      </span>
+                    <TableCell>
+                      <Skeleton className="h-4 w-24" />
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {column.is_nullable ? 'Sim' : 'Não'}
+                    <TableCell>
+                      <Skeleton className="h-4 w-10" />
                     </TableCell>
                   </TableRow>
-                  {subfields.map((field) => (
-                    <TableRow key={`${column.column_name}.${field.name}`}>
-                      <TableCell className="pl-8 text-xs text-muted-foreground">
-                        {field.name}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{field.type}</TableCell>
-                      <TableCell />
-                    </TableRow>
-                  ))}
-                </Fragment>
-              )
-            })}
-      </TableBody>
-    </Table>
+                ))
+              : columns.map((column) => {
+                  const complex = isComplexType(column.data_type)
+                  const dateColumn = isDateType(column.data_type)
+                  const isPartition = column.column_name === partitionColumn
+                  const subfields = complex ? parseStructFields(column.data_type) : []
+                  const expanded = expandedColumns.has(column.column_name)
+
+                  return (
+                    <Fragment key={column.column_name}>
+                      <TableRow>
+                        <TableCell
+                          className={cn('text-xs font-medium', dateColumn && 'text-status-info')}
+                        >
+                          <span className="flex items-center gap-2">
+                            {complex && (
+                              <button
+                                type="button"
+                                onClick={() => toggleColumn(column.column_name)}
+                                className="shrink-0 text-muted-foreground hover:text-foreground"
+                                aria-label={
+                                  expanded
+                                    ? `Recolher subcampos de ${column.column_name}`
+                                    : `Expandir subcampos de ${column.column_name}`
+                                }
+                              >
+                                {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                              </button>
+                            )}
+                            {dateColumn && <Clock size={12} className="shrink-0" />}
+                            {column.column_name}
+                            {isPartition && <Badge>Partição</Badge>}
+                          </span>
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            'text-xs',
+                            dateColumn ? 'text-status-info' : 'text-muted-foreground',
+                          )}
+                        >
+                          <span className="flex items-center gap-2">
+                            {column.data_type}
+                            {complex && <Badge variant="outline">Complexo</Badge>}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {column.is_nullable ? 'Sim' : 'Não'}
+                        </TableCell>
+                      </TableRow>
+                      {expanded &&
+                        subfields.map((field) => (
+                          <TableRow key={`${column.column_name}.${field.name}`}>
+                            <TableCell className="pl-8 text-xs text-muted-foreground">
+                              {field.name}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {field.type}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        ))}
+                    </Fragment>
+                  )
+                })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
   )
 }
