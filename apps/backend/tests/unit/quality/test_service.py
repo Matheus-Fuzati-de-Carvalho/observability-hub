@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from google.api_core.exceptions import NotFound
 
 from observability_hub.core.exceptions import (
     InvalidDateColumnError,
@@ -386,7 +387,13 @@ def test_run_profiling_builds_full_response(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
+        client,
+        MagicMock(),  # firestore_client
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert result.table_summary.total_sampled_rows == 10000
@@ -443,7 +450,13 @@ def test_run_profiling_zero_rows_has_zeroed_metrics_without_error(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "empty_table", ProfilingRequest()
+        client,
+        MagicMock(),  # firestore_client
+        "observability-hub-dev",
+        "RAW",
+        "empty_table",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert result.table_summary.total_sampled_rows == 0
@@ -488,7 +501,13 @@ def test_run_profiling_all_null_column_is_critical(monkeypatch):
     )
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads", ProfilingRequest()
+        client,
+        MagicMock(),  # firestore_client
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     col = result.columns[0]
@@ -531,10 +550,12 @@ def test_run_profiling_uses_exact_distinct_alias_when_requested(monkeypatch):
 
     result = service.run_profiling(
         client,
+        MagicMock(),  # firestore_client
         "observability-hub-dev",
         "RAW",
         "crm_leads",
         ProfilingRequest(uniqueness_method=UniquenessMethod.EXACT),
+        "a@dp6.com.br",
     )
 
     assert result.columns[0].distinct_count == 4
@@ -577,7 +598,13 @@ def test_run_profiling_omits_tablesample_for_view(monkeypatch):
     monkeypatch.setattr(service.repository, "execute_top_n_query", fake_execute_top_n_query)
 
     result = service.run_profiling(
-        client, "observability-hub-dev", "RAW", "crm_leads_view", ProfilingRequest()
+        client,
+        MagicMock(),  # firestore_client
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads_view",
+        ProfilingRequest(),
+        "a@dp6.com.br",
     )
 
     assert "TABLESAMPLE" not in result.sql
@@ -699,3 +726,144 @@ def test_get_null_distribution_handles_zero_total_rows_period(monkeypatch):
     )
 
     assert result.series[0].null_pct == 0.0
+
+
+# --- get_quality_score ------------------------------------------------------
+
+
+def _fake_bq_table(modified=None, description=None):
+    table = MagicMock()
+    table.modified = modified
+    table.description = description
+    return table
+
+
+def test_get_quality_score_raises_table_not_found(monkeypatch):
+    client = _fake_client()
+    firestore_client = MagicMock()
+    monkeypatch.setattr(
+        service,
+        "get_table_cached",
+        lambda client, table_ref: (_ for _ in ()).throw(NotFound("gone")),
+    )
+
+    with pytest.raises(TableNotFoundError):
+        service.get_quality_score(
+            client, firestore_client, "observability-hub-dev", "RAW", "crm_leads"
+        )
+
+
+def test_get_quality_score_neutral_when_never_profiled(monkeypatch):
+    client = _fake_client()
+    firestore_client = MagicMock()
+    monkeypatch.setattr(
+        service,
+        "get_table_cached",
+        lambda client, table_ref: _fake_bq_table(modified=None, description=None),
+    )
+    monkeypatch.setattr(
+        service.firestore_repository, "get_last_profiling_result", lambda *a, **kw: None
+    )
+
+    result = service.get_quality_score(
+        client, firestore_client, "observability-hub-dev", "RAW", "crm_leads"
+    )
+
+    assert result.has_profiling_data is False
+    assert result.breakdown.completeness == 50.0
+    assert result.breakdown.duplicates == 50.0
+    assert result.breakdown.documentation == 0.0
+
+
+def test_get_quality_score_uses_last_profiling_result(monkeypatch):
+    client = _fake_client()
+    firestore_client = MagicMock()
+    monkeypatch.setattr(
+        service,
+        "get_table_cached",
+        lambda client, table_ref: _fake_bq_table(modified=None, description="Tabela de leads"),
+    )
+    monkeypatch.setattr(
+        service.firestore_repository,
+        "get_last_profiling_result",
+        lambda *a, **kw: {"overall_density": 90.0, "estimated_duplicate_pct": 0.0},
+    )
+
+    result = service.get_quality_score(
+        client, firestore_client, "observability-hub-dev", "RAW", "crm_leads"
+    )
+
+    assert result.has_profiling_data is True
+    assert result.breakdown.completeness == 90.0
+    assert result.breakdown.duplicates == 100.0
+    assert result.breakdown.documentation == 100.0
+    assert result.project_id == "observability-hub-dev"
+    assert result.dataset_id == "RAW"
+    assert result.table_id == "crm_leads"
+
+
+# --- run_profiling salva no Firestore ---------------------------------------
+
+
+def test_run_profiling_saves_result_to_firestore(monkeypatch):
+    client = _fake_client()
+    firestore_client = MagicMock()
+    _stub_region_resolution(monkeypatch)
+    monkeypatch.setattr(
+        service.repository,
+        "get_table_columns",
+        lambda client, project_id, dataset_id, table_id, location: [
+            {"column_name": "email", "data_type": "STRING", "is_nullable": True},
+        ],
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "execute_main_query",
+        lambda client, project_id, sql, budget: {
+            "_total_sampled_rows": 10,
+            "_approx_distinct_rows": 10,
+            "email__count_filled": 10,
+            "email__distinct": 10,
+            "email__min": "a@dp6.com.br",
+            "email__max": "z@dp6.com.br",
+        },
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_total_table_rows",
+        lambda client, project_id, dataset_id, table_id, location: 10,
+    )
+    monkeypatch.setattr(
+        service.sql_builder,
+        "column_field_aliases",
+        lambda name, data_type, method: {
+            "count_filled": "email__count_filled",
+            "distinct": "email__distinct",
+            "min": "email__min",
+            "max": "email__max",
+        },
+    )
+    save_calls = []
+    monkeypatch.setattr(
+        service.firestore_repository,
+        "save_profiling_result",
+        lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    service.run_profiling(
+        client,
+        firestore_client,
+        "observability-hub-dev",
+        "RAW",
+        "crm_leads",
+        ProfilingRequest(),
+        "a@dp6.com.br",
+    )
+
+    assert len(save_calls) == 1
+    args, kwargs = save_calls[0]
+    assert args[0] is firestore_client
+    assert args[1:4] == ("observability-hub-dev", "RAW", "crm_leads")
+    assert kwargs["executed_by"] == "a@dp6.com.br"
+    assert kwargs["overall_density"] == 100.0
+    assert kwargs["estimated_duplicate_pct"] == 0.0

@@ -8,9 +8,14 @@ import re
 import time
 from datetime import UTC, datetime
 
-from google.cloud import bigquery
+from google.api_core.exceptions import NotFound
+from google.cloud import bigquery, firestore
 
-from observability_hub.core.bigquery import discover_regions, resolve_dataset_region
+from observability_hub.core.bigquery import (
+    discover_regions,
+    get_table_cached,
+    resolve_dataset_region,
+)
 from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
     InvalidDateColumnError,
@@ -18,7 +23,9 @@ from observability_hub.core.exceptions import (
     ProfilingTimeoutError,
     TableNotFoundError,
 )
-from observability_hub.domains.quality import repository, sql_builder
+from observability_hub.core.sla import hours_since
+from observability_hub.core.sla import sla_status as sla_status_for
+from observability_hub.domains.quality import firestore_repository, repository, score, sql_builder
 from observability_hub.domains.quality.schemas import (
     ColumnProfile,
     EstimateResponse,
@@ -30,6 +37,8 @@ from observability_hub.domains.quality.schemas import (
     ProfilingRequest,
     ProfilingRunResponse,
     QualityFlag,
+    QualityScoreResponse,
+    ScoreBreakdownResponse,
     TableProfilingSummary,
     TopValue,
 )
@@ -240,10 +249,12 @@ def estimate_profiling(
 
 def run_profiling(
     client: bigquery.Client,
+    firestore_client: firestore.Client,
     project_id: str,
     dataset_id: str,
     table_id: str,
     request: ProfilingRequest,
+    executed_by: str,
 ) -> ProfilingRunResponse:
     start = time.monotonic()
     _validate_sample_percent(request.sample_percent)
@@ -361,6 +372,21 @@ def run_profiling(
         if column_profiles
         else 0.0
     )
+    rounded_density = round(overall_density, 2)
+    rounded_duplicate_pct = round(duplicate_pct, 2)
+
+    # Salva pro score de qualidade (domains/quality/score.py) poder ler o
+    # resultado mais recente sem precisar reprofilar — coleção
+    # compartilhada, sobrescrita a cada run (ver firestore_repository).
+    firestore_repository.save_profiling_result(
+        firestore_client,
+        project_id,
+        dataset_id,
+        table_id,
+        overall_density=rounded_density,
+        estimated_duplicate_pct=rounded_duplicate_pct,
+        executed_by=executed_by,
+    )
 
     return ProfilingRunResponse(
         project_id=project_id,
@@ -373,8 +399,8 @@ def run_profiling(
             total_sampled_rows=total_sampled_rows,
             total_table_rows=total_table_rows,
             estimated_duplicate_rows=duplicate_rows,
-            estimated_duplicate_pct=round(duplicate_pct, 2),
-            overall_density=round(overall_density, 2),
+            estimated_duplicate_pct=rounded_duplicate_pct,
+            overall_density=rounded_density,
         ),
         columns=column_profiles,
         excluded_columns=excluded,
@@ -433,4 +459,55 @@ def get_null_distribution(
         date_column=date_column,
         granularity=granularity,
         series=series,
+    )
+
+
+def get_quality_score(
+    client: bigquery.Client,
+    firestore_client: firestore.Client,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+) -> QualityScoreResponse:
+    """completeness/duplicates vêm do último profiling salvo (Firestore,
+    ver firestore_repository) — None se a tabela nunca foi perfilada,
+    score.calculate_score já sabe cair pro valor neutro (50) nesse caso.
+    freshness vem do mesmo client.get_table() cacheado que já respondia
+    row_count/size_bytes noutros domínios (core.sla, sem custo extra).
+    documentation vem de bq_table.description, mesmo campo usado por
+    catalog.TableDetail."""
+    table_ref = f"{project_id}.{dataset_id}.{table_id}"
+    try:
+        bq_table = get_table_cached(client, table_ref)
+    except NotFound as exc:
+        raise TableNotFoundError(project_id, dataset_id, table_id) from exc
+
+    status = sla_status_for(hours_since(bq_table.modified))
+
+    raw_result = firestore_repository.get_last_profiling_result(
+        firestore_client, project_id, dataset_id, table_id
+    )
+    profiling_result = (
+        score.LastProfilingResult(
+            overall_density=raw_result["overall_density"],
+            estimated_duplicate_pct=raw_result["estimated_duplicate_pct"],
+        )
+        if raw_result is not None
+        else None
+    )
+
+    result = score.calculate_score(profiling_result, status, bq_table.description)
+
+    return QualityScoreResponse(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        table_id=table_id,
+        score=result.score,
+        breakdown=ScoreBreakdownResponse(
+            completeness=result.breakdown.completeness,
+            freshness=result.breakdown.freshness,
+            duplicates=result.breakdown.duplicates,
+            documentation=result.breakdown.documentation,
+        ),
+        has_profiling_data=result.has_profiling_data,
     )

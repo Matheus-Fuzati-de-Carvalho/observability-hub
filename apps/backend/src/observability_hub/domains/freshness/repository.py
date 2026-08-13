@@ -9,11 +9,10 @@ INFORMATION_SCHEMA.TABLE_STORAGE (custo $0, lag de até 24h). get_table_freshnes
 client.get_table() (tempo real, sem lag, custo $0) — ver core/bigquery.py.
 """
 
-from datetime import UTC, datetime
-
 from google.cloud import bigquery
 
 from observability_hub.core.bigquery import get_tables_metadata
+from observability_hub.core.sla import hours_since, sla_status
 
 # TABLE_STORAGE.table_type usa os mesmos valores brutos de TABLES ("BASE
 # TABLE", "MATERIALIZED VIEW" com espaço); a API expõe os valores
@@ -24,33 +23,6 @@ _RAW_TABLE_TYPE_TO_API = {
     "EXTERNAL": "EXTERNAL",
     "MATERIALIZED VIEW": "MATERIALIZED_VIEW",
 }
-
-# Mesmos limiares de _sla_status_case_sql (usada por
-# get_freshness_summary_by_dataset, que continua em TABLE_STORAGE), mas em
-# Python — get_table_freshness lê last_modified_time de client.get_table()
-# (core.bigquery.get_tables_metadata), não mais do SQL.
-_SLA_THRESHOLDS_HOURS = [
-    (12, "ok"),
-    (24, "warning_12_24"),
-    (48, "warning_24_48"),
-    (168, "warning_48_7d"),
-    (720, "warning_7d_1m"),
-]
-
-
-def _hours_since(modified: datetime | None) -> float | None:
-    if modified is None:
-        return None
-    return (datetime.now(UTC) - modified).total_seconds() / 3600
-
-
-def _sla_status(hours_since_update: float | None) -> str | None:
-    if hours_since_update is None:
-        return None
-    for threshold, status in _SLA_THRESHOLDS_HOURS:
-        if hours_since_update <= threshold:
-            return status
-    return "stale"
 
 
 # TABLE_STORAGE.storage_last_modified_time pode ser null (metadados de
@@ -154,14 +126,14 @@ def get_table_freshness(
     for row in rows:
         bq_table = metadata_by_ref.get(f"{project_id}.{dataset_id}.{row.table_id}")
         modified = bq_table.modified if bq_table is not None else None
-        hours_since_update = _hours_since(modified)
+        hours_since_update = hours_since(modified)
         tables.append(
             {
                 "table_id": row.table_id,
                 "table_type": _RAW_TABLE_TYPE_TO_API.get(row.table_type, row.table_type),
                 "last_modified_time": modified,
                 "hours_since_update": hours_since_update,
-                "sla_status": _sla_status(hours_since_update),
+                "sla_status": sla_status(hours_since_update),
                 "size_bytes": bq_table.num_bytes if bq_table is not None else None,
                 "row_count": bq_table.num_rows if bq_table is not None else None,
             }

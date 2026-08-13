@@ -108,3 +108,22 @@ class NullDistributionResponse(BaseModel):
     date_column: str
     granularity: Granularity
     series: list[NullDistributionPoint]
+
+
+class ScoreBreakdownResponse(BaseModel):
+    completeness: float
+    freshness: float
+    duplicates: float
+    documentation: float
+
+
+class QualityScoreResponse(BaseModel):
+    project_id: str
+    dataset_id: str
+    table_id: str
+    score: int
+    breakdown: ScoreBreakdownResponse
+    # False quando completeness/duplicates caíram no valor neutro (50) por
+    # falta de profiling_results — o frontend usa isso pra avisar "tabela
+    # ainda não perfilada" em vez de deixar parecer um score real de 50.
+    has_profiling_data: bool
