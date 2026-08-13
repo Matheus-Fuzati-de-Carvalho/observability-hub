@@ -39,7 +39,7 @@ def callback(
     response = Response(
         content=TokenResponse(user=user).model_dump_json(), media_type="application/json"
     )
-    response.delete_cookie(service.STATE_COOKIE_NAME, path="/")
+    response.delete_cookie(service.STATE_COOKIE_NAME, **_COOKIE_KWARGS)
     response.set_cookie(
         service.SESSION_COOKIE_NAME,
         token,
@@ -57,5 +57,9 @@ def me(user: UserInfo = Depends(get_current_user)) -> UserInfo:
 @router.post("/logout")
 def logout() -> Response:
     response = Response(status_code=204)
-    response.delete_cookie(service.SESSION_COOKIE_NAME, path="/")
+    # delete_cookie precisa dos MESMOS atributos secure/httponly/samesite do
+    # cookie original (Starlette default é secure=False/httponly=False/
+    # samesite="lax") — sem isso o browser não reconhece como o mesmo
+    # cookie e o Set-Cookie de deleção é ignorado, deixando a sessão viva.
+    response.delete_cookie(service.SESSION_COOKIE_NAME, **_COOKIE_KWARGS)
     return response
