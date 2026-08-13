@@ -76,6 +76,15 @@ def get_client() -> bigquery.Client:
     return bigquery.Client()
 
 
+def get_runtime_project() -> str:
+    """Projeto GCP onde este processo está rodando — mesma fonte usada por
+    is_native (domains/catalog/service.py) e pelo "fix" de
+    ProjectAccessDeniedError (main.py). Reaproveitada por core/secrets.py
+    pra resolver secrets com sufixo _DEV/_PROD sem uma segunda forma de
+    descobrir o projeto atual."""
+    return get_client().project
+
+
 def _probe_region(client: bigquery.Client, project_id: str, region: str) -> str | None:
     """Retorna a região se o projeto tiver ao menos um dataset nela, ou None
     se a região existir mas não tiver datasets. Propaga Forbidden/NotFound

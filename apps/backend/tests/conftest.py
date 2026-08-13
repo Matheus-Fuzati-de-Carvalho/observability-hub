@@ -1,6 +1,7 @@
 import pytest
 
 from observability_hub.core import bigquery as bigquery_module
+from observability_hub.core import secrets as secrets_module
 
 
 @pytest.fixture(autouse=True)
@@ -14,3 +15,15 @@ def _clear_bigquery_table_cache():
     bigquery_module._table_cache.clear()
     yield
     bigquery_module._table_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_secrets_cache():
+    """core.secrets.get_secret/_is_prod são @lru_cache — sem limpar entre
+    testes, o valor (ou o mock) da primeira chamada vaza pros testes
+    seguintes, mesmo trocando o monkeypatch."""
+    secrets_module.get_secret.cache_clear()
+    secrets_module._is_prod.cache_clear()
+    yield
+    secrets_module.get_secret.cache_clear()
+    secrets_module._is_prod.cache_clear()

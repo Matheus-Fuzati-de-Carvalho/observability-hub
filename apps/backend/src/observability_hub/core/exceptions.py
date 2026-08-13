@@ -66,3 +66,36 @@ class ProfilingTimeoutError(Exception):
             f"Profiling de '{project_id}.{dataset_id}.{table_id}' excedeu 60s. "
             "Reduza sample_percent e tente novamente."
         )
+
+
+class OAuthStateMismatchError(Exception):
+    """O cookie oauth_state (setado em /auth/login) não bate com o
+    parâmetro state devolvido por /auth/callback — sinal de CSRF ou de
+    cookie expirado/perdido entre as duas etapas."""
+
+    def __init__(self) -> None:
+        super().__init__("Parâmetro state inválido ou ausente — tente fazer login novamente.")
+
+
+class OAuthExchangeError(Exception):
+    """Falha na troca do authorization code pelo token/userinfo do Google
+    (rede, code expirado/reutilizado, credenciais OAuth erradas)."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(f"Falha ao autenticar com o Google: {detail}")
+
+
+class OAuthEmailNotAllowedError(Exception):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__(f"E-mail '{email}' não está na allowlist de acesso.")
+
+
+class InvalidSessionError(Exception):
+    """Cookie de sessão (JWT) ausente, expirado ou com assinatura
+    inválida — levantado por core/auth.py::get_current_user, usado em
+    todo endpoint que exige usuário autenticado."""
+
+    def __init__(self) -> None:
+        super().__init__("Sessão inválida ou expirada — faça login novamente.")
