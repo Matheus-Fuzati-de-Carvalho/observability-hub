@@ -2,7 +2,7 @@
 
 Versão: 1.0
 Status: Draft
-Última atualização: 2026-08-04
+Última atualização: 2026-08-13 (roadmap)
 
 ## 1. Problema
 
@@ -139,7 +139,12 @@ Por que é MVP: elimina o maior gargalo de qualidade — escrever queries de pro
 | Fase | Entregas | Status |
 |---|---|---|
 | Fase 0 | Estrutura do monorepo, CLAUDE.md, convenções | ✅ Concluída |
-| Fase 1 | Bootstrap Terraform, CI/CD, Cloud Run vazio deployado | 🔄 Em andamento |
-| Fase 2 | MVP: Catálogo + Volumetria + Freshness + Profiling | ⏳ Pendente |
-| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Pendente |
+| Fase 1 | Bootstrap Terraform, CI/CD, Cloud Run vazio deployado | ✅ Concluída |
+| Fase 2 | MVP: Catálogo + Volumetria + Freshness + Profiling (backend + frontend) | ✅ Concluída |
+| Sprint 2.2/2.3 | Metadados de partição, busca reversa tabela→datasets, refresh e melhorias de UX sobre o MVP do Catálogo | ✅ Concluída |
+| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Próxima |
 | Fase 4 | FinOps completo | ⏳ Pendente |
+
+Ver `CHANGELOG.md` para o detalhe fase a fase (o que foi feito, erros
+corrigidos e decisões de arquitetura) e `SESSIONLOG.md` para o estado
+mais recente da sessão de desenvolvimento.

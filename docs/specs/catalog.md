@@ -1,9 +1,9 @@
 # Spec — Domínio: Catálogo (catalog)
 
-**Versão:** 1.4 (flag is_native em /projects/{project_id}/validate)
+**Versão:** 1.5 (metadados de partição, endpoint de partições, busca reversa)
 **Status:** Aprovada
-**Fase:** 2 — MVP v1
-**Última atualização:** 2026-08-11 (v1.4)
+**Fase:** 2 — MVP v1 (Sprint 2.2/2.3)
+**Última atualização:** 2026-08-13 (v1.5)
 
 ---
 
@@ -40,6 +40,28 @@ tabelas de um dataset) lê `num_rows`/`size_bytes`/`last_modified_time` via
 e cacheada em memória por 5min (`core/bigquery.py::get_table_cached`/
 `get_tables_metadata`) para não bater a API a cada refresh de tela.
 `TABLE_PARTITIONS` não é mais usada (ver Query 3).
+
+`GET /catalog/{project_id}/datasets/{dataset_id}/tables` também busca
+min/max/contagem de partição (`partition_type`, `min_partition`,
+`max_partition`, `partition_count`) para as tabelas com
+`is_partitioned=true`, uma tabela por vez em paralelo
+(`ThreadPoolExecutor`). Diferente do resto desta spec, **essa não é uma
+query de metadado gratuita** — é `MIN`/`MAX`/`COUNT(DISTINCT)` direto na
+coluna de partição (`SELECT ... FROM {project}.{dataset}.{tabela}`), com
+custo real de bytes escaneados (mitigado por ler só uma coluna, sem
+filtro). `INFORMATION_SCHEMA.PARTITIONS` foi avaliada e descartada como
+fonte: não existe para datasets multi-região (US/EU), que é onde estão
+todos os datasets de dev e prod hoje — teria retornado N/D sempre, sem
+valor prático (ver CHANGELOG, Sprint 2.2). Por ter custo real, o
+resultado é cacheado em memória por 5min por tabela
+(`domains/catalog/repository.py::_partition_stats_cache`, TTL local ao
+domínio catalog, mesmo padrão do `get_table_cached` de `core/bigquery.py`
+mas não compartilhado com ele).
+
+`GET /catalog/{project_id}/search` (busca reversa) consulta
+`INFORMATION_SCHEMA.TABLES` de todas as regiões descobertas via
+`discover_regions()`, em paralelo — uma query por região, metadado
+gratuito, mesma técnica de `discover_regions`.
 
 Lista de regiões mantida em `core/config.py`:
 ```python
@@ -156,11 +178,104 @@ Lista tabelas do dataset. Região descoberta automaticamente via metadados.
       "partition_column": null,
       "is_clustered": false,
       "clustering_columns": [],
-      "location": "US"
+      "location": "US",
+      "partition_type": null,
+      "min_partition": null,
+      "max_partition": null,
+      "partition_count": null
     }
   ]
 }
 ```
+
+`partition_type`/`min_partition`/`max_partition`/`partition_count` só são
+preenchidos quando `is_partitioned=true` (`null` caso contrário).
+`partition_type` vem de `client.get_table().time_partitioning`/
+`range_partitioning`, ex: `"event_date (DAY)"` — sem custo extra, já
+reaproveita o `client.get_table()` cacheado que a listagem já faz para
+`row_count`/`size_bytes`/`last_modified_time`.
+
+---
+
+### GET /api/v1/catalog/{project_id}/datasets/{dataset_id}/tables/{table_id}/partitions
+Lista as partições distintas de uma tabela particionada com a contagem de
+linhas de cada uma — query real (`GROUP BY` na coluna de partição),
+ordenada da mais recente para a mais antiga.
+
+**Response 200:**
+```json
+{
+  "table_id": "events",
+  "partition_column": "event_date",
+  "partition_type": "event_date (DAY)",
+  "total_partitions": 3,
+  "partitions": [
+    { "value": "2021-01-30", "row_count": 3161 },
+    { "value": "2021-01-03", "row_count": 24743 },
+    { "value": "2021-01-01", "row_count": 22096 }
+  ]
+}
+```
+
+**Response 400** (tabela não particionada):
+```json
+{
+  "error": "table_not_partitioned",
+  "message": "Tabela 'crm_leads' em 'observability-hub-dev.RAW' não é particionada."
+}
+```
+
+---
+
+### GET /api/v1/catalog/{project_id}/search
+Busca reversa: em quais datasets do projeto existe (ou não) uma tabela com
+um determinado nome. Caso de uso principal: projetos GA4 com múltiplos
+datasets (`analytics_<id>`) recebendo tabelas `events_YYYYMMDD` diariamente
+— descobrir em quais datasets a partição do dia já chegou.
+
+**Parâmetros:**
+- `q` (query, obrigatório) — termo de busca, mínimo 1 caractere
+- `mode` (query, default `exact`) — `exact`, `contains` ou `not_contains`
+
+| Mode | Lógica |
+|---|---|
+| `exact` | `table_name = q`, em todas as regiões do projeto |
+| `contains` | `table_name LIKE '%q%'` |
+| `not_contains` | Inverte a pergunta: retorna os datasets onde **nenhuma** tabela contém `q` (não lista tabelas individuais) |
+
+**Response 200** (`mode=exact`, tabela existe em alguns datasets, ausente
+em outros da mesma série):
+```json
+{
+  "query": "events_20260813",
+  "mode": "exact",
+  "project_id": "observability-hub-dev",
+  "datasets_with_match": [],
+  "datasets_without_match": [
+    {
+      "dataset_id": "analytics_100001",
+      "reason": "prefix_exists",
+      "latest_partition": "events_20260812"
+    }
+  ]
+}
+```
+
+`datasets_with_match` traz `last_modified_time` e `row_count` reais via
+`client.get_table()` (mesma técnica de cache/paralelismo de
+`get_tables_metadata`, ver "Fonte de dados"). `datasets_without_match`
+**não** lista todo dataset do projeto que não bateu — só os que têm outra
+tabela da mesma série: o prefixo é derivado removendo o sufixo numérico
+final de `q` (`"events_20260812"` → `"events_"`,
+`domains/catalog/repository.py::derive_search_prefix`), buscado via
+`GROUP BY` + `MAX(table_name)` por dataset. Sem sufixo numérico em `q`
+(ex: `"ga4_events"`), não há "série" pra comparar e o campo fica vazio.
+
+Para `mode=not_contains`, `datasets_with_match` fica sempre vazio (não há
+uma tabela específica pra apontar como "match" nesse mode) e
+`datasets_without_match` lista **todos** os datasets do projeto sem
+nenhuma tabela contendo `q`, com `reason="no_match"` e
+`latest_partition=null` — a lógica de prefixo/série não se aplica aqui.
 
 ---
 
@@ -258,6 +373,48 @@ ver "Fonte de dados"), não de SQL. O `ORDER BY size_bytes DESC NULLS LAST` é
 aplicado em Python depois do merge, já que `size_bytes` não vem mais da
 query.
 
+### Query 4 — Min/max/contagem de partição (só tabelas com is_partitioned=true)
+```sql
+SELECT
+  MIN(`{campo}`)            AS min_partition,
+  MAX(`{campo}`)            AS max_partition,
+  COUNT(DISTINCT `{campo}`) AS partition_count
+FROM `{project}.{dataset}.{tabela}`
+```
+`{campo}` é o `partition_column` já resolvido na Query 3. Diferente das
+demais queries desta spec, **não** é `region-qualified` nem gratuita (ver
+"Fonte de dados").
+
+### Query 5 — Listagem de partições distintas (endpoint /partitions)
+```sql
+SELECT `{campo}` AS partition_value, COUNT(*) AS row_count
+FROM `{project}.{dataset}.{tabela}`
+GROUP BY 1
+ORDER BY 1 DESC
+```
+
+### Query 6 — Busca reversa (endpoint /search)
+```sql
+-- mode=exact
+SELECT table_schema AS dataset_id, table_name AS table_id, table_type
+FROM `{project}.region-{region}.INFORMATION_SCHEMA.TABLES`
+WHERE table_name = @q
+
+-- mode=contains
+... WHERE table_name LIKE @q  -- @q = '%{q}%'
+```
+Uma query por região, em paralelo. `mode=not_contains` não usa essa forma
+— compara o conjunto de datasets do projeto inteiro (Query 2, sem o
+`JOIN`/agregação) contra o resultado de `mode=contains`.
+
+```sql
+-- prefixo (datasets_without_match de exact/contains)
+SELECT table_schema AS dataset_id, MAX(table_name) AS latest_table
+FROM `{project}.region-{region}.INFORMATION_SCHEMA.TABLES`
+WHERE table_name LIKE @prefix  -- @prefix = '{prefixo}%'
+GROUP BY 1
+```
+
 ---
 
 ## Estrutura de arquivos
@@ -292,14 +449,19 @@ apps/backend/src/observability_hub/
 | Dataset sem tabelas | `total_tables: 0`, lista vazia |
 | Tabela externa | Incluída, `size_bytes` pode ser null |
 | View | Incluída, `row_count` e `size_bytes` null |
+| `/partitions` numa tabela não particionada | HTTP 400 `table_not_partitioned` |
+| `/search` sem sufixo numérico em `q` | `datasets_without_match` vazio (exact/contains) — não há série pra comparar |
+| `/search?mode=not_contains` | `datasets_with_match` sempre vazio; `datasets_without_match` lista todo dataset sem tabela contendo `q` |
 
 ---
 
 ## Fora do escopo desta spec
 
-- Busca semântica por nome de tabela
+- Busca semântica/fuzzy por nome de tabela (`/search` é exata ou substring
+  literal — `exact`/`contains`/`not_contains`, sem fuzzy matching nem
+  regex)
 - Lineage (Fase 3)
 - Detecção de PII (Fase 3)
-- Cache de metadados persistente/compartilhado entre instâncias (o cache
-  TTL de 5min de `client.get_table()` é em memória, por processo — ver
-  "Fonte de dados")
+- Cache de metadados persistente/compartilhado entre instâncias (os caches
+  TTL de `client.get_table()` e de `get_partition_stats` são em memória,
+  por processo — ver "Fonte de dados")
