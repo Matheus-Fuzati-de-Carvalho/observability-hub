@@ -5,6 +5,117 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (em andamento)
+
+Branch `feat/sprint-3.2`, a partir de `main` pós-PR #17. Sete itens
+planejados; cinco implementados e testados nesta sessão (o item de score
+de qualidade foi implementado, validado e depois removido por completo a
+pedido do usuário).
+
+### O que foi feito
+1. **Filtros e ordenação client-side**: busca por nome + filtro por tipo/
+   status SLA + colunas ordenáveis, sem mudança de backend, em
+   `AssetsTable` (catálogo), `TableFreshnessTable` (tabelas de um
+   dataset) e `DatasetFreshnessTable` (datasets de um projeto, adicionado
+   depois a pedido do usuário). Componente `SortableTableHead`
+   compartilhado, promovido de um componente que só existia na busca.
+2. **Score de qualidade por tabela — implementado e revertido**: média
+   ponderada de completude/freshness/duplicatas/documentação (0-100),
+   persistida em Firestore por profiling, badge na tabela de ativos.
+   Validado em dev e então removido por completo por decisão do usuário.
+3. **Histórico de qualidade**: cada profiling grava um snapshot em
+   Firestore (máximo 30 runs por tabela); aba "Histórico" no modal com
+   gráfico de linha (`recharts`), tabela de runs expansível por coluna e
+   alerta de degradação (>10pp de queda de densidade vs. run anterior).
+4. **Lineage e tabelas órfãs**: novo domínio a partir de audit logs de
+   BigQuery (Cloud Logging) — upstream/downstream de uma tabela e lista
+   de órfãs (sem consumidor conhecido). Limitação de visibilidade tratada
+   com honestidade: resultado vazio vem com aviso explicando que pode ser
+   falta de atividade OU audit logs desabilitados (indistinguível via
+   API), em vez de afirmar uma certeza que a implementação não tem.
+
+### Erros e decisões desta sessão
+
+**Decisão 1 — Score de qualidade removido depois de validado**
+- O usuário pediu a remoção completa (backend + frontend) do score de
+  qualidade depois de já ter validado a feature em dev, sem registrar o
+  motivo. Revertido preservando `core/sla.py` (extração de SLA
+  compartilhada entre freshness e quality), que é uma refatoração válida
+  independente do score — não fazia sentido desfazer só porque a feature
+  que motivou a extração saiu.
+
+**Decisão 2 — Lineage implementado mesmo com Data Access audit logs
+desabilitados**
+- Pré-requisito técnico da fonte de dados (audit logs de BigQuery via
+  Cloud Logging) não está habilitado em nenhum ambiente. Decisão
+  consciente do usuário: implementar a feature mesmo assim (ela funciona
+  corretamente assim que os logs forem habilitados) em vez de bloquear a
+  sprint esperando uma mudança de infraestrutura que não é código.
+- Limite técnico registrado explicitamente: a API não consegue
+  distinguir "sem atividade no período" de "audit logs desabilitados" —
+  os dois casos retornam o mesmo resultado vazio. Resolvido com um campo
+  de aviso explícito na resposta em vez de fingir certeza.
+- O schema do payload dos audit logs (`BigQueryAuditMetadata`/
+  `jobChange`) foi implementado a partir da documentação oficial do
+  Google, sem poder validar contra um log real — vale revisitar assim
+  que os audit logs forem habilitados e o primeiro job aparecer.
+
+### Mudanças de arquitetura
+- `core/sla.py`: classificação de SLA extraída de `domains/freshness`
+  para `core/`, compartilhada com `domains/quality` (mesmo racional do
+  `resolve_dataset_region()` na Fase 2B).
+- `core/logging_client.py`: client compartilhado do Cloud Logging, mesmo
+  padrão de `core/bigquery.py::get_client()` (singleton via `lru_cache`).
+- `LoggingAccessDeniedError` (`core/exceptions.py`) + handler em
+  `main.py`: mesmo padrão de `ProjectAccessDeniedError` — falta de IAM
+  vira 403 com o comando `gcloud` de correção pronto na resposta.
+
+### Status até o momento
+- Backend: 302 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle cresceu
+  para ~930 kB / gzip 281 kB, principalmente por causa do `recharts`)
+- Validado em dev (`observability-hub-dev`) a cada item, pelo usuário —
+  exceto lineage/órfãs, ainda pendente de validação visual no momento
+  deste registro
+- Ainda faltam 2 de 7 itens (PII, mapa de acesso) e nenhum PR foi aberto
+  pra `main`
+
+---
+
+## Sprint 3.1 — Auth (Google OAuth) + UX pessoal (concluída, PR #17)
+
+Reconstruída a partir da descrição do PR #17 — o SESSIONLOG não foi
+atualizado durante aquela sessão (falha de processo corrigida a partir
+desta sprint).
+
+### O que foi feito
+1. **Autenticação real**: senha hardcoded do frontend (dívida técnica
+   registrada no backlog da Sprint 2) substituída por Google OAuth 2.0 —
+   `domains/auth/` no backend (login, callback, sessão via JWT em cookie
+   httpOnly de 12h, allowlist por domínio/email no Secret Manager);
+   `RequireAuth` no frontend. Todos os routers de dados passaram a exigir
+   sessão válida no backend, não só proteção de rota no frontend.
+2. **Modal de profiling**: dois bugs de UI corrigidos (colapso de schema
+   em dois níveis, scroll horizontal vazando dos controles) e refatorado
+   para Tabs (Schema / Análise de qualidade).
+3. **Favoritos**: domínio novo, Firestore por usuário, estrela na tabela
+   de ativos com toggle otimista.
+4. **Histórico de navegação**: domínio novo, duas subcoleções por usuário
+   (visualizações de tabela / buscas), seção "Recentes" na sidebar.
+
+### Erros e aprendizados
+- Cookie de logout não limpava de fato a sessão (`delete_cookie` do
+  Starlette precisa dos mesmos atributos do cookie original pra
+  funcionar) — corrigido em fix separado, pós-validação.
+
+### Status final
+- 269 testes backend, `ruff`/`biome`/`tsc`/`vite build` limpos
+- Validado em dev pelo usuário (login/logout, allowlist, favoritos,
+  histórico, modal de profiling)
+
+---
+
 ## Sprint 2.2 e 2.3 — Metadados de partição, refresh, busca reversa e UX (concluída)
 
 Sete funcionalidades sobre o MVP de catálogo/freshness (Fase 2 backend +
@@ -282,5 +393,6 @@ implementação**
 | Fase 2D | Frontend MVP | ✅ Concluída |
 | Sprint 2.2 | Metadados de partição, "Ver partições", refresh, busca reversa | ✅ Concluída |
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
-| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Próxima |
+| Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
+| Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ⏳ Em andamento (5 de 7 itens) |
 | Fase 4 | FinOps completo | ⏳ Pendente |
