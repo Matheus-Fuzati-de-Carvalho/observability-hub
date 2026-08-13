@@ -1,5 +1,10 @@
 import { httpClient } from '@/lib/http-client'
-import type { DatasetsListResponse, TableDetail, TablesListResponse } from '@/types/catalog'
+import type {
+  DatasetsListResponse,
+  TableDetail,
+  TablePartitionsResponse,
+  TablesListResponse,
+} from '@/types/catalog'
 
 export const catalogApi = {
   listDatasets: (projectId: string) =>
@@ -11,5 +16,10 @@ export const catalogApi = {
   getTableDetail: (projectId: string, datasetId: string, tableId: string) =>
     httpClient.get<TableDetail>(
       `/api/v1/catalog/${projectId}/datasets/${datasetId}/tables/${tableId}`,
+    ),
+
+  getTablePartitions: (projectId: string, datasetId: string, tableId: string) =>
+    httpClient.get<TablePartitionsResponse>(
+      `/api/v1/catalog/${projectId}/datasets/${datasetId}/tables/${tableId}/partitions`,
     ),
 }

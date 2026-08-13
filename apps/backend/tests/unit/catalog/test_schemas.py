@@ -4,8 +4,10 @@ from observability_hub.domains.catalog.schemas import (
     ColumnDetail,
     DatasetsListResponse,
     DatasetSummary,
+    PartitionRow,
     ProjectValidateResponse,
     TableDetail,
+    TablePartitionsResponse,
     TablesListResponse,
     TableSummary,
     TableType,
@@ -177,6 +179,22 @@ def test_table_detail_matches_spec_example():
     model = TableDetail(**payload)
     assert len(model.columns) == 1
     assert model.labels == {}
+
+
+def test_table_partitions_response_matches_spec_example():
+    payload = {
+        "table_id": "events",
+        "partition_column": "event_date",
+        "partition_type": "event_date (DAY)",
+        "total_partitions": 2,
+        "partitions": [
+            {"value": "2026-08-12", "row_count": 1800},
+            {"value": "2026-08-11", "row_count": 1500},
+        ],
+    }
+    model = TablePartitionsResponse(**payload)
+    assert model.total_partitions == 2
+    assert model.partitions[0] == PartitionRow(value="2026-08-12", row_count=1800)
 
 
 def test_table_type_enum_values():

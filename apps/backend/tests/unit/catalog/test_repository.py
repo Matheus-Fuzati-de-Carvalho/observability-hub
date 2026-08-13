@@ -375,6 +375,45 @@ def test_get_partition_stats_caches_by_table_ref(monkeypatch):
     assert client.query.call_count == 1
 
 
+def test_get_table_partitions_queries_group_by_ordered_desc():
+    rows = [
+        _row(partition_value="2026-08-12", row_count=1800),
+        _row(partition_value="2026-08-11", row_count=1500),
+    ]
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["sql"] = sql
+        job = MagicMock()
+        job.result.return_value = rows
+        return job
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.get_table_partitions(client, "proj", "RAW", "events", "event_date")
+
+    assert "proj.RAW.events" in captured["sql"]
+    assert "GROUP BY 1" in captured["sql"]
+    assert "ORDER BY 1 DESC" in captured["sql"]
+    assert result == [
+        {"value": "2026-08-12", "row_count": 1800},
+        {"value": "2026-08-11", "row_count": 1500},
+    ]
+
+
+def test_get_table_partitions_skips_null_partition_value():
+    rows = [
+        _row(partition_value=None, row_count=5),
+        _row(partition_value="2026-08-12", row_count=1800),
+    ]
+    client = _client_returning([rows])
+
+    result = repository.get_table_partitions(client, "proj", "RAW", "events", "event_date")
+
+    assert result == [{"value": "2026-08-12", "row_count": 1800}]
+
+
 def test_get_table_detail_raises_when_table_missing(monkeypatch):
     monkeypatch.setattr(repository, "get_tables_summary", lambda *a, **k: [])
 

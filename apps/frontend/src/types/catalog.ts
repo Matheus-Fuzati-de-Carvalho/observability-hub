@@ -60,3 +60,16 @@ export interface TableDetail extends TableSummary {
   labels: Record<string, string>
   description: string | null
 }
+
+export interface PartitionRow {
+  value: string
+  row_count: number
+}
+
+export interface TablePartitionsResponse {
+  table_id: string
+  partition_column: string
+  partition_type: string
+  total_partitions: number
+  partitions: PartitionRow[]
+}

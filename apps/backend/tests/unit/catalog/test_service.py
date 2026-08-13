@@ -7,6 +7,7 @@ from observability_hub.core.exceptions import (
     ProjectAccessDeniedError,
     ProjectNotFoundError,
     TableNotFoundError,
+    TableNotPartitionedError,
 )
 from observability_hub.domains.catalog import service
 
@@ -299,3 +300,90 @@ def test_get_table_detail_propagates_table_not_found(monkeypatch):
 
     with pytest.raises(TableNotFoundError):
         service.get_table_detail(client, "observability-hub-dev", "RAW", "ghost")
+
+
+def _tables_summary_stub(tables):
+    def fake(client, project_id, dataset_id, location, table_type=None):
+        return tables
+
+    return fake
+
+
+def test_get_table_partitions_builds_response(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "resolve_dataset_region",
+        lambda client, project_id, dataset_id, candidate_regions: "US",
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_tables_summary",
+        _tables_summary_stub(
+            [
+                {
+                    "table_id": "events",
+                    "is_partitioned": True,
+                    "partition_column": "event_date",
+                    "partition_type": "event_date (DAY)",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_table_partitions",
+        lambda client, project_id, dataset_id, table_id, partition_field: [
+            {"value": "2026-08-12", "row_count": 1800},
+            {"value": "2026-08-11", "row_count": 1500},
+        ],
+    )
+
+    result = service.get_table_partitions(client, "observability-hub-dev", "RAW", "events")
+
+    assert result.partition_column == "event_date"
+    assert result.partition_type == "event_date (DAY)"
+    assert result.total_partitions == 2
+    assert result.partitions[0].value == "2026-08-12"
+
+
+def test_get_table_partitions_raises_when_table_missing(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "resolve_dataset_region",
+        lambda client, project_id, dataset_id, candidate_regions: "US",
+    )
+    monkeypatch.setattr(service.repository, "get_tables_summary", _tables_summary_stub([]))
+
+    with pytest.raises(TableNotFoundError):
+        service.get_table_partitions(client, "observability-hub-dev", "RAW", "ghost")
+
+
+def test_get_table_partitions_raises_when_table_not_partitioned(monkeypatch):
+    client = _fake_client()
+    monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
+    monkeypatch.setattr(
+        service.repository,
+        "resolve_dataset_region",
+        lambda client, project_id, dataset_id, candidate_regions: "US",
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_tables_summary",
+        _tables_summary_stub(
+            [
+                {
+                    "table_id": "dim_users",
+                    "is_partitioned": False,
+                    "partition_column": None,
+                    "partition_type": None,
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(TableNotPartitionedError):
+        service.get_table_partitions(client, "observability-hub-dev", "RAW", "dim_users")

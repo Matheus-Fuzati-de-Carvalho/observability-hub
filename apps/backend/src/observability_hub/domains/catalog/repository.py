@@ -249,6 +249,31 @@ def get_partition_stats(
     return result
 
 
+def get_table_partitions(
+    client: bigquery.Client,
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    partition_field: str,
+) -> list[dict]:
+    """Lista as partições distintas de uma tabela particionada com a
+    contagem de linhas de cada uma — query real de dados (não metadado),
+    ordenada da mais recente pra mais antiga. GROUP BY já garante um valor
+    distinto por linha, sem precisar de DISTINCT."""
+    query = f"""
+        SELECT `{partition_field}` AS partition_value, COUNT(*) AS row_count
+        FROM `{project_id}.{dataset_id}.{table_id}`
+        GROUP BY 1
+        ORDER BY 1 DESC
+    """
+    rows = client.query(query).result()
+    return [
+        {"value": str(row.partition_value), "row_count": row.row_count}
+        for row in rows
+        if row.partition_value is not None
+    ]
+
+
 def get_table_columns(
     client: bigquery.Client,
     project_id: str,

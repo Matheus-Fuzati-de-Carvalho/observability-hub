@@ -9,13 +9,16 @@ from datetime import UTC, datetime
 from google.cloud import bigquery
 
 from observability_hub.core.bigquery import discover_regions
+from observability_hub.core.exceptions import TableNotFoundError, TableNotPartitionedError
 from observability_hub.domains.catalog import repository
 from observability_hub.domains.catalog.schemas import (
     ColumnDetail,
     DatasetsListResponse,
     DatasetSummary,
+    PartitionRow,
     ProjectValidateResponse,
     TableDetail,
+    TablePartitionsResponse,
     TablesListResponse,
     TableSummary,
 )
@@ -108,3 +111,30 @@ def get_table_detail(
     raw_detail = repository.get_table_detail(client, project_id, dataset_id, table_id, location)
     columns = [ColumnDetail(**c) for c in raw_detail.pop("columns")]
     return TableDetail(**raw_detail, columns=columns)
+
+
+def get_table_partitions(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str
+) -> TablePartitionsResponse:
+    """Reaproveita get_tables_summary (mesmo padrão de get_table_detail) só
+    pra achar partition_column/partition_type da tabela — a listagem de
+    partições em si é uma query separada, direto na tabela."""
+    regions = discover_regions(project_id, client=client)
+    location = repository.resolve_dataset_region(client, project_id, dataset_id, regions)
+    tables = repository.get_tables_summary(client, project_id, dataset_id, location)
+    table = next((t for t in tables if t["table_id"] == table_id), None)
+    if table is None:
+        raise TableNotFoundError(project_id, dataset_id, table_id)
+    if not table["is_partitioned"]:
+        raise TableNotPartitionedError(project_id, dataset_id, table_id)
+
+    raw_partitions = repository.get_table_partitions(
+        client, project_id, dataset_id, table_id, table["partition_column"]
+    )
+    return TablePartitionsResponse(
+        table_id=table_id,
+        partition_column=table["partition_column"],
+        partition_type=table["partition_type"] or table["partition_column"],
+        total_partitions=len(raw_partitions),
+        partitions=[PartitionRow(**p) for p in raw_partitions],
+    )

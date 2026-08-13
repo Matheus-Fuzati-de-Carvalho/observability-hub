@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react'
+import { Layers, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { PartitionsDialog } from '@/features/catalog/PartitionsDialog'
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import type { TableSummary } from '@/types/catalog'
@@ -26,6 +27,7 @@ function formatOrDash(value: string | null): string {
 
 export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) {
   const [profilingTarget, setProfilingTarget] = useState<string | null>(null)
+  const [partitionsTarget, setPartitionsTarget] = useState<string | null>(null)
   const showPartitionColumns = tables.some((table) => table.is_partitioned)
 
   return (
@@ -82,15 +84,26 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
                 </>
               )}
               <TableCell>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={() => setProfilingTarget(table.table_id)}
-                >
-                  <Sparkles size={14} />
-                  Analisar
-                </Button>
+                <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                  {table.is_partitioned && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPartitionsTarget(table.table_id)}
+                    >
+                      <Layers size={14} />
+                      Ver partições
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setProfilingTarget(table.table_id)}
+                  >
+                    <Sparkles size={14} />
+                    Analisar
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -102,6 +115,13 @@ export function AssetsTable({ projectId, datasetId, tables }: AssetsTableProps) 
         datasetId={datasetId}
         tableId={profilingTarget}
         onOpenChange={(open) => !open && setProfilingTarget(null)}
+      />
+
+      <PartitionsDialog
+        projectId={projectId}
+        datasetId={datasetId}
+        tableId={partitionsTarget}
+        onOpenChange={(open) => !open && setPartitionsTarget(null)}
       />
     </>
   )

@@ -29,3 +29,16 @@ export function useTableDetail(
     enabled: Boolean(projectId) && Boolean(datasetId) && Boolean(tableId),
   })
 }
+
+export function useTablePartitions(
+  projectId: string | undefined,
+  datasetId: string | undefined,
+  tableId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ['table-partitions', projectId, datasetId, tableId],
+    queryFn: () =>
+      catalogApi.getTablePartitions(projectId as string, datasetId as string, tableId as string),
+    enabled: Boolean(projectId) && Boolean(datasetId) && Boolean(tableId),
+  })
+}

@@ -92,3 +92,16 @@ class TableDetail(TableSummary):
     columns: list[ColumnDetail]
     labels: dict[str, str]
     description: str | None = None
+
+
+class PartitionRow(BaseModel):
+    value: str
+    row_count: int
+
+
+class TablePartitionsResponse(BaseModel):
+    table_id: str
+    partition_column: str
+    partition_type: str
+    total_partitions: int
+    partitions: list[PartitionRow]

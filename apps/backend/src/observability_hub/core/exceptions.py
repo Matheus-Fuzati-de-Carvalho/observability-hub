@@ -33,6 +33,14 @@ class TableNotFoundError(Exception):
         super().__init__(f"Tabela '{table_id}' não encontrada em '{project_id}.{dataset_id}'.")
 
 
+class TableNotPartitionedError(Exception):
+    def __init__(self, project_id: str, dataset_id: str, table_id: str) -> None:
+        self.project_id = project_id
+        self.dataset_id = dataset_id
+        self.table_id = table_id
+        super().__init__(f"Tabela '{table_id}' em '{project_id}.{dataset_id}' não é particionada.")
+
+
 class InvalidSamplePercentError(Exception):
     def __init__(self, sample_percent: float) -> None:
         self.sample_percent = sample_percent

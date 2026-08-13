@@ -6,6 +6,7 @@ from observability_hub.domains.catalog import service
 from observability_hub.domains.catalog.schemas import (
     DatasetsListResponse,
     TableDetail,
+    TablePartitionsResponse,
     TablesListResponse,
     TableType,
 )
@@ -46,3 +47,16 @@ def get_table_detail(
     client: bigquery.Client = Depends(get_client),
 ) -> TableDetail:
     return service.get_table_detail(client, project_id, dataset_id, table_id)
+
+
+@router.get(
+    "/{project_id}/datasets/{dataset_id}/tables/{table_id}/partitions",
+    response_model=TablePartitionsResponse,
+)
+def get_table_partitions(
+    project_id: str,
+    dataset_id: str,
+    table_id: str,
+    client: bigquery.Client = Depends(get_client),
+) -> TablePartitionsResponse:
+    return service.get_table_partitions(client, project_id, dataset_id, table_id)
