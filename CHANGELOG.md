@@ -33,6 +33,16 @@ pedido do usuário).
    com honestidade: resultado vazio vem com aviso explicando que pode ser
    falta de atividade OU audit logs desabilitados (indistinguível via
    API), em vez de afirmar uma certeza que a implementação não tem.
+   **Evoluído na mesma sessão para v2** (spec `docs/specs/lineage.md`):
+   upstream/downstream deixou de ser 1 hop direto e virou cadeia
+   transitiva completa (ex: `daily_summary` ← `ga4_sessions` ←
+   `ga4_events`), representada como grafo dirigido (BFS bidirecional em
+   `domains/lineage/service.py`, `max_hops` configurável, padrão 8),
+   atravessando projetos GCP quando necessário (nó vira "acesso negado"
+   em vez de derrubar a requisição se a SA não tiver Logging no projeto
+   não-raiz). Frontend passou de duas listas planas para um diagrama
+   (`LineageGraph.tsx`, `@xyflow/react` + `dagre` para layout), sempre
+   com o prefixo `project.dataset.table`.
 
 ### Erros e decisões desta sessão
 
@@ -60,6 +70,18 @@ desabilitados**
   Google, sem poder validar contra um log real — vale revisitar assim
   que os audit logs forem habilitados e o primeiro job aparecer.
 
+**Decisão 3 — Lineage v1→v2 sem endpoint novo, breaking change direto**
+- A extensão pra cadeia transitiva trocou `LineageResponse` (upstream/
+  downstream flat) por `LineageGraphResponse` (nodes/edges) na mesma
+  rota, em vez de versionar a API. Único consumidor da v1 era
+  `LineageTab.tsx` — sem clientes externos, sem convenção de
+  versionamento de API em nenhum outro domínio do repo, então manter
+  compatibilidade retroativa seria custo sem benefício real.
+- Bug encontrado e corrigido no meio do caminho: a v1 comparava
+  `(dataset_id, table_id)` descartando `project_id`, então uma tabela
+  `outro-projeto.RAW.foo` podia colidir por engano com `RAW.foo` do
+  projeto consultado. A travessia v2 casa sempre pela tripla completa.
+
 ### Mudanças de arquitetura
 - `core/sla.py`: classificação de SLA extraída de `domains/freshness`
   para `core/`, compartilhada com `domains/quality` (mesmo racional do
@@ -69,15 +91,24 @@ desabilitados**
 - `LoggingAccessDeniedError` (`core/exceptions.py`) + handler em
   `main.py`: mesmo padrão de `ProjectAccessDeniedError` — falta de IAM
   vira 403 com o comando `gcloud` de correção pronto na resposta.
+- `@xyflow/react` + `dagre` (frontend): primeira lib de grafo/diagrama do
+  projeto (antes só `recharts`, gráficos, não DAG), adicionada
+  especificamente pro diagrama de lineage transitivo — nó custom
+  (`LineageGraph.tsx`) reaproveita o padrão visual de bloqueado+tooltip
+  já estabelecido nos botões de `AssetsTable.tsx` (item 1 desta sprint)
+  pra representar tabelas em projeto sem acesso de Logging.
 
 ### Status até o momento
-- Backend: 302 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 311 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
 - Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle cresceu
-  para ~930 kB / gzip 281 kB, principalmente por causa do `recharts`)
+  para ~1.19 MB / gzip 362 kB — `recharts` + `@xyflow/react`/`dagre`
+  agora dividem o peso; candidato a code-splitting por rota se continuar
+  crescendo)
 - Validado em dev (`observability-hub-dev`) a cada item, pelo usuário —
-  exceto lineage/órfãs, ainda pendente de validação visual no momento
-  deste registro
+  exceto lineage/órfãs (v1 e v2), ainda pendente de validação visual no
+  momento deste registro (depende de audit logs reais na janela de 30
+  dias, ver Decisão 2)
 - Ainda faltam 2 de 7 itens (PII, mapa de acesso) e nenhum PR foi aberto
   pra `main`
 

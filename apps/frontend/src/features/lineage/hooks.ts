@@ -5,11 +5,12 @@ export function useTableLineage(
   projectId: string | undefined,
   datasetId: string | undefined,
   tableId: string | undefined,
+  maxHops = 8,
 ) {
   return useQuery({
-    queryKey: ['lineage', projectId, datasetId, tableId],
+    queryKey: ['lineage', projectId, datasetId, tableId, maxHops],
     queryFn: () =>
-      lineageApi.getLineage(projectId as string, datasetId as string, tableId as string),
+      lineageApi.getLineage(projectId as string, datasetId as string, tableId as string, maxHops),
     enabled: Boolean(projectId) && Boolean(datasetId) && Boolean(tableId),
   })
 }

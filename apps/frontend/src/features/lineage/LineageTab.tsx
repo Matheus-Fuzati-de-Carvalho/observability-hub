@@ -1,6 +1,6 @@
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { useTableLineage } from '@/features/lineage/hooks'
-import type { TableRef } from '@/types/lineage'
+import { LineageGraph } from '@/features/lineage/LineageGraph'
 
 interface LineageTabProps {
   projectId: string
@@ -30,35 +30,17 @@ export function LineageTab({ projectId, datasetId, tableId }: LineageTabProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <TableRefList title="Upstream (fontes)" refs={data.upstream} />
-        <TableRefList title="Downstream (consumidores)" refs={data.downstream} />
-      </div>
+      {data.truncated && (
+        <div className="rounded-lg border border-status-warn/30 bg-status-warn/10 p-3 text-sm text-status-warn">
+          Grafo truncado em {data.max_hops} saltos — pode haver mais tabelas além do limite.
+        </div>
+      )}
+
+      <LineageGraph data={data} />
 
       <p className="text-xs text-muted-foreground">
         Baseado em audit logs dos últimos {data.lookback_days} dias.
       </p>
-    </div>
-  )
-}
-
-function TableRefList({ title, refs }: { title: string; refs: TableRef[] }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {title}
-      </p>
-      {refs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nenhuma tabela encontrada.</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {refs.map((ref) => (
-            <li key={`${ref.project_id}.${ref.dataset_id}.${ref.table_id}`} className="text-sm">
-              {ref.project_id}.{ref.dataset_id}.{ref.table_id}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   )
 }

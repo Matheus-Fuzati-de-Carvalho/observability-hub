@@ -4,13 +4,29 @@ export interface TableRef {
   table_id: string
 }
 
-export interface LineageResponse {
+export interface LineageNode {
+  id: string
   project_id: string
   dataset_id: string
   table_id: string
-  upstream: TableRef[]
-  downstream: TableRef[]
+  hop_distance: number
+  is_root: boolean
+  access_denied: boolean
+}
+
+export interface LineageEdge {
+  source: string
+  target: string
+  job_id: string
+}
+
+export interface LineageGraphResponse {
+  root: TableRef
+  nodes: LineageNode[]
+  edges: LineageEdge[]
   lookback_days: number
+  max_hops: number
+  truncated: boolean
   warning: string | null
 }
 
