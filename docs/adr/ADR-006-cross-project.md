@@ -26,15 +26,12 @@ O frontend armazena o `project_id` selecionado como contexto global da sessão
 
 ## Como conceder acesso a um projeto alvo
 
-O administrador do projeto alvo executa uma vez:
-
-```bash
-gcloud projects add-iam-policy-binding {project_id} \
-  --member="serviceAccount:backend-run@observability-hub-prod.iam.gserviceaccount.com" \
-  --role="roles/bigquery.metadataViewer"
-```
-
-Para o ambiente dev, substituir por `backend-run@observability-hub-dev.iam.gserviceaccount.com`.
+O administrador do projeto alvo executa uma vez. A lista de roles cresceu
+desde a decisão original deste ADR (que previa só `metadataViewer`) — o
+checklist completo e atualizado, incluindo `jobUser`/`dataViewer`
+(profiling) e `logging.viewer` + Data Access audit logs (lineage), vive em
+[`docs/onboarding-cliente.md`](../onboarding-cliente.md), mantido como
+documento operacional vivo em vez de duplicado aqui.
 
 ## Alternativas consideradas
 

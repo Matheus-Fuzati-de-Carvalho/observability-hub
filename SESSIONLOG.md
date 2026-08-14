@@ -34,15 +34,19 @@ tabelas (Fase 3 do CLAUDE.md, "Discovery"), branch `feat/sprint-3.2`
 Ver seção "Sprint 3.2" abaixo para o detalhe de cada item (o número da
 lista acima segue a ordem de execução real desta sessão, não
 necessariamente a numeração original da spec).
-**Próximo passo:** usuário está validando lineage/órfãs em dev
-(`observability-hub-dev`, branch `feat/sprint-3.2` no ar). Depois da
-validação, seguir pro item de PII — versão resumida da spec antes de
-implementar (preferência já confirmada pelo usuário nesta sprint), sem
-spec formal em `docs/specs/` ainda (fica pra documentação de
-encerramento da sprint, junto com lineage e mapa de acesso). **Nenhum PR
-aberto** para `main` — aguardando os 7 itens completos e validados, como
-pedido explicitamente no início da sprint. `main`/prod seguem no PR #17
-(`44ad7c9`), inalterados por esta sessão.
+**Próximo passo:** usuário está revalidando lineage/órfãs em dev depois do
+fix de `c33f950` (bug de "Failed to fetch" ao olhar prod a partir de dev —
+ver seção "Bug: lineage cross-project" abaixo) e do IAM cross-project de
+`roles/logging.viewer` concedido nesta sessão. Depois da validação, seguir
+pro item de PII — versão resumida da spec antes de implementar (preferência
+já confirmada pelo usuário nesta sprint), sem spec formal em `docs/specs/`
+ainda (fica pra documentação de encerramento da sprint, junto com lineage e
+mapa de acesso). **Nenhum PR aberto** para `main` — aguardando os 7 itens
+completos e validados, como pedido explicitamente no início da sprint.
+`main`/prod seguem no PR #17 (`44ad7c9`), inalterados por esta sessão.
+`docs/onboarding-cliente.md` (novo) e a seção "Registro de acessos e
+configurações" do CLAUDE.md (nova) não fazem parte da spec da sprint —
+foram um pedido à parte do usuário nesta sessão, já commitados/aplicados.
 
 ---
 
@@ -124,6 +128,44 @@ testado via suíte de testes (23 novos) e build limpo. Como os audit logs
 estão desabilitados, o comportamento esperado em dev agora é: aviso
 amarelo em toda consulta, e a página de órfãs listando todas as tabelas
 do projeto (esperado dada a limitação de visibilidade, não é bug).
+
+### Bug: lineage cross-project dava "Failed to fetch" (commit `c33f950`,
+sessão de 2026-08-14 depois de `d9401d2`)
+Usuário validou lineage/órfãs em dev (projeto nativo, ok) mas achou "Failed
+to fetch" ao trocar pra olhar o projeto prod com o Hub rodando em dev.
+Causa raiz, confirmada nos logs reais do Cloud Run de dev
+(`gcloud logging read ... severity>=ERROR`): `domains/lineage/repository.py`
+capturava `google.api_core.exceptions.PermissionDenied` (classe de erro
+gRPC), mas o client do Cloud Logging usa transporte REST
+(`_use_grpc=False`, ver docstring de `core/logging_client.py`) — um 403 via
+REST levanta `Forbidden`, não `PermissionDenied`. A exceção real escapava
+sem tratamento, virava 500 não capturado por nenhum `@app.exception_handler`,
+e por estar fora do `CORSMiddleware` nesse caminho o browser reportava
+"Failed to fetch" em vez do 403 tratado que `LoggingAccessDeniedError` já
+sabia gerar. Resto do backend já usava a classe certa (`core/bigquery.py`,
+`domains/quality/repository.py`); só lineage tinha o import errado.
+Corrigido trocando `PermissionDenied` por `Forbidden` no import e no
+`except`; testes do módulo (que mockavam `PermissionDenied`, mascarando o
+bug) corrigidos pra mockar `Forbidden`. 303 testes passando, ruff limpo.
+
+Enquanto investigava, descobri que `roles/logging.viewer` (self) e os
+Data Access audit logs do BigQuery já estavam habilitados nos dois
+projetos desde antes desta sessão, sem nunca terem sido documentados aqui
+— ver correção dos itens 8/9/10 do Backlog. A pedido do usuário, concedi
+(ele rodou via `!`) `roles/logging.viewer` cross-project nos dois sentidos
+(dev→prod e prod→dev) — mesmo padrão das roles de BigQuery já cross-granted
+desde a Sprint 2. Confirmado ao vivo via `gcloud projects get-iam-policy`
+depois do comando. Lineage cross-project agora deve funcionar de verdade,
+não só falhar de forma tratada — **ainda não revalidado em dev pelo usuário
+depois do deploy do fix** (push feito, deploy automático disparado).
+
+Nesta mesma sessão, criado `docs/onboarding-cliente.md` (checklist
+completo de IAM/API/audit config pra um projeto cliente aceitar leitura do
+Hub) e nova seção "Registro de acessos e configurações" no CLAUDE.md,
+pedindo que toda concessão de acesso futura (IAM, API, audit config, em
+qualquer projeto incluindo dev/prod um observando o outro) seja registrada
+naquele documento no momento em que acontece — mitigação direta da falha
+de processo que causou os itens 8/9/10 ficarem desatualizados.
 
 ### Status no fim desta sessão (commit `28f1f7f`)
 - Backend: 302 testes unitários, 100% passando, `ruff check`/`ruff
@@ -550,21 +592,23 @@ revisitar se o risco incomodar mais adiante.
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ tag 28f1f7f (branch feat/sprint-3.2, à frente de main)
-├── Cloud Run: frontend ✅ tag 28f1f7f (branch feat/sprint-3.2, à frente de main)
+├── Cloud Run: backend — c33f950 pusheado (fix Forbidden/PermissionDenied),
+│   deploy automático disparado, ainda não confirmado verde nem revalidado
+│   em dev pelo usuário nesta sessão
+├── Cloud Run: frontend ✅ tag d9401d2 (branch feat/sprint-3.2, à frente de main)
 │   https://frontend-995219021404.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer no
-│   próprio projeto e em observability-hub-prod (cross-project, Sprint 2)
-├── IAM backend-run@...-prod: as mesmas três roles em observability-hub-dev
-│   (cross-project, Sprint 2)
-├── IAM: roles/logging.viewer **ainda não concedida** em nenhum dos dois
-│   projetos — bloqueia domains/lineage (Sprint 3.2) e vai bloquear
-│   domains/access (mesmo pré-requisito) até ser concedida
-├── Data Access audit logs **ainda desabilitados** em dev e prod
-│   (auditConfigs vazio, confirmado via `gcloud projects get-iam-policy`)
-│   — bloqueia lineage/órfãs terem dado real, ver Sprint 3.2 acima
-├── Pipeline validado ponta a ponta: 302 testes backend, ruff limpo, biome+
+├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer +
+│   logging.viewer no próprio projeto e em observability-hub-prod
+│   (cross-project completo — logging.viewer cross adicionado nesta sessão)
+├── IAM backend-run@...-prod: as mesmas quatro roles em observability-hub-dev
+│   (cross-project completo, idem)
+├── Data Access audit logs (DATA_READ, DATA_WRITE, ADMIN_READ) habilitados
+│   em dev e prod pra bigquery.googleapis.com — descoberto nesta sessão que
+│   já estava assim antes (nunca documentado, ver Backlog itens 8/9/10)
+├── Checklist completo de IAM/API/audit config pra onboarding de projeto
+│   alvo agora vive em docs/onboarding-cliente.md (criado nesta sessão)
+├── Pipeline validado ponta a ponta: 303 testes backend, ruff limpo, biome+
 │   tsc+vite build limpos, deploy automático verde a cada push nesta sessão
 └── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
 
@@ -573,8 +617,8 @@ GCP Prod (observability-hub-prod)
 ├── Cloud Run: frontend ✅ tag 44ad7c9
 │   https://frontend-906161007412.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM: ver bloco de dev acima — simétrico nas duas direções, mesmas
-│   lacunas (logging.viewer, Data Access audit logs)
+├── IAM: ver bloco de dev acima — simétrico nas duas direções, sem lacunas
+│   conhecidas no momento
 ├── total_datasets: 3
 └── WIF: attribute_condition restrito a refs/heads/main (só push direto,
     nunca PR) — plan de prod continua revisão manual
@@ -585,7 +629,7 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-Dev está à frente de prod — feat/sprint-3.2 (28f1f7f) ainda não tem PR
+Dev está à frente de prod — feat/sprint-3.2 (c33f950) ainda não tem PR
 aberto pra main. Prod segue em 44ad7c9 (PR #17, Sprint 3.1).
 ```
 
@@ -665,29 +709,39 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
    forçando pra Node 24 com aviso de depreciação — sem ação necessária
    agora, mas vale atualizar as actions antes que vire erro.
 
-8. **roles/logging.viewer não concedida em dev nem prod** (Sprint 3.2) —
-   bloqueia dado real em domains/lineage; vai bloquear domains/access do
-   mesmo jeito quando chegar a vez. Comando pronto (idempotente, mesmo
-   padrão de ProjectAccessDeniedError):
-   `gcloud projects add-iam-policy-binding <project> --member='serviceAccount:backend-run@<project>.iam.gserviceaccount.com' --role='roles/logging.viewer'`
-   — rodar em observability-hub-dev e observability-hub-prod quando o
-   usuário quiser habilitar lineage de verdade.
+8. ~~roles/logging.viewer não concedida em dev nem prod~~ — **obsoleto**:
+   descoberto nesta sessão (2026-08-14, via `gcloud projects
+   get-iam-policy`) que a role já tinha sido concedida self (cada SA no
+   próprio projeto) em algum momento entre sessões, sem atualizar este
+   arquivo. Cross-project (dev↔prod) foi concedida nesta própria sessão,
+   ver "Bug: lineage cross-project" abaixo. Checklist completo (incluindo
+   este item) agora vive em `docs/onboarding-cliente.md`.
 
-9. **Data Access audit logs desabilitados em dev e prod** (Sprint 3.2) —
-   sem eles, `domains/lineage` sempre retorna vazio (com aviso) e
-   `domains/access` (item ainda não implementado) vai ter a mesma
-   limitação. Decisão consciente do usuário nesta sessão: implementar a
-   feature mesmo assim, habilitar os logs depois. Formalizar via
-   Terraform (`google_project_iam_audit_config`) em vez de `gcloud`
-   manual, quando for a hora — nenhum snippet chegou a ser fornecido
-   ainda, só a constatação do estado atual.
+9. ~~Data Access audit logs desabilitados em dev e prod~~ — **obsoleto**:
+   mesma descoberta do item 8, `auditConfigs` já tinha `DATA_READ`,
+   `DATA_WRITE` e `ADMIN_READ` habilitados pra `bigquery.googleapis.com`
+   nos dois projetos antes desta sessão, também sem registro. Formalizar
+   via Terraform (`google_project_iam_audit_config`) continua pendente,
+   mas não é mais bloqueante — dado real já flui.
 
-10. **Schema dos audit logs de BigQuery (domains/lineage/repository.py)
-    nunca foi validado contra logs reais** — implementado a partir da
-    documentação oficial (`BigQueryAuditMetadata`/`jobChange`), mas como
-    os Data Access audit logs estão desabilitados (item 9 acima), não há
-    como confirmar o parsing contra um payload real ainda. Revisitar
-    assim que os logs forem habilitados e o primeiro job real aparecer.
+10. ~~Schema dos audit logs nunca validado contra logs reais~~ —
+    **obsoleto**: resolvido nos commits `72ed011`/`f18dfab` (depois do
+    último `SESSIONLOG` escrito, nunca documentado aqui) — o formato real
+    em uso é `AuditData`/`jobCompletedEvent` (legado), não
+    `BigQueryAuditMetadata`/`jobChange` como a doc de migração do BQ
+    sugeria; parser corrigido, payload real capturado e versionado em
+    `tests/unit/lineage/test_repository.py`. Ver docstring de
+    `domains/lineage/repository.py`.
+
+11. **Falha de processo recorrente: mudanças de IAM/audit config feitas
+    entre sessões sem atualizar o SESSIONLOG** — itens 8/9/10 acima
+    ficaram desatualizados por pelo menos uma sessão inteira porque o
+    usuário rodou os comandos de IAM/audit config fora do fluxo
+    documentado por este arquivo. Mitigação adotada nesta sessão: nova
+    seção "Registro de acessos e configurações" no CLAUDE.md + log vivo em
+    `docs/onboarding-cliente.md`, para toda concessão de acesso (IAM, API,
+    audit config) ser registrada no momento em que acontece, e verificada
+    (não assumida) antes de marcar como feita.
 
 11. **Possíveis documentos órfãos na coleção `profiling_results` do
     Firestore de dev** — a feature de score de qualidade escreveu nessa
@@ -731,11 +785,18 @@ Fase 4 — FinOps [pendente, depois da Sprint 3.2]
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. Branch local está em `feat/sprint-3.2`, à frente de `main` em 9
-   commits (`5516b36`..`28f1f7f`) — itens 1, 2 (score, implementado e
-   revertido), 3 (histórico) e 4 (lineage/órfãs) completos; item 4 ainda
-   sem validação visual do usuário em dev. **Sem PR aberto.**
-4. Confirmar com o usuário se a validação de lineage/órfãs já aconteceu
-   antes de seguir pro próximo item (PII, item 6 da spec original) —
-   apresentar plano resumido antes de escrever qualquer arquivo novo,
-   como no restante desta sprint.
+3. Branch local está em `feat/sprint-3.2`, à frente de `main` em 11
+   commits (`5516b36`..`c33f950`) — itens 1, 2 (score, implementado e
+   revertido), 3 (histórico), 4 (lineage/órfãs) e o ajuste de UX do
+   catálogo (`d9401d2`) completos; fix de bug cross-project em lineage
+   (`c33f950`) pusheado, aguardando revalidação do usuário em dev. **Sem PR
+   aberto.**
+4. Confirmar com o usuário se a revalidação do fix de lineage cross-project
+   já aconteceu antes de seguir pro próximo item (PII, item 6 da spec
+   original) — apresentar plano resumido antes de escrever qualquer arquivo
+   novo, como no restante desta sprint.
+5. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
+   alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que
+   conceder/alterar IAM, API ou audit config num projeto deve registrar lá
+   antes de considerar a tarefa concluída (ver CLAUDE.md, "Registro de
+   acessos e configurações").
