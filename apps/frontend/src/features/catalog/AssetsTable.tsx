@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PartitionsDialog } from '@/features/catalog/PartitionsDialog'
 import { isFavoriteTable, useFavorites, useToggleFavorite } from '@/features/favorites/hooks'
 import { useRecordTableView } from '@/features/history/hooks'
@@ -206,7 +207,7 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
             return (
               <TableRow
                 key={table.table_id}
-                className={cn('group', highlightTableId === table.table_id && 'bg-primary/10')}
+                className={cn(highlightTableId === table.table_id && 'bg-primary/10')}
               >
                 <TableCell>
                   <button
@@ -229,17 +230,31 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
                   </button>
                 </TableCell>
                 <TableCell>
-                  <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    {table.is_partitioned && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPartitionsTarget(table.table_id)}
+                  <div className="flex gap-2">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-disabled={!table.is_partitioned}
+                            className={cn(
+                              !table.is_partitioned &&
+                                'cursor-not-allowed text-muted-foreground opacity-50 hover:bg-background',
+                            )}
+                            onClick={() =>
+                              table.is_partitioned && setPartitionsTarget(table.table_id)
+                            }
+                          />
+                        }
                       >
                         <Layers size={14} />
                         Ver partições
-                      </Button>
-                    )}
+                      </TooltipTrigger>
+                      {!table.is_partitioned && (
+                        <TooltipContent>Tabela não particionada</TooltipContent>
+                      )}
+                    </Tooltip>
                     <Button
                       size="sm"
                       variant="outline"
