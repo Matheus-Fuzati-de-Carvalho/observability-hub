@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from google.api_core.exceptions import PermissionDenied
+from google.api_core.exceptions import Forbidden
 
 from observability_hub.core.exceptions import LoggingAccessDeniedError
 from observability_hub.domains.lineage import repository
@@ -228,18 +228,22 @@ def test_parse_entry_skips_malformed_referenced_table_entries():
 
 def test_list_job_events_raises_logging_access_denied():
     client = MagicMock()
-    client.list_entries.side_effect = PermissionDenied("denied")
+    client.list_entries.side_effect = Forbidden("denied")
 
     with pytest.raises(LoggingAccessDeniedError):
         repository.list_job_events(client, "observability-hub-dev")
 
 
 def test_list_job_events_raises_when_permission_denied_during_iteration():
-    """PermissionDenied costuma só estourar ao iterar (list_entries devolve
-    um iterador preguiçoso) — não só na chamada inicial."""
+    """Forbidden costuma só estourar ao iterar (list_entries devolve
+    um iterador preguiçoso) — não só na chamada inicial. É a exceção real
+    do transporte REST (_use_grpc=False, ver core/logging_client.py) para
+    um 403 — não PermissionDenied, que é a classe usada para o código gRPC
+    equivalente; confirmado no log de erro real de observability-hub-dev
+    ao consultar lineage de um projeto sem roles/logging.viewer."""
 
     def _raise_on_iter():
-        raise PermissionDenied("denied")
+        raise Forbidden("denied")
         yield  # pragma: no cover
 
     client = MagicMock()

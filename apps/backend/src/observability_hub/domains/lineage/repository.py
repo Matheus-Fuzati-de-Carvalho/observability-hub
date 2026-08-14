@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from google.api_core.exceptions import PermissionDenied
+from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
 from google.cloud import logging as cloud_logging
 
@@ -109,7 +109,7 @@ def list_job_events(client: cloud_logging.Client, project_id: str) -> list[JobEv
             page_size=_PAGE_SIZE,
         )
         return [event for entry in entries if (event := _parse_entry(entry)) is not None]
-    except PermissionDenied as exc:
+    except Forbidden as exc:
         raise LoggingAccessDeniedError(project_id) from exc
 
 
