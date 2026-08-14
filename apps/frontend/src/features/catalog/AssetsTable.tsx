@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/table'
 import { PartitionsDialog } from '@/features/catalog/PartitionsDialog'
 import { isFavoriteTable, useFavorites, useToggleFavorite } from '@/features/favorites/hooks'
+import { useRecordTableView } from '@/features/history/hooks'
 import { ProfilingDialog } from '@/features/quality/ProfilingDialog'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -74,6 +75,7 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
   const [sortDir, setSortDir] = useState<SortDirection>('asc')
   const favoritesQuery = useFavorites()
   const toggleFavorite = useToggleFavorite()
+  const recordTableView = useRecordTableView()
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
@@ -136,6 +138,7 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
         <TableHeader>
           <TableRow>
             <TableHead />
+            <TableHead>Ações</TableHead>
             <SortableTableHead
               label="Nome"
               active={sortKey === 'table_id'}
@@ -190,7 +193,6 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
                 <TableHead className="text-right">Qtd partições</TableHead>
               </>
             )}
-            <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -226,6 +228,31 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
                     />
                   </button>
                 </TableCell>
+                <TableCell>
+                  <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                    {table.is_partitioned && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPartitionsTarget(table.table_id)}
+                      >
+                        <Layers size={14} />
+                        Ver partições
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        recordTableView.mutate({ projectId, datasetId, tableId: table.table_id })
+                        setProfilingTarget(table.table_id)
+                      }}
+                    >
+                      <Sparkles size={14} />
+                      Analisar
+                    </Button>
+                  </div>
+                </TableCell>
                 <TableCell className="font-medium">{table.table_id}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{table.table_type}</Badge>
@@ -252,28 +279,6 @@ export function AssetsTable({ projectId, datasetId, tables, highlightTableId }: 
                     </TableCell>
                   </>
                 )}
-                <TableCell>
-                  <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    {table.is_partitioned && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPartitionsTarget(table.table_id)}
-                      >
-                        <Layers size={14} />
-                        Ver partições
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setProfilingTarget(table.table_id)}
-                    >
-                      <Sparkles size={14} />
-                      Analisar
-                    </Button>
-                  </div>
-                </TableCell>
               </TableRow>
             )
           })}
