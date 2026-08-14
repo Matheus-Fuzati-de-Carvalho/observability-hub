@@ -155,6 +155,41 @@ def test_parse_entry_falls_back_to_load_config_destination():
     assert event.referenced_tables == []
 
 
+def test_parse_entry_treats_anonymous_dataset_destination_as_no_destination():
+    """SELECT interativo sem destino explícito ganha uma destinationTable
+    de cache num dataset anônimo do BigQuery (prefixo "_") — não é
+    lineage real, não deve aparecer como downstream."""
+    payload = {
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobName": {"jobId": "job789", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": {
+                        "query": {
+                            "destinationTable": {
+                                "projectId": "proj",
+                                "datasetId": "_dc808a0dc9597042ed10aa06b088d1851477dbb9",
+                                "tableId": "anon7160e641_c778_4dc8_8e1e_ec80da94a128",
+                            }
+                        }
+                    },
+                    "jobStatistics": {
+                        "referencedTables": [
+                            {"projectId": "proj", "datasetId": "TRUSTED", "tableId": "ga4_sessions"}
+                        ]
+                    },
+                }
+            }
+        }
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.destination_table is None
+    assert event.referenced_tables == [("proj", "TRUSTED", "ga4_sessions")]
+
+
 def test_parse_entry_returns_none_when_payload_is_not_a_dict():
     assert repository._parse_entry(_entry(None)) is None
     assert repository._parse_entry(_entry("not a dict")) is None

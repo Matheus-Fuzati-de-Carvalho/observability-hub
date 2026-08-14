@@ -70,6 +70,13 @@ def _parse_entry(entry: cloud_logging.LogEntry) -> JobEvent | None:
         "load", {}
     ).get("destinationTable")
     destination = _parse_table_ref(destination_raw)
+    if destination is not None and destination[1].startswith("_"):
+        # Dataset anônimo do BigQuery (cache de resultado de query
+        # interativa sem destino explícito, ex: SELECT rodado sem CREATE
+        # TABLE) — não é uma tabela de destino real, não conta como
+        # lineage. Convenção oficial: datasets anônimos sempre começam
+        # com "_".
+        destination = None
 
     job_name = job.get("jobName", {})
     job_id = job_name.get("jobId", "") if isinstance(job_name, dict) else ""
