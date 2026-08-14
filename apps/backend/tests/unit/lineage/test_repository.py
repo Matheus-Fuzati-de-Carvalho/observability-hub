@@ -12,17 +12,103 @@ def _entry(payload: dict | None):
     return SimpleNamespace(payload=payload)
 
 
+# Payload real, capturado via `gcloud logging read --format=json` em
+# observability-hub-dev (2026-08-14) para o CTAS de
+# `TRUSTED.ga4_sessions AS SELECT ... FROM RAW.ga4_events`. É o campo
+# `protoPayload` do log entry, formato legado `AuditData`/
+# `jobCompletedEvent` — não o `BigQueryAuditMetadata`/`jobChange` da doc
+# de migração (ver docstring de repository.py).
+REAL_CTAS_PROTO_PAYLOAD = {
+    "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+    "authenticationInfo": {
+        "oauthInfo": {"oauthClientId": "32555940559.apps.googleusercontent.com"},
+        "principalEmail": "fuzatimatheus.cloud@gmail.com",
+    },
+    "methodName": "jobservice.jobcompleted",
+    "requestMetadata": {
+        "callerIp": "200.205.43.10",
+        "callerSuppliedUserAgent": "google-cloud-sdk578.0.0 google-api-python-client command/bq.query.jobs",
+        "destinationAttributes": {},
+        "requestAttributes": {},
+    },
+    "resourceName": "projects/observability-hub-dev/jobs/bqjob_r5bf5dfa96120dc26_000001a000b0cfae_1",
+    "serviceData": {
+        "@type": "type.googleapis.com/google.cloud.bigquery.logging.v1.AuditData",
+        "jobCompletedEvent": {
+            "eventName": "query_job_completed",
+            "job": {
+                "jobConfiguration": {
+                    "query": {
+                        "createDisposition": "CREATE_IF_NEEDED",
+                        "defaultDataset": {},
+                        "destinationTable": {
+                            "datasetId": "TRUSTED",
+                            "projectId": "observability-hub-dev",
+                            "tableId": "ga4_sessions",
+                        },
+                        "query": (
+                            "CREATE OR REPLACE TABLE `observability-hub-dev.TRUSTED.ga4_sessions` AS "
+                            "SELECT event_date, user_pseudo_id, COUNT(*) AS total_events, "
+                            "SUM(CASE WHEN event_name = 'purchase' THEN revenue ELSE 0 END) AS revenue "
+                            "FROM `observability-hub-dev.RAW.ga4_events` GROUP BY 1, 2;"
+                        ),
+                        "queryPriority": "QUERY_INTERACTIVE",
+                        "statementType": "CREATE_TABLE_AS_SELECT",
+                        "writeDisposition": "WRITE_EMPTY",
+                    }
+                },
+                "jobName": {
+                    "jobId": "bqjob_r5bf5dfa96120dc26_000001a000b0cfae_1",
+                    "location": "US",
+                    "projectId": "observability-hub-dev",
+                },
+                "jobStatistics": {
+                    "billingTier": 1,
+                    "createTime": "2026-08-14T14:33:03.171Z",
+                    "endTime": "2026-08-14T14:33:05.199Z",
+                    "queryOutputRowCount": "9964",
+                    "referencedTables": [
+                        {
+                            "datasetId": "RAW",
+                            "projectId": "observability-hub-dev",
+                            "tableId": "ga4_events",
+                        }
+                    ],
+                    "reservation": "unreserved",
+                    "startTime": "2026-08-14T14:33:03.625Z",
+                    "totalBilledBytes": "10485760",
+                    "totalProcessedBytes": "4352799",
+                    "totalSlotMs": "1426",
+                    "totalTablesProcessed": 1,
+                },
+                "jobStatus": {"error": {}, "state": "DONE"},
+            },
+        },
+    },
+    "serviceName": "bigquery.googleapis.com",
+    "status": {},
+}
+
+
 # --- _parse_table_ref --------------------------------------------------------
 
 
 def test_parse_table_ref_valid_format():
-    result = repository._parse_table_ref("projects/proj/datasets/RAW/tables/crm_leads")
+    result = repository._parse_table_ref(
+        {"projectId": "proj", "datasetId": "RAW", "tableId": "crm_leads"}
+    )
     assert result == ("proj", "RAW", "crm_leads")
 
 
 @pytest.mark.parametrize(
     "ref",
-    [None, "", "not-a-table-ref", "projects/proj/datasets/RAW", "projects/proj/tables/crm_leads"],
+    [
+        None,
+        {},
+        {"projectId": "proj", "datasetId": "RAW"},
+        {"projectId": "proj", "tableId": "crm_leads"},
+        {"datasetId": "RAW", "tableId": "crm_leads"},
+    ],
 )
 def test_parse_table_ref_returns_none_for_malformed_input(ref):
     assert repository._parse_table_ref(ref) is None
@@ -31,55 +117,32 @@ def test_parse_table_ref_returns_none_for_malformed_input(ref):
 # --- _parse_entry -------------------------------------------------------------
 
 
-def test_parse_entry_extracts_referenced_and_destination_tables():
-    payload = {
-        "authenticationInfo": {"principalEmail": "a@dp6.com.br"},
-        "metadata": {
-            "jobChange": {
-                "job": {
-                    "jobName": "projects/proj/jobs/job123/location/US",
-                    "jobConfig": {
-                        "queryConfig": {
-                            "destinationTable": "projects/proj/datasets/GOLD/tables/leads_summary",
-                        }
-                    },
-                    "jobStats": {
-                        "queryStats": {
-                            "referencedTables": [
-                                "projects/proj/datasets/RAW/tables/crm_leads",
-                                "projects/proj/datasets/RAW/tables/crm_accounts",
-                            ]
-                        }
-                    },
-                }
-            }
-        },
-    }
-
-    event = repository._parse_entry(_entry(payload))
+def test_parse_entry_extracts_referenced_and_destination_tables_from_real_payload():
+    event = repository._parse_entry(_entry(REAL_CTAS_PROTO_PAYLOAD))
 
     assert event is not None
-    assert event.job_id == "job123"
-    assert event.principal_email == "a@dp6.com.br"
-    assert event.destination_table == ("proj", "GOLD", "leads_summary")
-    assert set(event.referenced_tables) == {
-        ("proj", "RAW", "crm_leads"),
-        ("proj", "RAW", "crm_accounts"),
-    }
+    assert event.job_id == "bqjob_r5bf5dfa96120dc26_000001a000b0cfae_1"
+    assert event.principal_email == "fuzatimatheus.cloud@gmail.com"
+    assert event.destination_table == ("observability-hub-dev", "TRUSTED", "ga4_sessions")
+    assert event.referenced_tables == [("observability-hub-dev", "RAW", "ga4_events")]
 
 
 def test_parse_entry_falls_back_to_load_config_destination():
     payload = {
-        "metadata": {
-            "jobChange": {
+        "serviceData": {
+            "jobCompletedEvent": {
                 "job": {
-                    "jobName": "projects/proj/jobs/job456/location/US",
-                    "jobConfig": {
-                        "loadConfig": {
-                            "destinationTable": "projects/proj/datasets/RAW/tables/crm_leads",
+                    "jobName": {"jobId": "job456", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": {
+                        "load": {
+                            "destinationTable": {
+                                "projectId": "proj",
+                                "datasetId": "RAW",
+                                "tableId": "crm_leads",
+                            }
                         }
                     },
-                    "jobStats": {"queryStats": {}},
+                    "jobStatistics": {},
                 }
             }
         }
@@ -97,24 +160,22 @@ def test_parse_entry_returns_none_when_payload_is_not_a_dict():
     assert repository._parse_entry(_entry("not a dict")) is None
 
 
-def test_parse_entry_returns_none_when_job_change_missing():
-    assert repository._parse_entry(_entry({"metadata": {}})) is None
+def test_parse_entry_returns_none_when_job_completed_event_missing():
+    assert repository._parse_entry(_entry({"serviceData": {}})) is None
     assert repository._parse_entry(_entry({})) is None
 
 
 def test_parse_entry_skips_malformed_referenced_table_entries():
     payload = {
-        "metadata": {
-            "jobChange": {
+        "serviceData": {
+            "jobCompletedEvent": {
                 "job": {
-                    "jobName": "",
-                    "jobStats": {
-                        "queryStats": {
-                            "referencedTables": [
-                                "projects/proj/datasets/RAW/tables/crm_leads",
-                                "garbage",
-                            ]
-                        }
+                    "jobName": {},
+                    "jobStatistics": {
+                        "referencedTables": [
+                            {"projectId": "proj", "datasetId": "RAW", "tableId": "crm_leads"},
+                            {"projectId": "proj", "datasetId": "RAW"},
+                        ]
                     },
                 }
             }
@@ -155,11 +216,11 @@ def test_list_job_events_raises_when_permission_denied_during_iteration():
 
 def test_list_job_events_parses_valid_entries_and_skips_invalid_ones():
     valid_payload = {
-        "metadata": {
-            "jobChange": {
+        "serviceData": {
+            "jobCompletedEvent": {
                 "job": {
-                    "jobName": "projects/proj/jobs/job1/location/US",
-                    "jobStats": {"queryStats": {"referencedTables": []}},
+                    "jobName": {"jobId": "job1", "location": "US", "projectId": "proj"},
+                    "jobStatistics": {"referencedTables": []},
                 }
             }
         }

@@ -3,11 +3,15 @@ BigQuery a partir de audit logs (Data Access, categoria opcional —
 precisa estar habilitada no projeto alvo; ver domains/lineage/service.py
 sobre o aviso devolvido quando o resultado vem vazio).
 
-Formato do payload documentado em
+Formato do payload validado contra logs reais de observability-hub-dev
+(2026-08-14): o projeto emite o formato legado `AuditData`/
+`jobCompletedEvent` (`google.cloud.bigquery.logging.v1.AuditData`), não
+o formato novo `BigQueryAuditMetadata`/`jobChange` descrito em
 https://docs.cloud.google.com/bigquery/docs/reference/auditlogs/migration
-(BigQueryAuditMetadata, "jobChange"). Ainda não validado contra logs
-reais deste projeto — Data Access audit logs estavam desabilitados em
-dev/prod no momento em que este domínio foi implementado.
+— a doc de migração descreve o destino da migração, não o formato
+efetivamente em uso aqui. `referencedTables`/`destinationTable` vêm como
+dicts `{projectId, datasetId, tableId}`, não como strings
+`"projects/.../datasets/.../tables/..."`.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -34,16 +38,18 @@ class JobEvent:
     destination_table: TableRefTuple | None
 
 
-def _parse_table_ref(ref: str | None) -> TableRefTuple | None:
-    """ "projects/{p}/datasets/{d}/tables/{t}" -> (p, d, t); None se o
-    formato não bater (defensivo — não deve travar o parsing de um job
-    inteiro por causa de uma referência inesperada)."""
+def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
+    """{"projectId": p, "datasetId": d, "tableId": t} -> (p, d, t); None se
+    algum campo obrigatório faltar (defensivo — não deve travar o parsing
+    de um job inteiro por causa de uma referência inesperada)."""
     if not ref:
         return None
-    parts = ref.split("/")
-    if len(parts) != 6 or parts[0] != "projects" or parts[2] != "datasets" or parts[4] != "tables":
+    project_id = ref.get("projectId")
+    dataset_id = ref.get("datasetId")
+    table_id = ref.get("tableId")
+    if not project_id or not dataset_id or not table_id:
         return None
-    return parts[1], parts[3], parts[5]
+    return project_id, dataset_id, table_id
 
 
 def _parse_entry(entry: cloud_logging.LogEntry) -> JobEvent | None:
@@ -51,22 +57,22 @@ def _parse_entry(entry: cloud_logging.LogEntry) -> JobEvent | None:
     if payload is None:
         return None
 
-    job = payload.get("metadata", {}).get("jobChange", {}).get("job", {})
+    job = payload.get("serviceData", {}).get("jobCompletedEvent", {}).get("job", {})
     if not job:
         return None
 
-    job_stats = job.get("jobStats", {}).get("queryStats", {})
+    job_stats = job.get("jobStatistics", {})
     raw_referenced = job_stats.get("referencedTables", [])
     referenced = [ref for r in raw_referenced if (ref := _parse_table_ref(r)) is not None]
 
-    job_config = job.get("jobConfig", {})
-    destination_raw = job_config.get("queryConfig", {}).get("destinationTable") or job_config.get(
-        "loadConfig", {}
+    job_config = job.get("jobConfiguration", {})
+    destination_raw = job_config.get("query", {}).get("destinationTable") or job_config.get(
+        "load", {}
     ).get("destinationTable")
     destination = _parse_table_ref(destination_raw)
 
-    job_name_parts = job.get("jobName", "").split("/")
-    job_id = job_name_parts[3] if len(job_name_parts) > 3 else job.get("jobName", "")
+    job_name = job.get("jobName", {})
+    job_id = job_name.get("jobId", "") if isinstance(job_name, dict) else ""
     principal_email = payload.get("authenticationInfo", {}).get("principalEmail", "")
 
     return JobEvent(
