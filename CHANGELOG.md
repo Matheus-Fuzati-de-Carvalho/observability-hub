@@ -8,7 +8,7 @@ Atualizado ao final de cada fase pelo Claude Code.
 ## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (em andamento)
 
 Branch `feat/sprint-3.2`, a partir de `main` pós-PR #17. Sete itens
-planejados; cinco implementados e testados nesta sessão (o item de score
+planejados; seis implementados e testados nesta sessão (o item de score
 de qualidade foi implementado, validado e depois removido por completo a
 pedido do usuário).
 
@@ -42,7 +42,22 @@ pedido do usuário).
    em vez de derrubar a requisição se a SA não tiver Logging no projeto
    não-raiz). Frontend passou de duas listas planas para um diagrama
    (`LineageGraph.tsx`, `@xyflow/react` + `dagre` para layout), sempre
-   com o prefixo `project.dataset.table`.
+   com o prefixo `project.dataset.table`. Validado em dev pelo usuário
+   após o deploy — cadeia completa (`ga4_events → ga4_sessions →
+   daily_summary`) confirmada contra audit logs reais.
+5. **Fingerprinting de PII**: novo domínio `domains/pii`, nova aba "PII"
+   no mesmo modal de profiling (`ProfilingDialog.tsx`). Duas camadas:
+   heurística de nome de coluna (grátis, `INFORMATION_SCHEMA.COLUMNS`) +
+   amostragem real via `TABLESAMPLE SYSTEM` com `REGEXP_CONTAINS`/
+   `COUNTIF` por coluna (email, CPF, CNPJ, telefone BR, CEP, cartão de
+   crédito — conjunto BR completo, a pedido do usuário). Coluna só é
+   sinalizada pela amostra se ≥ `match_threshold_pct` (padrão 5%) dos
+   valores não-nulos amostrados baterem no regex, não "qualquer match" —
+   reduz falso positivo de coincidência isolada. Mesmo padrão de
+   `/estimate`+`/run` (dry-run antes de executar) e cache de 5min do
+   domínio `quality`, reaproveitados ao máximo. Matching roda inteiramente
+   em SQL dentro do BigQuery — a API nunca recebe nem loga um valor de
+   coluna real, só contagens agregadas.
 
 ### Erros e decisões desta sessão
 
@@ -82,6 +97,24 @@ desabilitados**
   `outro-projeto.RAW.foo` podia colidir por engano com `RAW.foo` do
   projeto consultado. A travessia v2 casa sempre pela tripla completa.
 
+**Decisão 4 — PII diverge do guard de view de quality: pula a query
+paga inteiramente, não só o TABLESAMPLE**
+- `quality` (profiling), quando a tabela é VIEW/MATERIALIZED VIEW, só
+  omite a cláusula `TABLESAMPLE` e roda a query principal sem amostragem
+  — aceitável porque profiling é a funcionalidade central do domínio.
+  PII é uma checagem complementar; rodar sem amostragem escanearia a
+  view inteira (que pode envolver uma query subjacente pesada) sem o
+  usuário ter visto uma estimativa de custo antes. Decisão: pular a
+  query de amostragem por completo pra view, mantendo só a heurística de
+  nome (grátis) — mesmo padrão de dry-run/estimate de quality, mas com
+  esse guard adicional.
+- Limitação assumida conscientemente e documentada em
+  `docs/specs/pii.md`: os padrões regex (CPF, CNPJ, telefone, cartão)
+  validam só formato, sem dígito verificador nem algoritmo de Luhn — e
+  não cobrem a variante sem formatação (dígitos crus), que teria alto
+  risco de falso positivo contra qualquer sequência numérica do tamanho
+  certo.
+
 ### Mudanças de arquitetura
 - `core/sla.py`: classificação de SLA extraída de `domains/freshness`
   para `core/`, compartilhada com `domains/quality` (mesmo racional do
@@ -97,20 +130,28 @@ desabilitados**
   (`LineageGraph.tsx`) reaproveita o padrão visual de bloqueado+tooltip
   já estabelecido nos botões de `AssetsTable.tsx` (item 1 desta sprint)
   pra representar tabelas em projeto sem acesso de Logging.
+- `components/SqlPreview.tsx`: promovido de `features/quality/` pro
+  nível compartilhado — componente já era genérico (`{sql, defaultOpen}`,
+  sem lógica de domínio) e passou a ser usado por `quality` e `pii`, mesmo
+  racional do `SortableTableHead` promovido no item 1.
+- `domains/pii/`: `repository.py` duplica (não importa)
+  `get_table_columns`/`is_view`/`dry_run` de `domains/quality/
+  repository.py` — mesma decisão de isolamento de domínio já tomada em
+  `domains/lineage/repository.py` (CLAUDE.md proíbe um domínio importar
+  de outro).
 
 ### Status até o momento
-- Backend: 311 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 337 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
 - Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle cresceu
-  para ~1.19 MB / gzip 362 kB — `recharts` + `@xyflow/react`/`dagre`
-  agora dividem o peso; candidato a code-splitting por rota se continuar
-  crescendo)
-- Validado em dev (`observability-hub-dev`) a cada item, pelo usuário —
-  exceto lineage/órfãs (v1 e v2), ainda pendente de validação visual no
-  momento deste registro (depende de audit logs reais na janela de 30
-  dias, ver Decisão 2)
-- Ainda faltam 2 de 7 itens (PII, mapa de acesso) e nenhum PR foi aberto
-  pra `main`
+  para ~1.19 MB / gzip 364 kB)
+- Validado em dev (`observability-hub-dev`) a cada item, pelo usuário,
+  incluindo lineage v2 (cadeia transitiva confirmada contra audit logs
+  reais). PII ainda não validado visualmente no momento deste registro —
+  mesma limitação de lineage, depende de dado de teste com PII sintético
+  em dev
+- Ainda falta 1 de 7 itens (mapa de acesso) e nenhum PR foi aberto pra
+  `main`
 
 ---
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SqlPreview } from '@/components/SqlPreview'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,11 +22,11 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTableDetail } from '@/features/catalog/hooks'
 import { LineageTab } from '@/features/lineage/LineageTab'
+import { PiiTab } from '@/features/pii/PiiTab'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
 import { HistoryTab } from '@/features/quality/HistoryTab'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
 import { SchemaTable } from '@/features/quality/SchemaTable'
-import { SqlPreview } from '@/features/quality/SqlPreview'
 import { formatNumber, formatPercent } from '@/lib/format'
 import { ApiError } from '@/lib/http-client'
 import type { UniquenessMethod } from '@/types/profiling'
@@ -37,6 +38,7 @@ const SCHEMA_TAB = 'schema'
 const ANALYSIS_TAB = 'analysis'
 const HISTORY_TAB = 'history'
 const LINEAGE_TAB = 'lineage'
+const PII_TAB = 'pii'
 
 // SelectValue não deriva o rótulo a partir dos SelectItem filhos nesta
 // versão do base-ui — precisa de um render-prop mapeando valor -> rótulo.
@@ -171,6 +173,7 @@ export function ProfilingDialog({
             </TabsTrigger>
             <TabsTrigger value={HISTORY_TAB}>Histórico</TabsTrigger>
             <TabsTrigger value={LINEAGE_TAB}>Lineage</TabsTrigger>
+            <TabsTrigger value={PII_TAB}>PII</TabsTrigger>
           </TabsList>
 
           <TabsContent value={SCHEMA_TAB} className="flex min-h-0 flex-1 flex-col gap-3">
@@ -377,6 +380,10 @@ export function ProfilingDialog({
 
           <TabsContent value={LINEAGE_TAB} className="min-h-0 flex-1 overflow-y-auto">
             <LineageTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
+          </TabsContent>
+
+          <TabsContent value={PII_TAB} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <PiiTab projectId={projectId} datasetId={datasetId} tableId={tableId} isView={isView} />
           </TabsContent>
         </Tabs>
       </DialogContent>

@@ -9,6 +9,7 @@ from observability_hub.api.v1 import (
     freshness,
     history,
     lineage,
+    pii,
     profiling,
     projects,
     quality,
@@ -24,6 +25,7 @@ from observability_hub.core.exceptions import (
     OAuthEmailNotAllowedError,
     OAuthExchangeError,
     OAuthStateMismatchError,
+    PiiScanTimeoutError,
     ProfilingTimeoutError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
@@ -52,6 +54,7 @@ app.include_router(favorites.router)
 app.include_router(history.router)
 app.include_router(quality.router)
 app.include_router(lineage.router)
+app.include_router(pii.router)
 
 
 @app.get("/health")
@@ -175,6 +178,14 @@ def handle_profiling_timeout(request: Request, exc: ProfilingTimeoutError) -> JS
     return JSONResponse(
         status_code=504,
         content={"error": "profiling_timeout", "message": str(exc)},
+    )
+
+
+@app.exception_handler(PiiScanTimeoutError)
+def handle_pii_scan_timeout(request: Request, exc: PiiScanTimeoutError) -> JSONResponse:
+    return JSONResponse(
+        status_code=504,
+        content={"error": "pii_scan_timeout", "message": str(exc)},
     )
 
 

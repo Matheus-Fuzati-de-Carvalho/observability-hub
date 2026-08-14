@@ -78,6 +78,17 @@ class ProfilingTimeoutError(Exception):
         )
 
 
+class PiiScanTimeoutError(Exception):
+    def __init__(self, project_id: str, dataset_id: str, table_id: str) -> None:
+        self.project_id = project_id
+        self.dataset_id = dataset_id
+        self.table_id = table_id
+        super().__init__(
+            f"Scan de PII de '{project_id}.{dataset_id}.{table_id}' excedeu 60s. "
+            "Reduza sample_percent e tente novamente."
+        )
+
+
 class OAuthStateMismatchError(Exception):
     """O cookie oauth_state (setado em /auth/login) não bate com o
     parâmetro state devolvido por /auth/callback — sinal de CSRF ou de
