@@ -155,9 +155,53 @@ projetos desde antes desta sessão, sem nunca terem sido documentados aqui
 (ele rodou via `!`) `roles/logging.viewer` cross-project nos dois sentidos
 (dev→prod e prod→dev) — mesmo padrão das roles de BigQuery já cross-granted
 desde a Sprint 2. Confirmado ao vivo via `gcloud projects get-iam-policy`
-depois do comando. Lineage cross-project agora deve funcionar de verdade,
-não só falhar de forma tratada — **ainda não revalidado em dev pelo usuário
-depois do deploy do fix** (push feito, deploy automático disparado).
+depois do comando.
+
+### Bug 2: lineage cross-project não estourava mais erro, mas retornava
+sempre vazio (`roles/logging.privateLogViewer` faltando, mesma sessão)
+Usuário revalidou depois do fix acima — "Failed to fetch" resolvido, mas
+a mensagem virou o aviso estático de "nenhum evento encontrado nos audit
+logs" pra `observability-hub-prod`, apesar de `auditConfigs` já estarem
+habilitados (confirmado no Bug 1 acima). Suspeita inicial (dado
+insuficiente/quantidade de eventos) descartada rodando a query real via
+`gcloud logging read` como usuário: **11.298 entradas** de
+`jobservice.jobcompleted` em prod nos últimos 30 dias, muito longe de
+"sem atividade". Reproduzindo `repository.list_job_events` localmente com
+essas credenciais (usuário, não a SA), os 11.298 eventos parseavam sem
+problema — ou seja, o parser está correto, o bug é puramente de IAM.
+
+Causa raiz, confirmada contra a documentação oficial do GCP
+(`docs.cloud.google.com/logging/docs/access-control`): **Data Access
+audit logs exigem `roles/logging.privateLogViewer` pra serem visíveis via
+API, além de `roles/logging.viewer`** — Admin Activity/System Event/Policy
+Denied logs bastam com `logging.viewer`, mas Data Access (categoria onde
+vive o `jobCompletedEvent` que lineage lê) é mais restrita por design
+(pode conter informação sensível sobre o que foi acessado). Sem
+`privateLogViewer`, a chamada **não falha** — só retorna sempre vazio,
+indistinguível de "sem atividade real" ou "audit logs desabilitados" só
+pelo resultado. `roles/logging.privateLogViewer` já existia self (cada SA
+no próprio projeto, daí dev-olhando-dev sempre ter funcionado) mas nunca
+tinha sido cross-granted — só `logging.viewer` foi cross-granted no Bug 1
+acima, o que bastou pra não estourar 403 mas não bastou pra ver os dados.
+
+Corrigido em três frentes:
+1. `domains/lineage/service.py::_EMPTY_RESULT_WARNING` reescrito pra
+   mencionar as duas roles como causa possível, não só "audit logs
+   desabilitados" (que era a única hipótese sugerida antes, incompleta).
+2. `main.py::handle_logging_access_denied` (o 403 de
+   `LoggingAccessDeniedError`, que dispara quando falta `logging.viewer`
+   por completo) passou a sugerir as duas roles de uma vez, mesmo padrão
+   de `ProjectAccessDeniedError`.
+3. `docs/onboarding-cliente.md` corrigido — a primeira versão do
+   documento (escrita mais cedo nesta mesma sessão, antes deste bug
+   aparecer) tinha marcado `logging.privateLogViewer` como "não usada
+   pelo código, não replicar em onboarding"; agora faz parte do
+   checklist oficial, com nota de correção explicando o erro.
+
+Comandos de `roles/logging.privateLogViewer` cross-project (dev→prod e
+prod→dev) fornecidos ao usuário nesta sessão — **pendente confirmação de
+execução e revalidação em dev**, ver `docs/onboarding-cliente.md` pra o
+comando exato e o registro de quando for confirmado.
 
 Nesta mesma sessão, criado `docs/onboarding-cliente.md` (checklist
 completo de IAM/API/audit config pra um projeto cliente aceitar leitura do

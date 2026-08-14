@@ -18,11 +18,17 @@ from observability_hub.domains.lineage.schemas import (
 
 _EMPTY_RESULT_WARNING = (
     "Nenhum evento de job encontrado nos audit logs dos últimos {days} dias. "
-    "Isso pode significar que não houve atividade na janela, ou que os Data "
-    "Access audit logs estão desabilitados no projeto '{project_id}' — "
-    "lineage depende deles (Admin Activity logs, sempre ativos, não bastam). "
-    "Verifique com: gcloud projects get-iam-policy {project_id} --format=json "
-    "(procure por 'auditConfigs' com service 'bigquery.googleapis.com')."
+    "Isso pode significar (a) que não houve atividade na janela, (b) que os "
+    "Data Access audit logs estão desabilitados no projeto '{project_id}' "
+    "(lineage depende deles — Admin Activity logs, sempre ativos, não "
+    "bastam) ou (c) que a service account do Hub tem roles/logging.viewer "
+    "mas não roles/logging.privateLogViewer no projeto — Data Access audit "
+    "logs só ficam visíveis via API com a segunda role, mesmo com a "
+    "primeira concedida (a chamada não falha, só retorna vazio). Verifique "
+    "auditConfigs com: gcloud projects get-iam-policy {project_id} "
+    "--format=json (procure por 'auditConfigs' com service "
+    "'bigquery.googleapis.com'); verifique as duas roles da SA com o mesmo "
+    "comando, procurando por 'logging.viewer' e 'logging.privateLogViewer'."
 )
 
 

@@ -48,7 +48,16 @@ domínio hoje opera com IAM a nível de dataset ou tabela):
 | `roles/bigquery.metadataViewer` | Ler `INFORMATION_SCHEMA` (schemas, tabelas, colunas, particionamento) | catalog, freshness, lineage (`discover_regions`) |
 | `roles/bigquery.jobUser` | Executar queries — inclusive as de `INFORMATION_SCHEMA`, que rodam como job no BigQuery | catalog, freshness, quality, lineage |
 | `roles/bigquery.dataViewer` | Ler dados reais de tabela (amostragem, contagem de nulos/duplicatas, valores distintos) | quality (profiling e histórico) |
-| `roles/logging.viewer` | Ler audit logs de jobs completados do BigQuery via Cloud Logging | lineage (tabelas órfãs, upstream/downstream); mapa de acesso quando implementado |
+| `roles/logging.viewer` | Chamar a API de Cloud Logging sem 403 — sozinha **não é suficiente** pra ver Data Access audit logs, ver nota abaixo | lineage (tabelas órfãs, upstream/downstream); mapa de acesso quando implementado |
+| `roles/logging.privateLogViewer` | Ver especificamente os **Data Access audit logs** — é onde vive o `jobCompletedEvent` que lineage lê; sem essa role a chamada não falha, só retorna sempre vazio | idem |
+
+> **Pegadinha confirmada em produção (2026-08-14):** `roles/logging.viewer`
+> sozinha deixa a API responder 200 normalmente, mas Data Access audit logs
+> (categoria diferente de Admin Activity, que fica sempre visível) só ficam
+> visíveis pra quem também tem `roles/logging.privateLogViewer` — sem ela,
+> `entries.list` não erra, só nunca retorna nenhuma entrada da categoria
+> Data Access. As duas roles são necessárias juntas, não uma ou outra.
+> ([doc oficial](https://docs.cloud.google.com/logging/docs/access-control))
 
 ```bash
 SA_EMAIL="backend-run@observability-hub-prod.iam.gserviceaccount.com"  # ou -dev
@@ -64,13 +73,21 @@ gcloud projects add-iam-policy-binding {PROJECT_ID} \
 
 gcloud projects add-iam-policy-binding {PROJECT_ID} \
   --member="serviceAccount:${SA_EMAIL}" --role="roles/logging.viewer"
+
+gcloud projects add-iam-policy-binding {PROJECT_ID} \
+  --member="serviceAccount:${SA_EMAIL}" --role="roles/logging.privateLogViewer"
 ```
 
-Todos os quatro comandos são idempotentes — seguro rodar de novo mesmo que
+Todos os cinco comandos são idempotentes — seguro rodar de novo mesmo que
 algum já tenha sido aplicado. Se faltar qualquer uma das três primeiras, a
 API responde 403 com esses mesmos comandos prontos no corpo do erro
-(`ProjectAccessDeniedError`); se faltar a quarta, o mesmo acontece só pros
-endpoints de lineage (`LoggingAccessDeniedError`).
+(`ProjectAccessDeniedError`); se faltar `logging.viewer`, o mesmo acontece
+só pros endpoints de lineage (`LoggingAccessDeniedError`, que já sugere as
+duas roles de logging juntas); se faltar só `logging.privateLogViewer`
+(com `logging.viewer` presente), não há erro nenhum — só o aviso de
+"nenhum evento encontrado", indistinguível à primeira vista de "sem
+atividade real" ou "audit logs desabilitados". Checar as três
+possibilidades nessa ordem quando o aviso aparecer sem explicação óbvia.
 
 ---
 
@@ -142,6 +159,9 @@ motivo.
 [ ] roles/bigquery.jobUser concedida à SA do Hub
 [ ] roles/bigquery.dataViewer concedida à SA do Hub
 [ ] roles/logging.viewer concedida à SA do Hub
+[ ] roles/logging.privateLogViewer concedida à SA do Hub — sem ela,
+    logging.viewer sozinha NÃO mostra Data Access audit logs (falha
+    silenciosa, sem erro, só resultado sempre vazio)
 [ ] Data Access audit logs (DATA_READ + DATA_WRITE) do BigQuery habilitados
     — só necessário se o cliente for usar lineage/tabelas órfãs/mapa de acesso
 ```
@@ -164,6 +184,8 @@ checklist, e servem de precedente real de que o processo funciona.
 | Antes de 2026-08-14 (sessão não documentada no SESSIONLOG) | `observability-hub-dev` e `observability-hub-prod` | — | Data Access audit logs do BigQuery (`DATA_READ`, `DATA_WRITE`, `ADMIN_READ`) habilitados | `gcloud projects get-iam-policy` (campo `auditConfigs`) |
 | 2026-08-14 | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.viewer` (cross) | `gcloud projects get-iam-policy` |
 | 2026-08-14 | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.viewer` (cross) | `gcloud projects get-iam-policy` |
+| 2026-08-14 | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.privateLogViewer` (cross) — **pendente**, comando fornecido nesta sessão | aguardando confirmação |
+| 2026-08-14 | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.privateLogViewer` (cross) — **pendente**, comando fornecido nesta sessão | aguardando confirmação |
 
 **Nota:** os dois itens "antes de 2026-08-14" foram descobertos ao vivo
 nesta sessão via `gcloud projects get-iam-policy` — o SESSIONLOG.md
@@ -171,13 +193,24 @@ registrava esse estado como pendente (backlog itens 8 e 9), mas já tinha
 sido resolvido manualmente pelo usuário em algum momento entre sessões sem
 atualizar a documentação. Ver SESSIONLOG.md para a correção desses itens.
 
+**Nota 2 (correção):** a primeira versão deste documento, escrita mais
+cedo nesta mesma sessão, listava `roles/logging.privateLogViewer` como
+"não lida por nenhum código atual, não replicar em onboarding de
+cliente" — **isso estava errado**. Só ficou claro depois que o usuário
+testou lineage cross-project em produção e recebeu "nenhum evento
+encontrado" mesmo com dados reais existindo (confirmado via
+`gcloud logging read` direto): `roles/logging.viewer` deixa a API
+responder sem erro, mas **não é suficiente** pra ver Data Access audit
+logs — só `roles/logging.privateLogViewer` mostra essa categoria
+especificamente. As duas roles voltaram a fazer parte do checklist
+oficial (seção 2 acima). Erro registrado aqui de propósito, como exemplo
+do próprio processo que este documento existe pra evitar.
+
 Roles concedidas às SAs do Hub que **não fazem parte deste checklist**
 (específicas da infraestrutura própria do Hub, nunca pedidas a um projeto
 cliente): `roles/datastore.user`, `roles/secretmanager.secretAccessor`
 (cada uma só no próprio projeto, `dev` na SA de dev e `prod` na SA de
-prod) e `roles/logging.privateLogViewer` (concedida nos dois projetos à
-respectiva SA local, mas não é lida por nenhum código atual — não
-replicar em onboarding de cliente até confirmar se ainda é necessária).
+prod).
 
 ---
 

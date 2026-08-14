@@ -93,17 +93,23 @@ def handle_project_access_denied(request: Request, exc: ProjectAccessDeniedError
 def handle_logging_access_denied(request: Request, exc: LoggingAccessDeniedError) -> JSONResponse:
     runtime_project = get_client().project
     sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    # logging.viewer sozinho basta pra não estourar Forbidden, mas Data
+    # Access audit logs (onde vive o jobCompletedEvent que lineage lê) só
+    # ficam visíveis via API com logging.privateLogViewer também — sem essa
+    # segunda role a chamada não falha, só retorna sempre vazio (ver aviso
+    # estático em domains/lineage/service.py). Sugerimos as duas de uma vez,
+    # mesmo padrão de ProjectAccessDeniedError.
+    roles = ["logging.viewer", "logging.privateLogViewer"]
     return JSONResponse(
         status_code=403,
         content={
             "error": "logging_access_denied",
             "message": "A service account do Hub não tem acesso aos audit logs deste projeto.",
             "fix": [
-                (
-                    f"gcloud projects add-iam-policy-binding {exc.project_id} "
-                    f"--member='serviceAccount:{sa_email}' "
-                    "--role='roles/logging.viewer'"
-                )
+                f"gcloud projects add-iam-policy-binding {exc.project_id} "
+                f"--member='serviceAccount:{sa_email}' "
+                f"--role='roles/{role}'"
+                for role in roles
             ],
         },
     )
