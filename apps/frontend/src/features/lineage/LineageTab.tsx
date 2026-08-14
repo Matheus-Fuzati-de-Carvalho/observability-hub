@@ -53,8 +53,8 @@ function TableRefList({ title, refs }: { title: string; refs: TableRef[] }) {
       ) : (
         <ul className="flex flex-col gap-1">
           {refs.map((ref) => (
-            <li key={`${ref.dataset_id}.${ref.table_id}`} className="text-sm">
-              {ref.dataset_id}.{ref.table_id}
+            <li key={`${ref.project_id}.${ref.dataset_id}.${ref.table_id}`} className="text-sm">
+              {ref.project_id}.{ref.dataset_id}.{ref.table_id}
             </li>
           ))}
         </ul>

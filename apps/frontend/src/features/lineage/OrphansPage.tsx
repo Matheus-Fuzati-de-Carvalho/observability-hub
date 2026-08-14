@@ -58,10 +58,10 @@ export function OrphansPage() {
         </TableHeader>
         <TableBody>
           {data.orphans.map((orphan) => (
-            <TableRow key={`${orphan.dataset_id}.${orphan.table_id}`}>
+            <TableRow key={`${data.project_id}.${orphan.dataset_id}.${orphan.table_id}`}>
               <TableCell>
                 <Link to={`/datasets/${orphan.dataset_id}`} className="hover:text-primary">
-                  {orphan.dataset_id}
+                  {data.project_id}.{orphan.dataset_id}
                 </Link>
               </TableCell>
               <TableCell className="font-medium">{orphan.table_id}</TableCell>
