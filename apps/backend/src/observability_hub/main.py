@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from observability_hub.api.v1 import (
+    access,
     auth,
     catalog,
     favorites,
@@ -55,6 +56,7 @@ app.include_router(history.router)
 app.include_router(quality.router)
 app.include_router(lineage.router)
 app.include_router(pii.router)
+app.include_router(access.router)
 
 
 @app.get("/health")

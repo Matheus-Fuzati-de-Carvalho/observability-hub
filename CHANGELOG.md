@@ -5,12 +5,13 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
-## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (em andamento)
+## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (concluída)
 
 Branch `feat/sprint-3.2`, a partir de `main` pós-PR #17. Sete itens
-planejados; seis implementados e testados nesta sessão (o item de score
+planejados; sete implementados e testados nesta sessão (o item de score
 de qualidade foi implementado, validado e depois removido por completo a
-pedido do usuário).
+pedido do usuário — por isso a numeração abaixo chega a 6 novas
+features, não 7).
 
 ### O que foi feito
 1. **Filtros e ordenação client-side**: busca por nome + filtro por tipo/
@@ -57,7 +58,22 @@ pedido do usuário).
    `/estimate`+`/run` (dry-run antes de executar) e cache de 5min do
    domínio `quality`, reaproveitados ao máximo. Matching roda inteiramente
    em SQL dentro do BigQuery — a API nunca recebe nem loga um valor de
-   coluna real, só contagens agregadas.
+   coluna real, só contagens agregadas. Validado em dev pelo usuário.
+6. **Mapa de acesso**: novo domínio `domains/access`, nova aba "Acesso"
+   no mesmo modal de profiling. Reaproveita a mesma fonte de dados do
+   lineage (audit logs de jobs BigQuery via Cloud Logging), sob um
+   ângulo diferente — "quem tocou nessa tabela" em vez de "de onde vem/
+   pra onde vai o dado". Agrega por `principal_email`: último acesso,
+   contagem, tipo (leitura/escrita) e se é usuário humano ou service
+   account (heurística: email termina em `gserviceaccount.com`).
+   Diferente do lineage, uma auto-referência (ex: MERGE lendo e
+   escrevendo a própria tabela) **conta** como acesso real, em vez de
+   ser excluída — ali representaria um ciclo sem sentido, aqui é
+   exatamente o tipo de evento que o mapa de acesso quer mostrar.
+   Endpoint único (`GET /{project}/{dataset}/{table}`, sem custo de BQ,
+   só Cloud Logging), sem fluxo estimar→rodar como PII/profiling — só
+   carrega ao abrir a aba, como o Lineage. Fecha os 7 de 7 itens
+   planejados da sprint.
 
 ### Erros e decisões desta sessão
 
@@ -115,6 +131,25 @@ paga inteiramente, não só o TABLESAMPLE**
   risco de falso positivo contra qualquer sequência numérica do tamanho
   certo.
 
+**Decisão 5 — Mapa de acesso: limitação de visibilidade cross-project
+discutida e documentada antes de implementar**
+- Durante a conversa sobre o que conta como "acesso" (motivada por uma
+  pergunta do usuário sobre um job Glue extraindo do BQ pra S3), ficou
+  claro que `list_access_events`/`list_job_events` só enxergam jobs que
+  **rodaram no projeto da tabela** — um job rodando em outro projeto que
+  lê a tabela via referência cross-project não aparece, porque o audit
+  log dele vive no projeto onde ele rodou. Mesma classe de limitação já
+  documentada em lineage/órfãs, agora também explícita em
+  `docs/specs/access.md`, "Fonte de dados" e "Casos de borda" — em vez
+  de descobrir isso depois, via um usuário confuso com um número de
+  acessos menor que o esperado.
+- Decisão de design: diferente de `get_orphans` (que só conta leitura)
+  e do lineage (que exclui auto-referência), o mapa de acesso conta
+  leitura **e** escrita, e **não** exclui auto-referência — são
+  perguntas diferentes ("quem consome" vs. "de onde vem" vs. "quem
+  tocou"), cada domínio com a semântica que faz sentido pra ele mesmo
+  reaproveitando a mesma fonte de dados.
+
 ### Mudanças de arquitetura
 - `core/sla.py`: classificação de SLA extraída de `domains/freshness`
   para `core/`, compartilhada com `domains/quality` (mesmo racional do
@@ -139,19 +174,23 @@ paga inteiramente, não só o TABLESAMPLE**
   repository.py` — mesma decisão de isolamento de domínio já tomada em
   `domains/lineage/repository.py` (CLAUDE.md proíbe um domínio importar
   de outro).
+- `domains/access/`: mesma decisão de duplicação, desta vez sobre
+  `domains/lineage/repository.py` — `AccessEvent` é quase idêntico a
+  `JobEvent` de lineage, mas carrega também `timestamp`
+  (`jobStatistics.endTime`), campo que lineage não lê porque não
+  precisa de "quando", só de "de onde/pra onde".
 
 ### Status até o momento
-- Backend: 337 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 367 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
-- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle cresceu
-  para ~1.19 MB / gzip 364 kB)
-- Validado em dev (`observability-hub-dev`) a cada item, pelo usuário,
-  incluindo lineage v2 (cadeia transitiva confirmada contra audit logs
-  reais). PII ainda não validado visualmente no momento deste registro —
-  mesma limitação de lineage, depende de dado de teste com PII sintético
-  em dev
-- Ainda falta 1 de 7 itens (mapa de acesso) e nenhum PR foi aberto pra
-  `main`
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle
+  ~1.19 MB / gzip 364 kB)
+- Validado em dev (`observability-hub-dev`) pelo usuário: filtros/
+  ordenação, histórico de qualidade, lineage v2 (cadeia transitiva
+  confirmada contra audit logs reais) e PII. Mapa de acesso ainda não
+  validado visualmente no momento deste registro.
+- **7 de 7 itens concluídos — sprint fechada.** PR pra `main` ainda não
+  aberto.
 
 ---
 
@@ -466,5 +505,5 @@ implementação**
 | Sprint 2.2 | Metadados de partição, "Ver partições", refresh, busca reversa | ✅ Concluída |
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
 | Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
-| Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ⏳ Em andamento (6 de 7 itens) |
+| Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
 | Fase 4 | FinOps completo | ⏳ Pendente |
