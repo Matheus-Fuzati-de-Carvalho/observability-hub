@@ -5,6 +5,7 @@ só chama estas funções — CLAUDE.md proíbe lógica de negócio em api/.
 
 from google.cloud import logging as cloud_logging
 
+from observability_hub.core.bigquery import get_client
 from observability_hub.domains.access import repository
 from observability_hub.domains.access.repository import TableRefTuple
 from observability_hub.domains.access.schemas import TableAccessEntry, TableAccessResponse
@@ -35,6 +36,18 @@ def _is_service_account(principal_email: str) -> bool:
     return principal_email.endswith("gserviceaccount.com")
 
 
+def _hub_runtime_sa_email() -> str:
+    """SA de runtime do próprio Hub (Cloud Run, ver core/bigquery.py::
+    get_client() e o mesmo padrão em main.py::handle_project_access_denied) —
+    excluída do mapa de acesso porque toda vez que o usuário roda
+    profiling/PII numa tabela pela UI, é essa SA (não o usuário) quem
+    executa a query real no BigQuery. Sem esse filtro, o próprio ato de
+    inspecionar uma tabela pelo Hub apareceria como "acesso recente" —
+    ruído, não um consumidor real de fora."""
+    runtime_project = get_client().project
+    return f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+
+
 def get_table_access(
     logging_client: cloud_logging.Client,
     project_id: str,
@@ -44,11 +57,14 @@ def get_table_access(
 ) -> TableAccessResponse:
     target: TableRefTuple = (project_id, dataset_id, table_id)
     events = repository.list_access_events(logging_client, project_id)
+    hub_sa_email = _hub_runtime_sa_email()
 
     by_principal: dict[str, dict] = {}
     for event in events:
         if event.timestamp is None:
             continue  # sem "quando" não é útil pro mapa de acesso
+        if event.principal_email == hub_sa_email:
+            continue  # o próprio Hub rodando profiling/PII não é um acesso externo real
 
         types: set[str] = set()
         if target in event.referenced_tables:

@@ -21,8 +21,13 @@ def _event(
     )
 
 
-def _events(monkeypatch, events):
+def _events(monkeypatch, events, hub_project="hub-proj"):
     monkeypatch.setattr(service.repository, "list_access_events", lambda *a, **kw: events)
+    # get_client() nunca deve ser chamado de verdade em teste unitário —
+    # _hub_runtime_sa_email() só lê .project, então um MagicMock com esse
+    # atributo já basta (ver core/bigquery.py::get_client, singleton via
+    # lru_cache, não usado aqui de outra forma).
+    monkeypatch.setattr(service, "get_client", lambda: MagicMock(project=hub_project))
 
 
 # --- read/write classification ------------------------------------------------
@@ -218,3 +223,46 @@ def test_get_table_access_sets_warning_when_no_events(monkeypatch):
     assert result.users == []
     assert result.warning is not None
     assert "proj" in result.warning
+
+
+# --- exclusão da SA de runtime do próprio Hub -------------------------------------
+
+
+def test_get_table_access_excludes_hub_own_runtime_service_account(monkeypatch):
+    # Toda vez que o usuário roda profiling/PII pela UI, quem executa a
+    # query real é a SA de runtime do Hub — não deve aparecer como um
+    # "acesso" externo real.
+    events = [
+        _event(
+            referenced=[("proj", "RAW", "crm_leads")],
+            destination=None,
+            principal_email="backend-run@hub-proj.iam.gserviceaccount.com",
+        ),
+        _event(
+            referenced=[("proj", "RAW", "crm_leads")],
+            destination=None,
+            principal_email="ana@dp6.com.br",
+        ),
+    ]
+    _events(monkeypatch, events, hub_project="hub-proj")
+
+    result = service.get_table_access(MagicMock(), "proj", "RAW", "crm_leads")
+
+    assert [u.principal_email for u in result.users] == ["ana@dp6.com.br"]
+
+
+def test_get_table_access_does_not_exclude_other_service_accounts(monkeypatch):
+    events = [
+        _event(
+            referenced=[("proj", "RAW", "crm_leads")],
+            destination=None,
+            principal_email="glue-job@other-proj.iam.gserviceaccount.com",
+        )
+    ]
+    _events(monkeypatch, events, hub_project="hub-proj")
+
+    result = service.get_table_access(MagicMock(), "proj", "RAW", "crm_leads")
+
+    assert len(result.users) == 1
+    assert result.users[0].principal_email == "glue-job@other-proj.iam.gserviceaccount.com"
+    assert result.users[0].is_service_account is True

@@ -116,6 +116,24 @@ def get_table_access(
 `get_table_lineage`/`get_orphans` (domínio `lineage`) não mudam — este é
 um domínio novo e independente, só compartilhando a fonte de dados.
 
+### Exclusão da SA do próprio Hub
+
+Antes de agregar, todo evento cujo `principal_email` seja
+`backend-run@<projeto-do-hub>.iam.gserviceaccount.com` (`<projeto-do-hub>`
+= `core/bigquery.py::get_client().project`, o projeto onde a instância
+do Hub está rodando — dev ou prod, não o projeto da tabela consultada)
+é descartado antes de entrar em `by_principal`.
+
+Motivo: toda vez que o usuário roda profiling ou scan de PII numa
+tabela pela própria UI do Hub, quem executa a query real no BigQuery é
+essa SA de runtime (`core/bigquery.py::get_client()`), não o usuário.
+Sem esse filtro, o simples ato de inspecionar uma tabela pelo Hub faria
+ela aparecer como "acesso recente" no próprio mapa de acesso — ruído
+que mascararia os consumidores externos reais, o oposto do que a
+funcionalidade existe pra mostrar. Outras service accounts (pipelines
+externos, Glue, etc.) continuam contando normalmente — só a SA do
+próprio Hub é excluída.
+
 ---
 
 ## Estrutura de arquivos
@@ -147,6 +165,8 @@ apps/backend/src/observability_hub/
 | Job rodando em outro projeto, lendo esta tabela via cross-project | Não aparece — audit log vive no projeto onde o job rodou, não no da tabela (ver "Fonte de dados") |
 | Nenhum evento de job no projeto | `warning` populado (mesmo texto/causas de lineage), `users: []` |
 | `limit` fora do intervalo 1–100 | HTTP 422 (validação do `Query(ge=1, le=100)`) |
+| Job executado pela própria SA de runtime do Hub (`backend-run@<projeto-do-hub>.iam.gserviceaccount.com`) | Excluído da agregação — profiling/PII rodado pela UI usa essa SA pra consultar o BigQuery, não é um consumidor externo real (ver "Exclusão da SA do próprio Hub") |
+| Job de outra service account (ex: pipeline externo) | Conta normalmente, `is_service_account: true` |
 
 ---
 
