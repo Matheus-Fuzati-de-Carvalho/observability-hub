@@ -6,6 +6,7 @@ import { RequireAuth } from '@/features/auth/RequireAuth'
 import { CatalogDatasetPage } from '@/features/catalog/CatalogDatasetPage'
 import { CatalogOverviewPage } from '@/features/catalog/CatalogOverviewPage'
 import { SearchPage } from '@/features/catalog/SearchPage'
+import { FinOpsPage } from '@/features/finops/FinOpsPage'
 import { DatasetFreshnessPage } from '@/features/freshness/DatasetFreshnessPage'
 import { FreshnessPage } from '@/features/freshness/FreshnessPage'
 import { OrphansPage } from '@/features/lineage/OrphansPage'
@@ -22,6 +23,7 @@ export function AppRoutes() {
           <Route path="freshness" element={<FreshnessPage />} />
           <Route path="freshness/:datasetId" element={<DatasetFreshnessPage />} />
           <Route path="orphans" element={<OrphansPage />} />
+          <Route path="finops" element={<FinOpsPage />} />
           <Route path="search" element={<SearchPage />} />
         </Route>
       </Route>

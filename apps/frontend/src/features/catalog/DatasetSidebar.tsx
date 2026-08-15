@@ -1,4 +1,4 @@
-import { ChevronDown, Clock, History, Search, Star, Unlink } from 'lucide-react'
+import { ChevronDown, Clock, History, PiggyBank, Search, Star, Unlink } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -70,6 +70,20 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
         >
           <Unlink size={16} />
           Tabelas órfãs
+        </NavLink>
+        <NavLink
+          to="/finops"
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+              isActive
+                ? 'bg-primary font-bold text-primary-foreground'
+                : 'text-foreground hover:bg-muted',
+            )
+          }
+        >
+          <PiggyBank size={16} />
+          FinOps
         </NavLink>
         <NavLink
           to="/search"

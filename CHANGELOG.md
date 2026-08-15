@@ -5,6 +5,85 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Fase 4 — FinOps: scanner de desperdício (em andamento, 1ª de 3 frentes)
+
+Branch `feat/finops-waste-scanner`, criada a partir de `feat/sprint-3.2`
+(PR #18 da Sprint 3.2 ainda não mergeado em `main` no momento desta
+sessão — decisão consciente do usuário pra não bloquear o início da
+Fase 4 esperando review). Primeira das três frentes do roadmap de
+FinOps (`docs/prd.md`): scanner de desperdício. Budget/custo por
+dataset e otimizações sugeridas ficam pra sessões futuras — a lacuna da
+v1 do PII (detecção de nome de pessoa, classificação de sensibilidade
+por tabela) foi explicitamente adiada, não faz parte deste trabalho.
+
+### O que foi feito
+
+**Novo domínio `domains/finops`** — duas checagens independentes:
+
+1. **Tabelas sem uso** (`GET /finops/{project}/unused-tables?min_days_unused=30|60|90`):
+   tabelas sem leitura conhecida nos audit logs, com custo de storage
+   evitável estimado via `size_bytes × preço/GB` (BigQuery já rebaixa
+   pra tarifa long-term sozinho depois de 90 dias sem modificação — a
+   estimativa usa a tarifa certa conforme `last_modified_time`, não uma
+   única tarifa fixa).
+2. **Candidatas a particionamento** (`GET /finops/{project}/partition-candidates`):
+   tabelas grandes (≥1GB), sem partição, com coluna
+   `DATE`/`DATETIME`/`TIMESTAMP` candidata. Estimativa de economia
+   **ancorada em custo real observado** (`jobStatistics.totalBilledBytes`
+   dos audit logs, campo que nenhum outro domínio lia ainda) em vez de
+   uma suposição do zero — só aparece quando há custo real na janela de
+   30 dias, sempre como faixa (30%–70% de redução), nunca um número
+   único, com disclaimer explícito. Ver "Decisão 1" abaixo — foi uma
+   escolha de design discutida em detalhe com o usuário antes de
+   implementar, pra não gerar frustração com uma economia superestimada.
+
+Nova página de frontend `/finops` (fora do modal de profiling, diferente
+de PII/lineage/access — é uma visão de projeto inteiro, não de uma
+tabela só, mesmo padrão de `/orphans`), duas abas (Tabelas sem uso /
+Candidatas a particionamento), link novo no sidebar.
+
+### Erros e decisões desta sessão
+
+**Decisão 1 — Estimativa de economia de particionamento: nunca fabricar
+um número de aparência precisa sobre suposição não verificada**
+- Pedido inicial era "estimativa heurística aproximada". Discutido com o
+  usuário até chegar num desenho que ancora a base em dado real (custo
+  de scan já observado nos audit logs, não uma frequência de query
+  assumida) e só extrapola daí — e mesmo assim como faixa, não um valor
+  único, com o disclaimer sempre visível. Justificativa do usuário:
+  "sem superestimar a economia para não gerar frustração" — um número
+  de decisão financeira errado é pior que não mostrar número nenhum.
+- Limitação assumida e documentada: se a query faz `JOIN` com outra
+  tabela grande, o custo mostrado é da query inteira, não isolado só
+  daquela tabela — sem tentativa de dividir a proporção, dado que não
+  está disponível no audit log.
+
+**Decisão 2 — Reaproveitar `core/bigquery.py::get_tables_metadata` em
+vez de duplicar mais uma vez**
+- Diferente de lineage/pii/access (que duplicam parsing de audit log
+  entre si, por serem domínios distintos), a enumeração de tabelas com
+  tamanho/partição/`last_modified_time` já vive em `core/bigquery.py`
+  (`get_table_cached`/`get_tables_metadata`, usado por catalog e
+  freshness) — reaproveitada direto aqui, sem duplicar, porque é
+  infraestrutura compartilhada (`core/`), não código de outro domínio.
+  A regra de "domínios não importam um do outro" nunca foi sobre
+  proibir reaproveitar `core/`.
+- `domains/finops/repository.py` ainda duplica o parsing de audit log
+  em si (terceira vez, depois de lineage e access) — o que muda é o
+  campo novo extraído (`jobStatistics.totalBilledBytes`) e que não
+  precisa de `destination_table`/`principal_email`, só leitura.
+
+### Status até o momento
+- Backend: 406 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos
+- Ainda não validado em dev — branch não deployada nesta sessão até este
+  registro
+- Faltam as outras 2 frentes de FinOps (budget/custo, otimizações
+  sugeridas) e a lacuna da v1 do PII (adiada, não esquecida)
+
+---
+
 ## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (concluída)
 
 Branch `feat/sprint-3.2`, a partir de `main` pós-PR #17. Sete itens
@@ -506,4 +585,4 @@ implementação**
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
 | Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
 | Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
-| Fase 4 | FinOps completo | ⏳ Pendente |
+| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício concluído, faltam budget e otimizações) |

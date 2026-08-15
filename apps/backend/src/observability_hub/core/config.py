@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # Preço on-demand do BigQuery por TiB processado (cloud.google.com/bigquery/pricing).
     # Usado só pra estimativa de custo em domains/quality — não afeta billing real.
     bigquery_price_usd_per_tib: float = 6.25
+    # Preço de storage do BigQuery por GB/mês (cloud.google.com/bigquery/pricing,
+    # região US). "Active" = tabela modificada nos últimos 90 dias; "long_term"
+    # = sem modificação há 90+ dias, o BQ já rebaixa a tarifa sozinho — usado
+    # em domains/finops pra estimar custo de storage de tabelas sem uso.
+    bigquery_storage_price_usd_per_gb_month_active: float = 0.02
+    bigquery_storage_price_usd_per_gb_month_long_term: float = 0.01
     # Origens liberadas pro CORS do frontend, separadas por vírgula (o
     # frontend roda em outra origem tanto em dev — Vite dev server — quanto
     # em prod — outro serviço Cloud Run).

@@ -7,6 +7,7 @@ from observability_hub.api.v1 import (
     auth,
     catalog,
     favorites,
+    finops,
     freshness,
     history,
     lineage,
@@ -57,6 +58,7 @@ app.include_router(quality.router)
 app.include_router(lineage.router)
 app.include_router(pii.router)
 app.include_router(access.router)
+app.include_router(finops.router)
 
 
 @app.get("/health")
