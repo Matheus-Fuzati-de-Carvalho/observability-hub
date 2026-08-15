@@ -1,8 +1,11 @@
+import { Search } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
+import { SortableTableHead } from '@/components/SortableTableHead'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -21,15 +24,28 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePartitionCandidates, useUnusedTables } from '@/features/finops/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
+import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
-import type { MinDaysUnused } from '@/types/finops'
+import type { MinDaysUnused, PartitionCandidate, UnusedTable } from '@/types/finops'
 
 const UNUSED_TAB = 'unused'
 const PARTITION_TAB = 'partition'
 const MIN_DAYS_OPTIONS: MinDaysUnused[] = [30, 60, 90]
+const ESTIMATE_FILTER_ALL = 'all'
+const ESTIMATE_FILTER_WITH = 'with'
+const ESTIMATE_FILTER_WITHOUT = 'without'
+type EstimateFilter =
+  | typeof ESTIMATE_FILTER_ALL
+  | typeof ESTIMATE_FILTER_WITH
+  | typeof ESTIMATE_FILTER_WITHOUT
 
 function formatUsd(value: number): string {
   return `US$ ${value.toFixed(value < 0.01 ? 6 : 2)}`
+}
+
+function matchesSearch(datasetId: string, tableId: string, term: string): boolean {
+  const needle = term.toLowerCase()
+  return tableId.toLowerCase().includes(needle) || datasetId.toLowerCase().includes(needle)
 }
 
 export function FinOpsPage() {
@@ -62,9 +78,41 @@ export function FinOpsPage() {
   )
 }
 
+type UnusedSortKey =
+  | 'table_id'
+  | 'size_bytes'
+  | 'last_accessed_at'
+  | 'estimated_monthly_storage_cost_usd'
+
+function compareUnused(a: UnusedTable, b: UnusedTable, key: UnusedSortKey): number {
+  if (key === 'size_bytes') return a.size_bytes - b.size_bytes
+  if (key === 'estimated_monthly_storage_cost_usd') {
+    return a.estimated_monthly_storage_cost_usd - b.estimated_monthly_storage_cost_usd
+  }
+  if (key === 'last_accessed_at') {
+    return (a.last_accessed_at ?? '').localeCompare(b.last_accessed_at ?? '')
+  }
+  return a.table_id.localeCompare(b.table_id)
+}
+
 function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
   const [minDaysUnused, setMinDaysUnused] = useState<MinDaysUnused>(30)
   const query = useUnusedTables(projectId, minDaysUnused)
+  const data = query.data
+
+  const {
+    search,
+    setSearch,
+    sortKey,
+    sortDir,
+    toggleSort,
+    visibleRows: visibleTables,
+  } = useTableFilterSort<UnusedTable, UnusedSortKey>({
+    rows: data?.tables ?? [],
+    initialSortKey: 'size_bytes',
+    compare: compareUnused,
+    matches: (table, term) => matchesSearch(table.dataset_id, table.table_id, term),
+  })
 
   if (query.isLoading) {
     return <p className="mt-4 text-sm text-muted-foreground">Carregando…</p>
@@ -78,12 +126,23 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
     )
   }
 
-  const data = query.data
   if (!data) return null
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search
+            size={14}
+            className="-translate-y-1/2 absolute top-1/2 left-2.5 text-muted-foreground"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filtrar por nome da tabela…"
+            className="pl-8"
+          />
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Sem uso há pelo menos</span>
           <Select
@@ -101,11 +160,13 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
               ))}
             </SelectContent>
           </Select>
-          <span className="text-sm text-muted-foreground">
-            — {data.tables.length} tabela{data.tables.length === 1 ? '' : 's'}
-          </span>
         </div>
-        <RefreshButton isRefreshing={query.isFetching} onRefresh={() => query.refetch()} />
+        <span className="text-sm text-muted-foreground">
+          {visibleTables.length} de {data.tables.length} tabela{data.tables.length === 1 ? '' : 's'}
+        </span>
+        <div className="ml-auto">
+          <RefreshButton isRefreshing={query.isFetching} onRefresh={() => query.refetch()} />
+        </div>
       </div>
 
       {data.warning && (
@@ -117,14 +178,36 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Tabela</TableHead>
-            <TableHead className="text-right">Tamanho</TableHead>
-            <TableHead>Último acesso</TableHead>
-            <TableHead className="text-right">Custo de storage estimado/mês</TableHead>
+            <SortableTableHead
+              label="Tabela"
+              active={sortKey === 'table_id'}
+              direction={sortDir}
+              onClick={() => toggleSort('table_id')}
+            />
+            <SortableTableHead
+              label="Tamanho"
+              active={sortKey === 'size_bytes'}
+              direction={sortDir}
+              onClick={() => toggleSort('size_bytes')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Último acesso"
+              active={sortKey === 'last_accessed_at'}
+              direction={sortDir}
+              onClick={() => toggleSort('last_accessed_at')}
+            />
+            <SortableTableHead
+              label="Custo de storage estimado/mês"
+              active={sortKey === 'estimated_monthly_storage_cost_usd'}
+              direction={sortDir}
+              onClick={() => toggleSort('estimated_monthly_storage_cost_usd')}
+              align="right"
+            />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.tables.map((table) => (
+          {visibleTables.map((table) => (
             <TableRow key={`${data.project_id}.${table.dataset_id}.${table.table_id}`}>
               <TableCell>
                 <Link to={`/datasets/${table.dataset_id}`} className="hover:text-primary">
@@ -143,10 +226,12 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
               </TableCell>
             </TableRow>
           ))}
-          {data.tables.length === 0 && (
+          {visibleTables.length === 0 && (
             <TableRow>
               <TableCell colSpan={4} className="text-center text-muted-foreground">
-                Nenhuma tabela sem uso encontrada.
+                {data.tables.length === 0
+                  ? 'Nenhuma tabela sem uso encontrada.'
+                  : 'Nenhuma tabela encontrada com esse filtro.'}
               </TableCell>
             </TableRow>
           )}
@@ -156,8 +241,52 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
   )
 }
 
+type PartitionSortKey =
+  | 'table_id'
+  | 'size_bytes'
+  | 'observed_cost_usd_30d'
+  | 'estimated_savings_usd_conservative'
+
+function comparePartition(
+  a: PartitionCandidate,
+  b: PartitionCandidate,
+  key: PartitionSortKey,
+): number {
+  if (key === 'size_bytes') return a.size_bytes - b.size_bytes
+  if (key === 'observed_cost_usd_30d') return a.observed_cost_usd_30d - b.observed_cost_usd_30d
+  if (key === 'estimated_savings_usd_conservative') {
+    return (
+      (a.estimated_savings_usd_conservative ?? -1) - (b.estimated_savings_usd_conservative ?? -1)
+    )
+  }
+  return a.table_id.localeCompare(b.table_id)
+}
+
 function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }) {
   const query = usePartitionCandidates(projectId)
+  const data = query.data
+  const [estimateFilter, setEstimateFilter] = useState<EstimateFilter>(ESTIMATE_FILTER_ALL)
+
+  const {
+    search,
+    setSearch,
+    sortKey,
+    sortDir,
+    toggleSort,
+    visibleRows: visibleCandidates,
+  } = useTableFilterSort<PartitionCandidate, PartitionSortKey>({
+    rows: data?.candidates ?? [],
+    initialSortKey: 'observed_cost_usd_30d',
+    compare: comparePartition,
+    matches: (candidate, term) => {
+      const hasEstimate = candidate.estimated_savings_usd_conservative !== null
+      const matchesEstimate =
+        estimateFilter === ESTIMATE_FILTER_ALL ||
+        (estimateFilter === ESTIMATE_FILTER_WITH && hasEstimate) ||
+        (estimateFilter === ESTIMATE_FILTER_WITHOUT && !hasEstimate)
+      return matchesSearch(candidate.dataset_id, candidate.table_id, term) && matchesEstimate
+    },
+  })
 
   if (query.isLoading) {
     return <p className="mt-4 text-sm text-muted-foreground">Carregando…</p>
@@ -171,17 +300,54 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
     )
   }
 
-  const data = query.data
   if (!data) return null
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {data.candidates.length} candidata{data.candidates.length === 1 ? '' : 's'} — custo
-          observado nos últimos {data.lookback_days} dias
-        </p>
-        <RefreshButton isRefreshing={query.isFetching} onRefresh={() => query.refetch()} />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search
+            size={14}
+            className="-translate-y-1/2 absolute top-1/2 left-2.5 text-muted-foreground"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filtrar por nome da tabela…"
+            className="pl-8"
+          />
+        </div>
+        <Select
+          value={estimateFilter}
+          onValueChange={(value) =>
+            setEstimateFilter((value as EstimateFilter) ?? ESTIMATE_FILTER_ALL)
+          }
+        >
+          <SelectTrigger className="w-52">
+            <SelectValue>
+              {(value: EstimateFilter) =>
+                value === ESTIMATE_FILTER_WITH
+                  ? 'Com estimativa de economia'
+                  : value === ESTIMATE_FILTER_WITHOUT
+                    ? 'Sem estimativa de economia'
+                    : 'Todas'
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ESTIMATE_FILTER_ALL}>Todas</SelectItem>
+            <SelectItem value={ESTIMATE_FILTER_WITH}>Com estimativa de economia</SelectItem>
+            <SelectItem value={ESTIMATE_FILTER_WITHOUT}>Sem estimativa de economia</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-sm text-muted-foreground">
+          {visibleCandidates.length} de {data.candidates.length} candidata
+          {data.candidates.length === 1 ? '' : 's'} — custo observado nos últimos{' '}
+          {data.lookback_days} dias
+        </span>
+        <div className="ml-auto">
+          <RefreshButton isRefreshing={query.isFetching} onRefresh={() => query.refetch()} />
+        </div>
       </div>
 
       {data.warning && (
@@ -193,15 +359,38 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Tabela</TableHead>
-            <TableHead className="text-right">Tamanho</TableHead>
+            <SortableTableHead
+              label="Tabela"
+              active={sortKey === 'table_id'}
+              direction={sortDir}
+              onClick={() => toggleSort('table_id')}
+            />
+            <SortableTableHead
+              label="Tamanho"
+              active={sortKey === 'size_bytes'}
+              direction={sortDir}
+              onClick={() => toggleSort('size_bytes')}
+              align="right"
+            />
             <TableHead>Coluna candidata</TableHead>
-            <TableHead className="text-right">Custo observado (30d)</TableHead>
-            <TableHead className="text-right">Economia estimada</TableHead>
+            <SortableTableHead
+              label="Custo observado (30d)"
+              active={sortKey === 'observed_cost_usd_30d'}
+              direction={sortDir}
+              onClick={() => toggleSort('observed_cost_usd_30d')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Economia estimada"
+              active={sortKey === 'estimated_savings_usd_conservative'}
+              direction={sortDir}
+              onClick={() => toggleSort('estimated_savings_usd_conservative')}
+              align="right"
+            />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.candidates.map((candidate) => (
+          {visibleCandidates.map((candidate) => (
             <TableRow key={`${data.project_id}.${candidate.dataset_id}.${candidate.table_id}`}>
               <TableCell>
                 <Link to={`/datasets/${candidate.dataset_id}`} className="hover:text-primary">
@@ -243,10 +432,12 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
               </TableCell>
             </TableRow>
           ))}
-          {data.candidates.length === 0 && (
+          {visibleCandidates.length === 0 && (
             <TableRow>
               <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Nenhuma candidata a particionamento encontrada.
+                {data.candidates.length === 0
+                  ? 'Nenhuma candidata a particionamento encontrada.'
+                  : 'Nenhuma candidata encontrada com esse filtro.'}
               </TableCell>
             </TableRow>
           )}
