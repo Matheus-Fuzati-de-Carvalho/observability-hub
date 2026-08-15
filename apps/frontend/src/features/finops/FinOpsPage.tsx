@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
@@ -31,6 +31,7 @@ import type { MinDaysUnused, PartitionCandidate, UnusedTable } from '@/types/fin
 const UNUSED_TAB = 'unused'
 const PARTITION_TAB = 'partition'
 const MIN_DAYS_OPTIONS: MinDaysUnused[] = [30, 60, 90]
+const DATASET_FILTER_ALL = 'all'
 const ESTIMATE_FILTER_ALL = 'all'
 const ESTIMATE_FILTER_WITH = 'with'
 const ESTIMATE_FILTER_WITHOUT = 'without'
@@ -100,6 +101,12 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
   const query = useUnusedTables(projectId, minDaysUnused)
   const data = query.data
 
+  const datasets = useMemo(
+    () => [...new Set(data?.tables.map((t) => t.dataset_id) ?? [])].sort(),
+    [data],
+  )
+  const [datasetFilter, setDatasetFilter] = useState(DATASET_FILTER_ALL)
+
   const {
     search,
     setSearch,
@@ -111,7 +118,9 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
     rows: data?.tables ?? [],
     initialSortKey: 'size_bytes',
     compare: compareUnused,
-    matches: (table, term) => matchesSearch(table.dataset_id, table.table_id, term),
+    matches: (table, term) =>
+      matchesSearch(table.dataset_id, table.table_id, term) &&
+      (datasetFilter === DATASET_FILTER_ALL || table.dataset_id === datasetFilter),
   })
 
   if (query.isLoading) {
@@ -161,6 +170,24 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
             </SelectContent>
           </Select>
         </div>
+        <Select
+          value={datasetFilter}
+          onValueChange={(value) => setDatasetFilter(value ?? DATASET_FILTER_ALL)}
+        >
+          <SelectTrigger className="w-52">
+            <SelectValue>
+              {(value: string) => (value === DATASET_FILTER_ALL ? 'Todos os datasets' : value)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DATASET_FILTER_ALL}>Todos os datasets</SelectItem>
+            {datasets.map((dataset) => (
+              <SelectItem key={dataset} value={dataset}>
+                {dataset}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-sm text-muted-foreground">
           {visibleTables.length} de {data.tables.length} tabela{data.tables.length === 1 ? '' : 's'}
         </span>
@@ -219,7 +246,9 @@ function UnusedTablesTab({ projectId }: { projectId: string | undefined }) {
                 {formatBytes(table.size_bytes)}
               </TableCell>
               <TableCell className="text-muted-foreground">
-                {table.last_accessed_at ? formatDate(table.last_accessed_at) : 'Nunca (na janela)'}
+                {table.last_accessed_at
+                  ? formatDate(table.last_accessed_at)
+                  : `Nunca nos últimos ${data.lookback_days} dias`}
               </TableCell>
               <TableCell className="text-right font-medium">
                 {formatUsd(table.estimated_monthly_storage_cost_usd)}
@@ -267,6 +296,12 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
   const data = query.data
   const [estimateFilter, setEstimateFilter] = useState<EstimateFilter>(ESTIMATE_FILTER_ALL)
 
+  const datasets = useMemo(
+    () => [...new Set(data?.candidates.map((c) => c.dataset_id) ?? [])].sort(),
+    [data],
+  )
+  const [datasetFilter, setDatasetFilter] = useState(DATASET_FILTER_ALL)
+
   const {
     search,
     setSearch,
@@ -284,7 +319,13 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
         estimateFilter === ESTIMATE_FILTER_ALL ||
         (estimateFilter === ESTIMATE_FILTER_WITH && hasEstimate) ||
         (estimateFilter === ESTIMATE_FILTER_WITHOUT && !hasEstimate)
-      return matchesSearch(candidate.dataset_id, candidate.table_id, term) && matchesEstimate
+      const matchesDataset =
+        datasetFilter === DATASET_FILTER_ALL || candidate.dataset_id === datasetFilter
+      return (
+        matchesSearch(candidate.dataset_id, candidate.table_id, term) &&
+        matchesEstimate &&
+        matchesDataset
+      )
     },
   })
 
@@ -338,6 +379,24 @@ function PartitionCandidatesTab({ projectId }: { projectId: string | undefined }
             <SelectItem value={ESTIMATE_FILTER_ALL}>Todas</SelectItem>
             <SelectItem value={ESTIMATE_FILTER_WITH}>Com estimativa de economia</SelectItem>
             <SelectItem value={ESTIMATE_FILTER_WITHOUT}>Sem estimativa de economia</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={datasetFilter}
+          onValueChange={(value) => setDatasetFilter(value ?? DATASET_FILTER_ALL)}
+        >
+          <SelectTrigger className="w-52">
+            <SelectValue>
+              {(value: string) => (value === DATASET_FILTER_ALL ? 'Todos os datasets' : value)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DATASET_FILTER_ALL}>Todos os datasets</SelectItem>
+            {datasets.map((dataset) => (
+              <SelectItem key={dataset} value={dataset}>
+                {dataset}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <span className="text-sm text-muted-foreground">
