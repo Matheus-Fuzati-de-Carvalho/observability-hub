@@ -31,7 +31,7 @@ export function OrphansPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Tabelas órfãs</h1>
+          <h1 className="text-2xl font-bold">Tabelas sem consumidor</h1>
           <p className="text-sm text-muted-foreground">
             {data.orphans.length} tabelas sem consumidor conhecido nos últimos {data.lookback_days}{' '}
             dias
