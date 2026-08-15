@@ -158,6 +158,36 @@ Diretrizes para os workflows quando forem criados:
 - Nunca colocar lógica de negócio em `api/` (backend) ou chamadas HTTP direto em componentes de página (frontend).
 - Fase 0 (estrutura e documentação) e Fase 1 (bootstrap do Terraform, módulo `infra/terraform/modules/cloud-run/`, root modules de `environments/{dev,prod}`, workflows em `.github/workflows/` e backend skeleton com `GET /health` em `apps/backend/`) concluídas — dev e prod com Cloud Run, Artifact Registry e CI/CD funcionando de ponta a ponta. Ainda não existem: os demais módulos de `infra/terraform/modules/` (artifact-registry standalone já é interno ao módulo cloud-run; faltam bigquery, secret-manager, logging-sink), lógica de domínio em `apps/backend/src/observability_hub/domains/`, e nenhum código em `apps/frontend/`.
 
+## Registro de acessos e configurações
+
+O produto existe pra ser apontado a projetos GCP de clientes (ver
+[ADR-006](docs/adr/ADR-006-cross-project.md), modelo de acesso
+cross-project). `docs/onboarding-cliente.md` é o checklist vivo de tudo
+que um projeto alvo precisa ter (APIs habilitadas, roles IAM concedidas à
+service account de runtime do Hub, audit logs configurados) para aceitar
+leitura do Hub — vira a base do documento de implementação entregue a um
+cliente real no futuro.
+
+**Toda vez que uma sessão liberar, alterar ou descobrir algum dos itens
+abaixo — em qualquer projeto GCP, incluindo os próprios
+`observability-hub-dev`/`observability-hub-prod` servindo de projeto-alvo
+um do outro —, isso entra na tabela "Registro de acessos concedidos" de
+`docs/onboarding-cliente.md` antes de considerar a tarefa concluída:**
+- `gcloud services enable` de qualquer API num projeto alvo
+- `gcloud projects add-iam-policy-binding` (ou remoção) de qualquer role
+  pra uma service account do Hub
+- Mudança em `auditConfigs` (Data Access audit logs) de um projeto
+- Qualquer nova role passando a ser lida pelo código (ex: um domínio novo
+  que passa a exigir uma permissão que nenhum outro pedia)
+
+Isso vale tanto para mudanças aplicadas via Terraform quanto para comandos
+`gcloud` rodados manualmente pelo usuário (via `!`) — não assumir que o
+comando fornecido foi executado; confirmar com `gcloud ... get-iam-policy`
+(ou equivalente) antes de marcar a linha como concedida. Se o checklist de
+roles necessárias mudar (ex: um domínio novo passa a precisar de uma role
+que a lista atual não cobre), atualizar também a tabela de roles do
+próprio `docs/onboarding-cliente.md`, não só o log de concessões.
+
 ## Contextos de trabalho
 
 Dependendo do escopo da tarefa, assuma o contexto correspondente abaixo.
@@ -182,6 +212,9 @@ Checklist de entrega:
 - [ ] terraform plan revisado e aprovado
 - [ ] Nenhum secret ou credencial em .tf ou .tfvars commitados
 - [ ] README.md do módulo atualizado se necessário
+- [ ] Se o recurso concede acesso a um projeto alvo (IAM binding
+      cross-project, API habilitada, audit config) — registrado em
+      `docs/onboarding-cliente.md`, ver "Registro de acessos e configurações"
 
 ---
 

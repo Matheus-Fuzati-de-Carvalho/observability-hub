@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { RefreshButton } from '@/components/RefreshButton'
 import { AssetsTable } from '@/features/catalog/AssetsTable'
@@ -6,11 +5,8 @@ import { useDatasets, useTables } from '@/features/catalog/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
 import { useProjectFreshness } from '@/features/freshness/hooks'
 import { SLA_LABELS } from '@/features/freshness/sla'
-import { useRecordTableView } from '@/features/history/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
 import { formatNumber } from '@/lib/format'
-
-const MAX_AUTO_RECORDED_TABLE_VIEWS = 5
 
 export function CatalogDatasetPage() {
   const { projectId } = useProjectContext()
@@ -21,24 +17,6 @@ export function CatalogDatasetPage() {
   const tablesQuery = useTables(projectId, datasetId)
   const datasetsQuery = useDatasets(projectId)
   const freshnessQuery = useProjectFreshness(projectId)
-  const recordTableView = useRecordTableView()
-
-  // Registra as 5 primeiras tabelas visíveis como "visualizadas" — uma vez
-  // por abertura do dataset (guardado por ref), não a cada refetch/refresh
-  // manual (RefreshButton não deve gerar spam de eventos de histórico).
-  // recordTableView.mutate não entra nas deps porque é uma nova referência
-  // a cada render — incluí-la reexecutaria o efeito em loop.
-  const recordedKeyRef = useRef<string | null>(null)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: ver comentário acima
-  useEffect(() => {
-    if (!tablesQuery.data || !projectId || !datasetId) return
-    const key = `${projectId}:${datasetId}`
-    if (recordedKeyRef.current === key) return
-    recordedKeyRef.current = key
-    for (const table of tablesQuery.data.tables.slice(0, MAX_AUTO_RECORDED_TABLE_VIEWS)) {
-      recordTableView.mutate({ projectId, datasetId, tableId: table.table_id })
-    }
-  }, [tablesQuery.data, projectId, datasetId])
 
   if (tablesQuery.isLoading) {
     return <p className="text-muted-foreground">Carregando…</p>

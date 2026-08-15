@@ -3,13 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from observability_hub.api.v1 import (
+    access,
     auth,
     catalog,
     favorites,
     freshness,
     history,
+    lineage,
+    pii,
     profiling,
     projects,
+    quality,
 )
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
@@ -18,9 +22,11 @@ from observability_hub.core.exceptions import (
     InvalidDateColumnError,
     InvalidSamplePercentError,
     InvalidSessionError,
+    LoggingAccessDeniedError,
     OAuthEmailNotAllowedError,
     OAuthExchangeError,
     OAuthStateMismatchError,
+    PiiScanTimeoutError,
     ProfilingTimeoutError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
@@ -47,6 +53,10 @@ app.include_router(freshness.router)
 app.include_router(profiling.router)
 app.include_router(favorites.router)
 app.include_router(history.router)
+app.include_router(quality.router)
+app.include_router(lineage.router)
+app.include_router(pii.router)
+app.include_router(access.router)
 
 
 @app.get("/health")
@@ -74,6 +84,32 @@ def handle_project_access_denied(request: Request, exc: ProjectAccessDeniedError
         content={
             "error": "access_denied",
             "message": "A service account do Hub não tem acesso a este projeto.",
+            "fix": [
+                f"gcloud projects add-iam-policy-binding {exc.project_id} "
+                f"--member='serviceAccount:{sa_email}' "
+                f"--role='roles/{role}'"
+                for role in roles
+            ],
+        },
+    )
+
+
+@app.exception_handler(LoggingAccessDeniedError)
+def handle_logging_access_denied(request: Request, exc: LoggingAccessDeniedError) -> JSONResponse:
+    runtime_project = get_client().project
+    sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    # logging.viewer sozinho basta pra não estourar Forbidden, mas Data
+    # Access audit logs (onde vive o jobCompletedEvent que lineage lê) só
+    # ficam visíveis via API com logging.privateLogViewer também — sem essa
+    # segunda role a chamada não falha, só retorna sempre vazio (ver aviso
+    # estático em domains/lineage/service.py). Sugerimos as duas de uma vez,
+    # mesmo padrão de ProjectAccessDeniedError.
+    roles = ["logging.viewer", "logging.privateLogViewer"]
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "logging_access_denied",
+            "message": "A service account do Hub não tem acesso aos audit logs deste projeto.",
             "fix": [
                 f"gcloud projects add-iam-policy-binding {exc.project_id} "
                 f"--member='serviceAccount:{sa_email}' "
@@ -144,6 +180,14 @@ def handle_profiling_timeout(request: Request, exc: ProfilingTimeoutError) -> JS
     return JSONResponse(
         status_code=504,
         content={"error": "profiling_timeout", "message": str(exc)},
+    )
+
+
+@app.exception_handler(PiiScanTimeoutError)
+def handle_pii_scan_timeout(request: Request, exc: PiiScanTimeoutError) -> JSONResponse:
+    return JSONResponse(
+        status_code=504,
+        content={"error": "pii_scan_timeout", "message": str(exc)},
     )
 
 

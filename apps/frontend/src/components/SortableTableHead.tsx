@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { TableHead } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
-interface SearchSortableHeadProps {
+interface SortableTableHeadProps {
   label: string
   active: boolean
   direction: 'asc' | 'desc'
@@ -10,13 +10,13 @@ interface SearchSortableHeadProps {
   align?: 'left' | 'right'
 }
 
-export function SearchSortableHead({
+export function SortableTableHead({
   label,
   active,
   direction,
   onClick,
   align = 'left',
-}: SearchSortableHeadProps) {
+}: SortableTableHeadProps) {
   return (
     <TableHead className={align === 'right' ? 'text-right' : undefined}>
       <button

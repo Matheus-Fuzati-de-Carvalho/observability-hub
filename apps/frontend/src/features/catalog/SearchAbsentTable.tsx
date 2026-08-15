@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { SortableTableHead } from '@/components/SortableTableHead'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -8,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { SearchSortableHead } from '@/features/catalog/SearchSortableHead'
 import type { DatasetWithoutMatch } from '@/types/catalog'
 
 type SortKey = 'dataset_id' | 'reason' | 'latest_partition'
@@ -59,19 +59,19 @@ export function SearchAbsentTable({ datasets }: SearchAbsentTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <SearchSortableHead
+          <SortableTableHead
             label="Dataset"
             active={sortKey === 'dataset_id'}
             direction={sortDir}
             onClick={() => toggleSort('dataset_id')}
           />
-          <SearchSortableHead
+          <SortableTableHead
             label="Motivo"
             active={sortKey === 'reason'}
             direction={sortDir}
             onClick={() => toggleSort('reason')}
           />
-          <SearchSortableHead
+          <SortableTableHead
             label="Última partição encontrada"
             active={sortKey === 'latest_partition'}
             direction={sortDir}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { SortableTableHead } from '@/components/SortableTableHead'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -8,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { SearchSortableHead } from '@/features/catalog/SearchSortableHead'
 import { formatDate, formatNumber } from '@/lib/format'
 import type { DatasetWithMatch } from '@/types/catalog'
 
@@ -56,25 +56,25 @@ export function SearchMatchesTable({ matches }: SearchMatchesTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <SearchSortableHead
+          <SortableTableHead
             label="Dataset"
             active={sortKey === 'dataset_id'}
             direction={sortDir}
             onClick={() => toggleSort('dataset_id')}
           />
-          <SearchSortableHead
+          <SortableTableHead
             label="Tabela"
             active={sortKey === 'table_id'}
             direction={sortDir}
             onClick={() => toggleSort('table_id')}
           />
-          <SearchSortableHead
+          <SortableTableHead
             label="Atualizado em"
             active={sortKey === 'last_modified_time'}
             direction={sortDir}
             onClick={() => toggleSort('last_modified_time')}
           />
-          <SearchSortableHead
+          <SortableTableHead
             label="Linhas"
             active={sortKey === 'row_count'}
             direction={sortDir}

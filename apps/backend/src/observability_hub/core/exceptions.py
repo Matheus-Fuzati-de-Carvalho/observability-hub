@@ -12,6 +12,16 @@ class ProjectAccessDeniedError(Exception):
         super().__init__(f"Acesso negado ao projeto '{project_id}'.")
 
 
+class LoggingAccessDeniedError(Exception):
+    """A SA de runtime não tem roles/logging.viewer no projeto alvo —
+    levantada por domains/lineage (e futuramente domains/access) ao
+    consultar audit logs via Cloud Logging."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Acesso negado aos audit logs do projeto '{project_id}'.")
+
+
 class ProjectNotFoundError(Exception):
     def __init__(self, project_id: str) -> None:
         self.project_id = project_id
@@ -64,6 +74,17 @@ class ProfilingTimeoutError(Exception):
         self.table_id = table_id
         super().__init__(
             f"Profiling de '{project_id}.{dataset_id}.{table_id}' excedeu 60s. "
+            "Reduza sample_percent e tente novamente."
+        )
+
+
+class PiiScanTimeoutError(Exception):
+    def __init__(self, project_id: str, dataset_id: str, table_id: str) -> None:
+        self.project_id = project_id
+        self.dataset_id = dataset_id
+        self.table_id = table_id
+        super().__init__(
+            f"Scan de PII de '{project_id}.{dataset_id}.{table_id}' excedeu 60s. "
             "Reduza sample_percent e tente novamente."
         )
 

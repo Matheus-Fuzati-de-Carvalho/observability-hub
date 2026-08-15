@@ -7,29 +7,258 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-13 — Sprint 2.2 e 2.3 concluídas, validadas
-em dev, documentação atualizada
-**Fase atual:** Sprint 2.2 (metadados de partição + "Ver partições",
-refresh, busca reversa) e Sprint 2.3 (sidebar sem bolinhas SLA,
-persistência de projeto via localStorage, mode `not_contains` na busca,
-resultado da busca em tabela ordenável/filtrável) — **as sete
-funcionalidades implementadas, testadas em dev e validadas pelo
-usuário**. Tudo na branch `feature/partition-metadata`
-(commits `ea64c8d`..`2630fb9`; ver seções "Sprint 2.2" e "Sprint 2.3"
-abaixo para o detalhe de cada funcionalidade). Documentação atualizada
-nesta sessão (CHANGELOG, PRD, ADR-008, specs de catalog/profiling) — ver
-"Sprint 2.2/2.3 — Documentação" abaixo. Um PR (#14) chegou a ser aberto
-ainda na primeira versão (incorreta) da Funcionalidade 1 e foi fechado
-pelo usuário sem merge — **nenhum PR aberto no momento**, main e prod
-inalterados.
-**Próximo passo:** Usuário ainda não pediu explicitamente a abertura do
-PR de `feature/partition-metadata` para `main` — confirmar antes de abrir
-(CLAUDE.md exige aprovação explícita para qualquer `git push`, e abrir PR
-é uma ação visível equivalente). Depois do PR (e merge), retomar
-**Sprint 3 — Discovery** (Fase 3 do CLAUDE.md): lineage, PII, mapa de
-acesso — nenhuma implementação desses domínios foi começada ainda; nenhum
-`docs/specs/lineage.md`/`pii.md`/`access.md` existe ainda (checklist do
-contexto "Backend" do CLAUDE.md exige spec aprovada antes de implementar).
+**Última atualização:** 2026-08-13 — Sprint 3.2 em andamento (5 de 7 itens
+concluídos e commitados; itens 4 e 5 aguardando validação do usuário em
+dev). Sprint 3.1 (auth Google OAuth, favoritos, histórico, 4 fixes no
+modal de profiling) foi concluída e mergeada em `main` via PR #17 antes
+desta sessão — ver seção própria abaixo, reconstruída a partir do PR
+porque o SESSIONLOG não foi atualizado naquela sessão.
+**Fase atual:** Sprint 3.2 — Qualidade, Discovery e melhorias de UX em
+tabelas (Fase 3 do CLAUDE.md, "Discovery"), branch `feat/sprint-3.2`
+(a partir de `main` `44ad7c9`), commits `5516b36`..`28f1f7f`:
+
+1. ✅ Filtros/ordenação — catálogo (`AssetsTable`) e freshness por tabela
+   (`TableFreshnessTable`), depois estendido pra freshness por dataset
+   (`DatasetFreshnessTable`)
+2. ✅ Score de qualidade por tabela — implementado, validado em dev, e
+   **removido por completo a pedido do usuário** (revert `59d4ae8`)
+   antes de seguir pro item de histórico
+3. ✅ Histórico de qualidade — aba "Histórico" no modal de profiling
+   (`recharts`, alerta de degradação >10pp) — validado em dev
+4. ✅ Lineage e tabelas órfãs — aba "Lineage" no modal + página "Tabelas
+   órfãs" — **implementado e testado (302 testes, build limpo), ainda
+   não validado visualmente em dev pelo usuário**
+5. ⏳ Fingerprinting de PII — não iniciado
+6. ⏳ Mapa de acesso — não iniciado
+
+Ver seção "Sprint 3.2" abaixo para o detalhe de cada item (o número da
+lista acima segue a ordem de execução real desta sessão, não
+necessariamente a numeração original da spec).
+**Próximo passo:** usuário está revalidando lineage/órfãs em dev depois do
+fix de `c33f950` (bug de "Failed to fetch" ao olhar prod a partir de dev —
+ver seção "Bug: lineage cross-project" abaixo) e do IAM cross-project de
+`roles/logging.viewer` concedido nesta sessão. Depois da validação, seguir
+pro item de PII — versão resumida da spec antes de implementar (preferência
+já confirmada pelo usuário nesta sprint), sem spec formal em `docs/specs/`
+ainda (fica pra documentação de encerramento da sprint, junto com lineage e
+mapa de acesso). **Nenhum PR aberto** para `main` — aguardando os 7 itens
+completos e validados, como pedido explicitamente no início da sprint.
+`main`/prod seguem no PR #17 (`44ad7c9`), inalterados por esta sessão.
+`docs/onboarding-cliente.md` (novo) e a seção "Registro de acessos e
+configurações" do CLAUDE.md (nova) não fazem parte da spec da sprint —
+foram um pedido à parte do usuário nesta sessão, já commitados/aplicados.
+
+---
+
+## Sprint 3.2 — Qualidade, Discovery e melhorias de UX (em andamento)
+
+Branch `feat/sprint-3.2`, a partir de `main` (`44ad7c9`, pós-merge do PR
+#17). Regras definidas pelo usuário no início da sprint: pytest depois de
+cada domínio de backend, testar em dev depois de cada item, commitar na
+branch (push só com aprovação explícita a cada vez), sem PR pra `main`
+até os itens completos e validados, plano apresentado antes de qualquer
+arquivo novo.
+
+### Filtros e ordenação (commits `5516b36`, `dae151e`)
+`AssetsTable` (catálogo) e `TableFreshnessTable` (freshness por tabela,
+dentro de um dataset) ganharam busca por nome + filtro por tipo/status
+SLA + colunas ordenáveis client-side (`useMemo`, sem mudança de
+backend). Componente `SearchSortableHead` (já existia só na busca) foi
+promovido pra `components/SortableTableHead.tsx` compartilhado. Descobriu-
+se nessa hora que `DatasetFreshnessTable` (a tabela de *datasets*, na
+raiz de `/freshness` — diferente de `TableFreshnessTable`) já existia sem
+filtro nenhum; ganhou o mesmo tratamento depois, a pedido do usuário.
+
+### Score de qualidade — implementado e depois removido (commits `695f9e1`,
+`3b12689`, revert `59d4ae8`)
+Implementado por completo: `core/sla.py` (SLA extraído de `freshness` pra
+ser compartilhado com `quality`), `domains/quality/score.py` (média
+ponderada — completude 40%, freshness 30%, duplicatas 20%, documentação
+10%, valor neutro 50 nas três primeiras quando não há dado), persistência
+do último profiling em Firestore (`profiling_results/
+{project}_{dataset}_{table}`, coleção compartilhada — decisão consciente
+pra não depender de quem rodou o profiling), endpoint `GET /api/v1/
+quality/score/...`, badge colorido + tooltip com breakdown na
+`AssetsTable`. **Validado em dev pelo usuário** — e então removido por
+completo (revert manual preservando `core/sla.py`, que é refatoração
+independente do score) a pedido explícito do usuário. `profiling_results`
+não é mais escrito por nenhum código a partir deste commit; pode haver
+documentos órfãos remanescentes no Firestore de dev de quando a feature
+esteve ativa (ver "Backlog").
+
+### Histórico de qualidade (commits `89796d2`, `6efeaa2`)
+Cada profiling grava um snapshot em `profiling_history/
+{project}_{dataset}_{table}/runs/{auto-id}` (Firestore, coleção
+compartilhada, máximo 30 runs por tabela — mesmo padrão de trim-to-max de
+`domains/history`, adaptado pra subcoleção em vez de coleção plana).
+Endpoint `GET /api/v1/quality/history/...`. `run_profiling()` recuperou
+os parâmetros `firestore_client`/`executed_by` que tinham sido removidos
+no revert do score (agora servem o histórico). Frontend: aba "Histórico"
+no modal de profiling — gráfico de linha (`recharts`, dependência nova)
+com densidade ao longo do tempo, tabela de runs com linha expansível
+mostrando completude por coluna, alerta quando a densidade cai mais de 10
+pontos percentuais em relação ao run anterior. `useRunProfiling` invalida
+a query de histórico ao concluir um run, pra aba atualizar sem fechar o
+modal. **Validado em dev pelo usuário.**
+
+### Lineage e tabelas órfãs (commits `12d6d9b`, `28f1f7f`)
+Novo `domains/lineage/`, fonte de dados são audit logs de job completado
+do BigQuery via Cloud Logging (formato `BigQueryAuditMetadata`/
+`jobChange`, documentado em docs.cloud.google.com/bigquery/docs/reference/
+auditlogs/migration — **schema do payload ainda não validado contra logs
+reais** porque os Data Access audit logs continuam desabilitados em dev e
+prod, ver "Backlog"). `referencedTables`/`destinationTable` de cada job na
+janela de 30 dias reconstroem upstream/downstream de uma tabela e a lista
+de órfãs de um projeto (tabela sem nenhum job que a referencie como
+leitura). Limitação registrada explicitamente na API: não dá pra
+distinguir "sem atividade" de "audit logs desabilitados" só pelo
+resultado — quando vem vazio, a resposta inclui um campo `warning` com
+instruções em vez de afirmar uma certeza que a implementação não tem.
+Falta de `roles/logging.viewer` vira `LoggingAccessDeniedError` → 403 com
+o comando `gcloud` pronto (mesmo padrão de `ProjectAccessDeniedError`).
+
+Endpoints: `GET /api/v1/lineage/{project}/{dataset}/{table}` e
+`GET /api/v1/lineage/{project}/orphans`. Frontend: aba "Lineage" no modal
+de profiling, página "Tabelas órfãs" (rota `/orphans`, link na sidebar),
+novo `components/ApiErrorNotice.tsx` compartilhado que mostra os comandos
+de `error.body.fix` quando presentes — corrigiu de quebra o tipo de
+`ApiErrorBody.fix` (já era array em runtime, estava tipado como
+`string`). **Ainda não validado visualmente em dev pelo usuário** — só
+testado via suíte de testes (23 novos) e build limpo. Como os audit logs
+estão desabilitados, o comportamento esperado em dev agora é: aviso
+amarelo em toda consulta, e a página de órfãs listando todas as tabelas
+do projeto (esperado dada a limitação de visibilidade, não é bug).
+
+### Bug: lineage cross-project dava "Failed to fetch" (commit `c33f950`,
+sessão de 2026-08-14 depois de `d9401d2`)
+Usuário validou lineage/órfãs em dev (projeto nativo, ok) mas achou "Failed
+to fetch" ao trocar pra olhar o projeto prod com o Hub rodando em dev.
+Causa raiz, confirmada nos logs reais do Cloud Run de dev
+(`gcloud logging read ... severity>=ERROR`): `domains/lineage/repository.py`
+capturava `google.api_core.exceptions.PermissionDenied` (classe de erro
+gRPC), mas o client do Cloud Logging usa transporte REST
+(`_use_grpc=False`, ver docstring de `core/logging_client.py`) — um 403 via
+REST levanta `Forbidden`, não `PermissionDenied`. A exceção real escapava
+sem tratamento, virava 500 não capturado por nenhum `@app.exception_handler`,
+e por estar fora do `CORSMiddleware` nesse caminho o browser reportava
+"Failed to fetch" em vez do 403 tratado que `LoggingAccessDeniedError` já
+sabia gerar. Resto do backend já usava a classe certa (`core/bigquery.py`,
+`domains/quality/repository.py`); só lineage tinha o import errado.
+Corrigido trocando `PermissionDenied` por `Forbidden` no import e no
+`except`; testes do módulo (que mockavam `PermissionDenied`, mascarando o
+bug) corrigidos pra mockar `Forbidden`. 303 testes passando, ruff limpo.
+
+Enquanto investigava, descobri que `roles/logging.viewer` (self) e os
+Data Access audit logs do BigQuery já estavam habilitados nos dois
+projetos desde antes desta sessão, sem nunca terem sido documentados aqui
+— ver correção dos itens 8/9/10 do Backlog. A pedido do usuário, concedi
+(ele rodou via `!`) `roles/logging.viewer` cross-project nos dois sentidos
+(dev→prod e prod→dev) — mesmo padrão das roles de BigQuery já cross-granted
+desde a Sprint 2. Confirmado ao vivo via `gcloud projects get-iam-policy`
+depois do comando.
+
+### Bug 2: lineage cross-project não estourava mais erro, mas retornava
+sempre vazio (`roles/logging.privateLogViewer` faltando, mesma sessão)
+Usuário revalidou depois do fix acima — "Failed to fetch" resolvido, mas
+a mensagem virou o aviso estático de "nenhum evento encontrado nos audit
+logs" pra `observability-hub-prod`, apesar de `auditConfigs` já estarem
+habilitados (confirmado no Bug 1 acima). Suspeita inicial (dado
+insuficiente/quantidade de eventos) descartada rodando a query real via
+`gcloud logging read` como usuário: **11.298 entradas** de
+`jobservice.jobcompleted` em prod nos últimos 30 dias, muito longe de
+"sem atividade". Reproduzindo `repository.list_job_events` localmente com
+essas credenciais (usuário, não a SA), os 11.298 eventos parseavam sem
+problema — ou seja, o parser está correto, o bug é puramente de IAM.
+
+Causa raiz, confirmada contra a documentação oficial do GCP
+(`docs.cloud.google.com/logging/docs/access-control`): **Data Access
+audit logs exigem `roles/logging.privateLogViewer` pra serem visíveis via
+API, além de `roles/logging.viewer`** — Admin Activity/System Event/Policy
+Denied logs bastam com `logging.viewer`, mas Data Access (categoria onde
+vive o `jobCompletedEvent` que lineage lê) é mais restrita por design
+(pode conter informação sensível sobre o que foi acessado). Sem
+`privateLogViewer`, a chamada **não falha** — só retorna sempre vazio,
+indistinguível de "sem atividade real" ou "audit logs desabilitados" só
+pelo resultado. `roles/logging.privateLogViewer` já existia self (cada SA
+no próprio projeto, daí dev-olhando-dev sempre ter funcionado) mas nunca
+tinha sido cross-granted — só `logging.viewer` foi cross-granted no Bug 1
+acima, o que bastou pra não estourar 403 mas não bastou pra ver os dados.
+
+Corrigido em três frentes:
+1. `domains/lineage/service.py::_EMPTY_RESULT_WARNING` reescrito pra
+   mencionar as duas roles como causa possível, não só "audit logs
+   desabilitados" (que era a única hipótese sugerida antes, incompleta).
+2. `main.py::handle_logging_access_denied` (o 403 de
+   `LoggingAccessDeniedError`, que dispara quando falta `logging.viewer`
+   por completo) passou a sugerir as duas roles de uma vez, mesmo padrão
+   de `ProjectAccessDeniedError`.
+3. `docs/onboarding-cliente.md` corrigido — a primeira versão do
+   documento (escrita mais cedo nesta mesma sessão, antes deste bug
+   aparecer) tinha marcado `logging.privateLogViewer` como "não usada
+   pelo código, não replicar em onboarding"; agora faz parte do
+   checklist oficial, com nota de correção explicando o erro.
+
+Comandos de `roles/logging.privateLogViewer` cross-project (dev→prod e
+prod→dev) fornecidos ao usuário nesta sessão — **pendente confirmação de
+execução e revalidação em dev**, ver `docs/onboarding-cliente.md` pra o
+comando exato e o registro de quando for confirmado.
+
+Nesta mesma sessão, criado `docs/onboarding-cliente.md` (checklist
+completo de IAM/API/audit config pra um projeto cliente aceitar leitura do
+Hub) e nova seção "Registro de acessos e configurações" no CLAUDE.md,
+pedindo que toda concessão de acesso futura (IAM, API, audit config, em
+qualquer projeto incluindo dev/prod um observando o outro) seja registrada
+naquele documento no momento em que acontece — mitigação direta da falha
+de processo que causou os itens 8/9/10 ficarem desatualizados.
+
+### Status no fim desta sessão (commit `28f1f7f`)
+- Backend: 302 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle
+  929.60 kB / gzip 281 kB — cresceu bastante com `recharts`, ver
+  "Backlog")
+- Deploy automático em dev confirmado verde a cada push (`gh run list`)
+  — branch `feat/sprint-3.2` no ar em `observability-hub-dev`
+- `main`/prod inalterados desde o PR #17 (`44ad7c9`)
+
+---
+
+## Sprint 3.1 — Auth (Google OAuth) + UX pessoal (concluída, PR #17)
+
+Sessão anterior a esta, reconstruída a partir da descrição do PR #17
+(`gh pr view 17`) — o SESSIONLOG não foi atualizado entre o encerramento
+da Sprint 2.2/2.3 e o início desta sessão (falha de processo já
+sinalizada ao usuário nesta sessão).
+
+- **Auth**: senha hardcoded (`AuthGate`, dívida técnica registrada no
+  backlog da Sprint 2) removida por completo, substituída por Google
+  OAuth 2.0 de verdade — `domains/auth/` (`/login`, `/callback`, `/me`,
+  `/logout`), JWT de sessão de 12h em cookie `httpOnly; Secure;
+  SameSite=None`, allowlist por domínio/email lida do Secret Manager.
+  Todos os routers de dados (catalog, freshness, profiling, projects)
+  passaram a exigir sessão válida no backend, não só proteção de rota no
+  frontend. Dois fixes pós-validação: cookie de logout não limpava de
+  verdade (`delete_cookie` do Starlette não replicava os atributos do
+  cookie original), redirect pro `/login` não era imediato.
+- **Modal de profiling**: bug de colapso do schema corrigido em dois
+  níveis (colunas STRUCT/ARRAY colapsáveis individualmente + seção
+  inteira), fix de scroll horizontal vazando dos controles pra fora do
+  modal, refatorado pra Tabs (shadcn/ui) — "Schema" e "Análise de
+  qualidade" como abas separadas.
+- **Favoritos**: `domains/favorites/`, Firestore por usuário
+  (`users/{email}/favorites/{doc_id}`, doc_id determinístico), estrela em
+  cada linha de `AssetsTable` com toggle otimista, seção "Favoritos" na
+  sidebar com navegação + highlight.
+- **Histórico** (de navegação — diferente do "histórico de qualidade" da
+  Sprint 3.2): `domains/history/`, duas subcoleções por usuário
+  (`history_table_views`/`history_searches`, decisão pra evitar depender
+  de índice composto não provisionado), seção "Recentes" na sidebar,
+  dropdown de buscas recentes na tela de busca.
+- 269 testes backend, `ruff`/`biome`/`tsc`/`vite build` limpos. Validado
+  em dev pelo usuário (login/logout, allowlist, as 4 melhorias do modal,
+  favoritos e histórico); renderização visual não verificada por este
+  assistente em nenhum momento (mesma limitação de Chromium headless de
+  sempre).
 
 ---
 
@@ -407,28 +636,34 @@ revisitar se o risco incomodar mais adiante.
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ tag 18a9707 (main atual, PR #12+#13 inclusos)
-├── Cloud Run: frontend ✅ tag 18a9707 (main atual)
+├── Cloud Run: backend — c33f950 pusheado (fix Forbidden/PermissionDenied),
+│   deploy automático disparado, ainda não confirmado verde nem revalidado
+│   em dev pelo usuário nesta sessão
+├── Cloud Run: frontend ✅ tag d9401d2 (branch feat/sprint-3.2, à frente de main)
 │   https://frontend-995219021404.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer no
-│   próprio projeto (PR #3) + as mesmas três em observability-hub-prod
-│   (esta sessão, cross-project)
-├── IAM backend-run@...-prod: as mesmas três roles em observability-hub-dev
-│   (esta sessão, cross-project — ver "IAM cross-project" acima)
-├── Pipeline validado ponta a ponta: 190 testes backend, ruff limpo, biome+
-│   tsc+vite build limpos, curl direto no Cloud Run confirmando is_native,
-│   volumetria em tempo real e classificação de SLA
+├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer +
+│   logging.viewer no próprio projeto e em observability-hub-prod
+│   (cross-project completo — logging.viewer cross adicionado nesta sessão)
+├── IAM backend-run@...-prod: as mesmas quatro roles em observability-hub-dev
+│   (cross-project completo, idem)
+├── Data Access audit logs (DATA_READ, DATA_WRITE, ADMIN_READ) habilitados
+│   em dev e prod pra bigquery.googleapis.com — descoberto nesta sessão que
+│   já estava assim antes (nunca documentado, ver Backlog itens 8/9/10)
+├── Checklist completo de IAM/API/audit config pra onboarding de projeto
+│   alvo agora vive em docs/onboarding-cliente.md (criado nesta sessão)
+├── Pipeline validado ponta a ponta: 303 testes backend, ruff limpo, biome+
+│   tsc+vite build limpos, deploy automático verde a cada push nesta sessão
 └── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ tag 5aa7179 (merge commit do PR #13 — main atual)
-├── Cloud Run: frontend ✅ tag 5aa7179
+├── Cloud Run: backend ✅ tag 44ad7c9 (merge commit do PR #17 — main atual)
+├── Cloud Run: frontend ✅ tag 44ad7c9
 │   https://frontend-906161007412.us-central1.run.app
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM: ver bloco de dev acima — simétrico nas duas direções
-├── total_datasets: 3 (confirmado ao vivo nesta sessão — ver "Erros
-│   encontrados", suposição antiga de "0 datasets" está desatualizada)
+├── IAM: ver bloco de dev acima — simétrico nas duas direções, sem lacunas
+│   conhecidas no momento
+├── total_datasets: 3
 └── WIF: attribute_condition restrito a refs/heads/main (só push direto,
     nunca PR) — plan de prod continua revisão manual
 
@@ -438,8 +673,8 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-Dev e prod estão em sincronia — mesmo código (commit 5aa7179 na linha de
-main), ambos os workflows de deploy verdes nos dois ambientes.
+Dev está à frente de prod — feat/sprint-3.2 (c33f950) ainda não tem PR
+aberto pra main. Prod segue em 44ad7c9 (PR #17, Sprint 3.1).
 ```
 
 ---
@@ -463,6 +698,20 @@ main), ambos os workflows de deploy verdes nos dois ambientes.
 
 (PR #1, deploy do frontend no Cloud Run, foi mergeado na sessão anterior e
 já estava documentado no encerramento daquela sessão.)
+
+---
+
+## PRs mergeados depois da Sprint 2
+
+| PR | Branch | Resumo |
+|---|---|---|
+| #16 | `feature/partition-metadata` | Sprint 2.2 + 2.3 completas |
+| #17 | `feat/sprint-3.1` | Auth Google OAuth, favoritos, histórico, fixes no modal de profiling |
+
+Sprint 3.2 (esta sessão, branch `feat/sprint-3.2`, commits `5516b36`..
+`28f1f7f`) ainda **não tem PR aberto** — aguardando os 7 itens completos e
+validados em dev, como pedido explicitamente pelo usuário no início da
+sprint.
 
 ---
 
@@ -503,6 +752,54 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
    `google-github-actions/setup-gcloud@v2`) alvo de Node.js 20, GitHub já
    forçando pra Node 24 com aviso de depreciação — sem ação necessária
    agora, mas vale atualizar as actions antes que vire erro.
+
+8. ~~roles/logging.viewer não concedida em dev nem prod~~ — **obsoleto**:
+   descoberto nesta sessão (2026-08-14, via `gcloud projects
+   get-iam-policy`) que a role já tinha sido concedida self (cada SA no
+   próprio projeto) em algum momento entre sessões, sem atualizar este
+   arquivo. Cross-project (dev↔prod) foi concedida nesta própria sessão,
+   ver "Bug: lineage cross-project" abaixo. Checklist completo (incluindo
+   este item) agora vive em `docs/onboarding-cliente.md`.
+
+9. ~~Data Access audit logs desabilitados em dev e prod~~ — **obsoleto**:
+   mesma descoberta do item 8, `auditConfigs` já tinha `DATA_READ`,
+   `DATA_WRITE` e `ADMIN_READ` habilitados pra `bigquery.googleapis.com`
+   nos dois projetos antes desta sessão, também sem registro. Formalizar
+   via Terraform (`google_project_iam_audit_config`) continua pendente,
+   mas não é mais bloqueante — dado real já flui.
+
+10. ~~Schema dos audit logs nunca validado contra logs reais~~ —
+    **obsoleto**: resolvido nos commits `72ed011`/`f18dfab` (depois do
+    último `SESSIONLOG` escrito, nunca documentado aqui) — o formato real
+    em uso é `AuditData`/`jobCompletedEvent` (legado), não
+    `BigQueryAuditMetadata`/`jobChange` como a doc de migração do BQ
+    sugeria; parser corrigido, payload real capturado e versionado em
+    `tests/unit/lineage/test_repository.py`. Ver docstring de
+    `domains/lineage/repository.py`.
+
+11. **Falha de processo recorrente: mudanças de IAM/audit config feitas
+    entre sessões sem atualizar o SESSIONLOG** — itens 8/9/10 acima
+    ficaram desatualizados por pelo menos uma sessão inteira porque o
+    usuário rodou os comandos de IAM/audit config fora do fluxo
+    documentado por este arquivo. Mitigação adotada nesta sessão: nova
+    seção "Registro de acessos e configurações" no CLAUDE.md + log vivo em
+    `docs/onboarding-cliente.md`, para toda concessão de acesso (IAM, API,
+    audit config) ser registrada no momento em que acontece, e verificada
+    (não assumida) antes de marcar como feita.
+
+11. **Possíveis documentos órfãos na coleção `profiling_results` do
+    Firestore de dev** — a feature de score de qualidade escreveu nessa
+    coleção enquanto esteve ativa nesta sessão (depois revertida, ver
+    Sprint 3.2 acima). Nenhum código lê ou escreve mais nela, mas os
+    documentos de teste podem continuar existindo no Firestore até
+    alguém limpar manualmente — não afeta nada em runtime, só
+    "sujeira" de dado morto.
+
+12. **Bundle do frontend cresceu bastante nesta sessão** — 929.60 kB /
+    gzip 281 kB (era 524.80 kB antes da Sprint 3.2), principalmente por
+    causa do `recharts` (histórico de qualidade). Item 6 do backlog da
+    Sprint 2 (code-splitting) fica mais urgente a cada domínio novo —
+    ainda não implementado.
 ```
 
 ---
@@ -510,21 +807,21 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 ## Próxima sprint
 
 ```
-Antes de tudo: abrir o PR de feature/partition-metadata para main
-  (Sprint 2.2 + 2.3 completas, validadas em dev — usuário ainda não pediu
-  a abertura, confirmar antes)
+Continuar Sprint 3.2 na branch feat/sprint-3.2 (commits 5516b36..28f1f7f):
 
-Sprint 3 — Discovery (Fase 3 do CLAUDE.md): lineage, PII, mapa de acesso
-  [não iniciada — nenhum código, spec ou branch criada ainda]
+1. Usuário valida lineage/órfãs em dev (último item entregue)
+2. Fingerprinting de PII — versão resumida da spec antes de implementar
+   (preferência já confirmada), depois domains/pii/, endpoint de scan,
+   badge na tabela de ativos, botão "Escanear PII" no modal de profiling
+3. Mapa de acesso — mesma janela de audit logs de lineage (Cloud Logging,
+   Data Access), mesmos pré-requisitos de IAM (item 8/9 do Backlog)
+4. Depois dos 7 itens completos e validados: docs/specs/lineage.md,
+   pii.md, access.md formais (deferidos pra este momento, por decisão do
+   usuário) + CHANGELOG/SESSIONLOG de encerramento + só então pedir
+   aprovação pra abrir o PR de feat/sprint-3.2 para main
 
-Fase 4 — FinOps [pendente, depois da Sprint 3]
+Fase 4 — FinOps [pendente, depois da Sprint 3.2]
 ```
-
-Antes de começar a Sprint 3: seguir o checklist do contexto "Backend" do
-CLAUDE.md — ler/criar a spec em `docs/specs/lineage.md` (ou
-`pii.md`/`access.md`, conforme o que for priorizado primeiro) antes de
-implementar qualquer domínio novo. Nenhuma dessas specs existe ainda em
-`docs/specs/`.
 
 ---
 
@@ -532,11 +829,18 @@ implementar qualquer domínio novo. Nenhuma dessas specs existe ainda em
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. Branch local está em `feature/partition-metadata`, à frente de `main`
-   em 9 commits (`ea64c8d`..`2630fb9` + o commit de documentação desta
-   seção) — Sprint 2.2 e 2.3 completas e validadas em dev, mas **sem PR
-   aberto**. Confirmar com o usuário se já pode abrir o PR para `main`
-   antes de qualquer outra ação.
-4. Só depois do PR (e merge): confirmar com o usuário qual dos três
-   domínios da Sprint 3 (lineage, PII, mapa de acesso) entra primeiro,
-   antes de escrever qualquer spec ou código
+3. Branch local está em `feat/sprint-3.2`, à frente de `main` em 11
+   commits (`5516b36`..`c33f950`) — itens 1, 2 (score, implementado e
+   revertido), 3 (histórico), 4 (lineage/órfãs) e o ajuste de UX do
+   catálogo (`d9401d2`) completos; fix de bug cross-project em lineage
+   (`c33f950`) pusheado, aguardando revalidação do usuário em dev. **Sem PR
+   aberto.**
+4. Confirmar com o usuário se a revalidação do fix de lineage cross-project
+   já aconteceu antes de seguir pro próximo item (PII, item 6 da spec
+   original) — apresentar plano resumido antes de escrever qualquer arquivo
+   novo, como no restante desta sprint.
+5. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
+   alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que
+   conceder/alterar IAM, API ou audit config num projeto deve registrar lá
+   antes de considerar a tarefa concluída (ver CLAUDE.md, "Registro de
+   acessos e configurações").

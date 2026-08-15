@@ -5,6 +5,228 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Sprint 3.2 — Qualidade, Discovery e melhorias de UX em tabelas (concluída)
+
+Branch `feat/sprint-3.2`, a partir de `main` pós-PR #17. Sete itens
+planejados; sete implementados e testados nesta sessão (o item de score
+de qualidade foi implementado, validado e depois removido por completo a
+pedido do usuário — por isso a numeração abaixo chega a 6 novas
+features, não 7).
+
+### O que foi feito
+1. **Filtros e ordenação client-side**: busca por nome + filtro por tipo/
+   status SLA + colunas ordenáveis, sem mudança de backend, em
+   `AssetsTable` (catálogo), `TableFreshnessTable` (tabelas de um
+   dataset) e `DatasetFreshnessTable` (datasets de um projeto, adicionado
+   depois a pedido do usuário). Componente `SortableTableHead`
+   compartilhado, promovido de um componente que só existia na busca.
+2. **Score de qualidade por tabela — implementado e revertido**: média
+   ponderada de completude/freshness/duplicatas/documentação (0-100),
+   persistida em Firestore por profiling, badge na tabela de ativos.
+   Validado em dev e então removido por completo por decisão do usuário.
+3. **Histórico de qualidade**: cada profiling grava um snapshot em
+   Firestore (máximo 30 runs por tabela); aba "Histórico" no modal com
+   gráfico de linha (`recharts`), tabela de runs expansível por coluna e
+   alerta de degradação (>10pp de queda de densidade vs. run anterior).
+4. **Lineage e tabelas órfãs**: novo domínio a partir de audit logs de
+   BigQuery (Cloud Logging) — upstream/downstream de uma tabela e lista
+   de órfãs (sem consumidor conhecido). Limitação de visibilidade tratada
+   com honestidade: resultado vazio vem com aviso explicando que pode ser
+   falta de atividade OU audit logs desabilitados (indistinguível via
+   API), em vez de afirmar uma certeza que a implementação não tem.
+   **Evoluído na mesma sessão para v2** (spec `docs/specs/lineage.md`):
+   upstream/downstream deixou de ser 1 hop direto e virou cadeia
+   transitiva completa (ex: `daily_summary` ← `ga4_sessions` ←
+   `ga4_events`), representada como grafo dirigido (BFS bidirecional em
+   `domains/lineage/service.py`, `max_hops` configurável, padrão 8),
+   atravessando projetos GCP quando necessário (nó vira "acesso negado"
+   em vez de derrubar a requisição se a SA não tiver Logging no projeto
+   não-raiz). Frontend passou de duas listas planas para um diagrama
+   (`LineageGraph.tsx`, `@xyflow/react` + `dagre` para layout), sempre
+   com o prefixo `project.dataset.table`. Validado em dev pelo usuário
+   após o deploy — cadeia completa (`ga4_events → ga4_sessions →
+   daily_summary`) confirmada contra audit logs reais.
+5. **Fingerprinting de PII**: novo domínio `domains/pii`, nova aba "PII"
+   no mesmo modal de profiling (`ProfilingDialog.tsx`). Duas camadas:
+   heurística de nome de coluna (grátis, `INFORMATION_SCHEMA.COLUMNS`) +
+   amostragem real via `TABLESAMPLE SYSTEM` com `REGEXP_CONTAINS`/
+   `COUNTIF` por coluna (email, CPF, CNPJ, telefone BR, CEP, cartão de
+   crédito — conjunto BR completo, a pedido do usuário). Coluna só é
+   sinalizada pela amostra se ≥ `match_threshold_pct` (padrão 5%) dos
+   valores não-nulos amostrados baterem no regex, não "qualquer match" —
+   reduz falso positivo de coincidência isolada. Mesmo padrão de
+   `/estimate`+`/run` (dry-run antes de executar) e cache de 5min do
+   domínio `quality`, reaproveitados ao máximo. Matching roda inteiramente
+   em SQL dentro do BigQuery — a API nunca recebe nem loga um valor de
+   coluna real, só contagens agregadas. Validado em dev pelo usuário.
+6. **Mapa de acesso**: novo domínio `domains/access`, nova aba "Acesso"
+   no mesmo modal de profiling. Reaproveita a mesma fonte de dados do
+   lineage (audit logs de jobs BigQuery via Cloud Logging), sob um
+   ângulo diferente — "quem tocou nessa tabela" em vez de "de onde vem/
+   pra onde vai o dado". Agrega por `principal_email`: último acesso,
+   contagem, tipo (leitura/escrita) e se é usuário humano ou service
+   account (heurística: email termina em `gserviceaccount.com`).
+   Diferente do lineage, uma auto-referência (ex: MERGE lendo e
+   escrevendo a própria tabela) **conta** como acesso real, em vez de
+   ser excluída — ali representaria um ciclo sem sentido, aqui é
+   exatamente o tipo de evento que o mapa de acesso quer mostrar.
+   Endpoint único (`GET /{project}/{dataset}/{table}`, sem custo de BQ,
+   só Cloud Logging), sem fluxo estimar→rodar como PII/profiling — só
+   carrega ao abrir a aba, como o Lineage. Fecha os 7 de 7 itens
+   planejados da sprint.
+
+### Erros e decisões desta sessão
+
+**Decisão 1 — Score de qualidade removido depois de validado**
+- O usuário pediu a remoção completa (backend + frontend) do score de
+  qualidade depois de já ter validado a feature em dev, sem registrar o
+  motivo. Revertido preservando `core/sla.py` (extração de SLA
+  compartilhada entre freshness e quality), que é uma refatoração válida
+  independente do score — não fazia sentido desfazer só porque a feature
+  que motivou a extração saiu.
+
+**Decisão 2 — Lineage implementado mesmo com Data Access audit logs
+desabilitados**
+- Pré-requisito técnico da fonte de dados (audit logs de BigQuery via
+  Cloud Logging) não está habilitado em nenhum ambiente. Decisão
+  consciente do usuário: implementar a feature mesmo assim (ela funciona
+  corretamente assim que os logs forem habilitados) em vez de bloquear a
+  sprint esperando uma mudança de infraestrutura que não é código.
+- Limite técnico registrado explicitamente: a API não consegue
+  distinguir "sem atividade no período" de "audit logs desabilitados" —
+  os dois casos retornam o mesmo resultado vazio. Resolvido com um campo
+  de aviso explícito na resposta em vez de fingir certeza.
+- O schema do payload dos audit logs (`BigQueryAuditMetadata`/
+  `jobChange`) foi implementado a partir da documentação oficial do
+  Google, sem poder validar contra um log real — vale revisitar assim
+  que os audit logs forem habilitados e o primeiro job aparecer.
+
+**Decisão 3 — Lineage v1→v2 sem endpoint novo, breaking change direto**
+- A extensão pra cadeia transitiva trocou `LineageResponse` (upstream/
+  downstream flat) por `LineageGraphResponse` (nodes/edges) na mesma
+  rota, em vez de versionar a API. Único consumidor da v1 era
+  `LineageTab.tsx` — sem clientes externos, sem convenção de
+  versionamento de API em nenhum outro domínio do repo, então manter
+  compatibilidade retroativa seria custo sem benefício real.
+- Bug encontrado e corrigido no meio do caminho: a v1 comparava
+  `(dataset_id, table_id)` descartando `project_id`, então uma tabela
+  `outro-projeto.RAW.foo` podia colidir por engano com `RAW.foo` do
+  projeto consultado. A travessia v2 casa sempre pela tripla completa.
+
+**Decisão 4 — PII diverge do guard de view de quality: pula a query
+paga inteiramente, não só o TABLESAMPLE**
+- `quality` (profiling), quando a tabela é VIEW/MATERIALIZED VIEW, só
+  omite a cláusula `TABLESAMPLE` e roda a query principal sem amostragem
+  — aceitável porque profiling é a funcionalidade central do domínio.
+  PII é uma checagem complementar; rodar sem amostragem escanearia a
+  view inteira (que pode envolver uma query subjacente pesada) sem o
+  usuário ter visto uma estimativa de custo antes. Decisão: pular a
+  query de amostragem por completo pra view, mantendo só a heurística de
+  nome (grátis) — mesmo padrão de dry-run/estimate de quality, mas com
+  esse guard adicional.
+- Limitação assumida conscientemente e documentada em
+  `docs/specs/pii.md`: os padrões regex (CPF, CNPJ, telefone, cartão)
+  validam só formato, sem dígito verificador nem algoritmo de Luhn — e
+  não cobrem a variante sem formatação (dígitos crus), que teria alto
+  risco de falso positivo contra qualquer sequência numérica do tamanho
+  certo.
+
+**Decisão 5 — Mapa de acesso: limitação de visibilidade cross-project
+discutida e documentada antes de implementar**
+- Durante a conversa sobre o que conta como "acesso" (motivada por uma
+  pergunta do usuário sobre um job Glue extraindo do BQ pra S3), ficou
+  claro que `list_access_events`/`list_job_events` só enxergam jobs que
+  **rodaram no projeto da tabela** — um job rodando em outro projeto que
+  lê a tabela via referência cross-project não aparece, porque o audit
+  log dele vive no projeto onde ele rodou. Mesma classe de limitação já
+  documentada em lineage/órfãs, agora também explícita em
+  `docs/specs/access.md`, "Fonte de dados" e "Casos de borda" — em vez
+  de descobrir isso depois, via um usuário confuso com um número de
+  acessos menor que o esperado.
+- Decisão de design: diferente de `get_orphans` (que só conta leitura)
+  e do lineage (que exclui auto-referência), o mapa de acesso conta
+  leitura **e** escrita, e **não** exclui auto-referência — são
+  perguntas diferentes ("quem consome" vs. "de onde vem" vs. "quem
+  tocou"), cada domínio com a semântica que faz sentido pra ele mesmo
+  reaproveitando a mesma fonte de dados.
+
+### Mudanças de arquitetura
+- `core/sla.py`: classificação de SLA extraída de `domains/freshness`
+  para `core/`, compartilhada com `domains/quality` (mesmo racional do
+  `resolve_dataset_region()` na Fase 2B).
+- `core/logging_client.py`: client compartilhado do Cloud Logging, mesmo
+  padrão de `core/bigquery.py::get_client()` (singleton via `lru_cache`).
+- `LoggingAccessDeniedError` (`core/exceptions.py`) + handler em
+  `main.py`: mesmo padrão de `ProjectAccessDeniedError` — falta de IAM
+  vira 403 com o comando `gcloud` de correção pronto na resposta.
+- `@xyflow/react` + `dagre` (frontend): primeira lib de grafo/diagrama do
+  projeto (antes só `recharts`, gráficos, não DAG), adicionada
+  especificamente pro diagrama de lineage transitivo — nó custom
+  (`LineageGraph.tsx`) reaproveita o padrão visual de bloqueado+tooltip
+  já estabelecido nos botões de `AssetsTable.tsx` (item 1 desta sprint)
+  pra representar tabelas em projeto sem acesso de Logging.
+- `components/SqlPreview.tsx`: promovido de `features/quality/` pro
+  nível compartilhado — componente já era genérico (`{sql, defaultOpen}`,
+  sem lógica de domínio) e passou a ser usado por `quality` e `pii`, mesmo
+  racional do `SortableTableHead` promovido no item 1.
+- `domains/pii/`: `repository.py` duplica (não importa)
+  `get_table_columns`/`is_view`/`dry_run` de `domains/quality/
+  repository.py` — mesma decisão de isolamento de domínio já tomada em
+  `domains/lineage/repository.py` (CLAUDE.md proíbe um domínio importar
+  de outro).
+- `domains/access/`: mesma decisão de duplicação, desta vez sobre
+  `domains/lineage/repository.py` — `AccessEvent` é quase idêntico a
+  `JobEvent` de lineage, mas carrega também `timestamp`
+  (`jobStatistics.endTime`), campo que lineage não lê porque não
+  precisa de "quando", só de "de onde/pra onde".
+
+### Status até o momento
+- Backend: 367 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle
+  ~1.19 MB / gzip 364 kB)
+- Validado em dev (`observability-hub-dev`) pelo usuário: filtros/
+  ordenação, histórico de qualidade, lineage v2 (cadeia transitiva
+  confirmada contra audit logs reais) e PII. Mapa de acesso ainda não
+  validado visualmente no momento deste registro.
+- **7 de 7 itens concluídos — sprint fechada.** PR pra `main` ainda não
+  aberto.
+
+---
+
+## Sprint 3.1 — Auth (Google OAuth) + UX pessoal (concluída, PR #17)
+
+Reconstruída a partir da descrição do PR #17 — o SESSIONLOG não foi
+atualizado durante aquela sessão (falha de processo corrigida a partir
+desta sprint).
+
+### O que foi feito
+1. **Autenticação real**: senha hardcoded do frontend (dívida técnica
+   registrada no backlog da Sprint 2) substituída por Google OAuth 2.0 —
+   `domains/auth/` no backend (login, callback, sessão via JWT em cookie
+   httpOnly de 12h, allowlist por domínio/email no Secret Manager);
+   `RequireAuth` no frontend. Todos os routers de dados passaram a exigir
+   sessão válida no backend, não só proteção de rota no frontend.
+2. **Modal de profiling**: dois bugs de UI corrigidos (colapso de schema
+   em dois níveis, scroll horizontal vazando dos controles) e refatorado
+   para Tabs (Schema / Análise de qualidade).
+3. **Favoritos**: domínio novo, Firestore por usuário, estrela na tabela
+   de ativos com toggle otimista.
+4. **Histórico de navegação**: domínio novo, duas subcoleções por usuário
+   (visualizações de tabela / buscas), seção "Recentes" na sidebar.
+
+### Erros e aprendizados
+- Cookie de logout não limpava de fato a sessão (`delete_cookie` do
+  Starlette precisa dos mesmos atributos do cookie original pra
+  funcionar) — corrigido em fix separado, pós-validação.
+
+### Status final
+- 269 testes backend, `ruff`/`biome`/`tsc`/`vite build` limpos
+- Validado em dev pelo usuário (login/logout, allowlist, favoritos,
+  histórico, modal de profiling)
+
+---
+
 ## Sprint 2.2 e 2.3 — Metadados de partição, refresh, busca reversa e UX (concluída)
 
 Sete funcionalidades sobre o MVP de catálogo/freshness (Fase 2 backend +
@@ -282,5 +504,6 @@ implementação**
 | Fase 2D | Frontend MVP | ✅ Concluída |
 | Sprint 2.2 | Metadados de partição, "Ver partições", refresh, busca reversa | ✅ Concluída |
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
-| Fase 3 | Lineage, PII, Mapa de acesso | ⏳ Próxima |
+| Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
+| Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
 | Fase 4 | FinOps completo | ⏳ Pendente |

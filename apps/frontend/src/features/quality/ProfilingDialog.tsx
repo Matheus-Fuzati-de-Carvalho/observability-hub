@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { SqlPreview } from '@/components/SqlPreview'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,11 +20,14 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AccessTab } from '@/features/access/AccessTab'
 import { useTableDetail } from '@/features/catalog/hooks'
+import { LineageTab } from '@/features/lineage/LineageTab'
+import { PiiTab } from '@/features/pii/PiiTab'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
+import { HistoryTab } from '@/features/quality/HistoryTab'
 import { useEstimateProfiling, useRunProfiling } from '@/features/quality/hooks'
 import { SchemaTable } from '@/features/quality/SchemaTable'
-import { SqlPreview } from '@/features/quality/SqlPreview'
 import { formatNumber, formatPercent } from '@/lib/format'
 import { ApiError } from '@/lib/http-client'
 import type { UniquenessMethod } from '@/types/profiling'
@@ -33,6 +37,10 @@ const DATE_TYPES = new Set(['DATE', 'DATETIME', 'TIMESTAMP'])
 const VIEW_TYPES = new Set(['VIEW', 'MATERIALIZED_VIEW'])
 const SCHEMA_TAB = 'schema'
 const ANALYSIS_TAB = 'analysis'
+const HISTORY_TAB = 'history'
+const LINEAGE_TAB = 'lineage'
+const PII_TAB = 'pii'
+const ACCESS_TAB = 'access'
 
 // SelectValue não deriva o rótulo a partir dos SelectItem filhos nesta
 // versão do base-ui — precisa de um render-prop mapeando valor -> rótulo.
@@ -165,6 +173,10 @@ export function ProfilingDialog({
                 </>
               )}
             </TabsTrigger>
+            <TabsTrigger value={HISTORY_TAB}>Histórico</TabsTrigger>
+            <TabsTrigger value={LINEAGE_TAB}>Lineage</TabsTrigger>
+            <TabsTrigger value={PII_TAB}>PII</TabsTrigger>
+            <TabsTrigger value={ACCESS_TAB}>Acesso</TabsTrigger>
           </TabsList>
 
           <TabsContent value={SCHEMA_TAB} className="flex min-h-0 flex-1 flex-col gap-3">
@@ -363,6 +375,22 @@ export function ProfilingDialog({
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value={HISTORY_TAB} className="min-h-0 flex-1 overflow-y-auto">
+            <HistoryTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
+          </TabsContent>
+
+          <TabsContent value={LINEAGE_TAB} className="min-h-0 flex-1 overflow-y-auto">
+            <LineageTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
+          </TabsContent>
+
+          <TabsContent value={PII_TAB} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <PiiTab projectId={projectId} datasetId={datasetId} tableId={tableId} isView={isView} />
+          </TabsContent>
+
+          <TabsContent value={ACCESS_TAB} className="min-h-0 flex-1 overflow-y-auto">
+            <AccessTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
           </TabsContent>
         </Tabs>
       </DialogContent>

@@ -9,6 +9,6 @@ export interface ProjectValidateResponse {
 export interface ApiErrorBody {
   error: string
   message: string
-  fix?: string
+  fix?: string[]
   available_date_columns?: string[]
 }

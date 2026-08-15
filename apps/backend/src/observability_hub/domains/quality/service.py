@@ -8,7 +8,7 @@ import re
 import time
 from datetime import UTC, datetime
 
-from google.cloud import bigquery
+from google.cloud import bigquery, firestore
 
 from observability_hub.core.bigquery import discover_regions, resolve_dataset_region
 from observability_hub.core.config import settings
@@ -18,15 +18,18 @@ from observability_hub.core.exceptions import (
     ProfilingTimeoutError,
     TableNotFoundError,
 )
-from observability_hub.domains.quality import repository, sql_builder
+from observability_hub.domains.quality import history_repository, repository, sql_builder
 from observability_hub.domains.quality.schemas import (
     ColumnProfile,
     EstimateResponse,
     ExcludedColumn,
     Granularity,
+    HistoryColumnSnapshot,
     InferredLogicalType,
     NullDistributionPoint,
     NullDistributionResponse,
+    ProfilingHistoryResponse,
+    ProfilingHistoryRun,
     ProfilingRequest,
     ProfilingRunResponse,
     QualityFlag,
@@ -240,10 +243,12 @@ def estimate_profiling(
 
 def run_profiling(
     client: bigquery.Client,
+    firestore_client: firestore.Client,
     project_id: str,
     dataset_id: str,
     table_id: str,
     request: ProfilingRequest,
+    executed_by: str,
 ) -> ProfilingRunResponse:
     start = time.monotonic()
     _validate_sample_percent(request.sample_percent)
@@ -361,6 +366,29 @@ def run_profiling(
         if column_profiles
         else 0.0
     )
+    rounded_density = round(overall_density, 2)
+    rounded_duplicate_pct = round(duplicate_pct, 2)
+
+    # Salva pro histórico de qualidade (domains/quality/history_repository.py)
+    # poder mostrar a evolução da tabela ao longo do tempo sem precisar
+    # reprofilar — subcoleção compartilhada, um doc novo por run.
+    history_repository.save_run(
+        firestore_client,
+        project_id,
+        dataset_id,
+        table_id,
+        overall_density=rounded_density,
+        estimated_duplicate_pct=rounded_duplicate_pct,
+        executed_by=executed_by,
+        columns=[
+            {
+                "column_name": c.column_name,
+                "completeness_pct": c.completeness_pct,
+                "quality_flag": c.quality_flag.value,
+            }
+            for c in column_profiles
+        ],
+    )
 
     return ProfilingRunResponse(
         project_id=project_id,
@@ -373,8 +401,8 @@ def run_profiling(
             total_sampled_rows=total_sampled_rows,
             total_table_rows=total_table_rows,
             estimated_duplicate_rows=duplicate_rows,
-            estimated_duplicate_pct=round(duplicate_pct, 2),
-            overall_density=round(overall_density, 2),
+            estimated_duplicate_pct=rounded_duplicate_pct,
+            overall_density=rounded_density,
         ),
         columns=column_profiles,
         excluded_columns=excluded,
@@ -433,4 +461,25 @@ def get_null_distribution(
         date_column=date_column,
         granularity=granularity,
         series=series,
+    )
+
+
+def get_quality_history(
+    firestore_client: firestore.Client, project_id: str, dataset_id: str, table_id: str
+) -> ProfilingHistoryResponse:
+    """Só Firestore — não toca BigQuery, o histórico independe do estado
+    atual da tabela (inclusive se ela já tiver sido apagada)."""
+    raw_runs = history_repository.list_runs(firestore_client, project_id, dataset_id, table_id)
+    runs = [
+        ProfilingHistoryRun(
+            executed_at=raw["executed_at"],
+            executed_by=raw["executed_by"],
+            overall_density=raw["overall_density"],
+            estimated_duplicate_pct=raw["estimated_duplicate_pct"],
+            columns=[HistoryColumnSnapshot(**c) for c in raw["columns"]],
+        )
+        for raw in raw_runs
+    ]
+    return ProfilingHistoryResponse(
+        project_id=project_id, dataset_id=dataset_id, table_id=table_id, runs=runs
     )
