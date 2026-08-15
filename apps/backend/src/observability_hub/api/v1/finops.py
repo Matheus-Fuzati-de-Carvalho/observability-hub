@@ -7,6 +7,7 @@ from observability_hub.core.bigquery import get_client
 from observability_hub.core.logging_client import get_logging_client
 from observability_hub.domains.finops import service
 from observability_hub.domains.finops.schemas import (
+    BudgetResponse,
     MinDaysUnused,
     PartitionCandidatesResponse,
     UnusedTablesResponse,
@@ -36,3 +37,12 @@ def get_partition_candidates(
     logging_client: cloud_logging.Client = Depends(get_logging_client),
 ) -> PartitionCandidatesResponse:
     return service.scan_partition_candidates(client, logging_client, project_id)
+
+
+@router.get("/{project_id}/budget", response_model=BudgetResponse)
+def get_budget(
+    project_id: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    logging_client: cloud_logging.Client = Depends(get_logging_client),
+) -> BudgetResponse:
+    return service.get_budget(logging_client, project_id, limit=limit)

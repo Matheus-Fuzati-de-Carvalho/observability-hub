@@ -8,10 +8,12 @@ freshness — reaproveitado direto, é core/, não outro domínio).
 Duplica o parsing de audit log de domains/lineage/repository.py (não
 importa — nenhum domínio deste projeto importa de outro, ver CLAUDE.md).
 Diferença: aqui só interessa leitura (referenced_tables), não destino, e
-o campo novo é jobStatistics.totalBilledBytes — custo real já pago
-escaneando a tabela, usado pra ancorar a estimativa de economia de
-particionamento em dado observado, não em suposição (ver
-docs/specs/finops-waste-scanner.md).
+os campos novos são jobStatistics.totalBilledBytes (custo real já pago
+escaneando a tabela — ancora a estimativa de economia de particionamento
+em dado observado, ver docs/specs/finops-waste-scanner.md) e, pra
+budget (docs/specs/finops-budget.md), job_id/principal_email/query_text
+— quem rodou o quê e o texto da query, truncado em
+_QUERY_TEXT_MAX_CHARS pra não inflar a resposta de "top queries".
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +28,7 @@ from observability_hub.core.exceptions import LoggingAccessDeniedError
 
 _PAGE_SIZE = 1000
 _DATE_LIKE_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
+_QUERY_TEXT_MAX_CHARS = 2000
 
 TableRefTuple = tuple[str, str, str]  # (project_id, dataset_id, table_id)
 
@@ -35,6 +38,9 @@ class ScanEvent:
     timestamp: datetime | None
     referenced_tables: list[TableRefTuple]
     total_billed_bytes: int
+    job_id: str = ""
+    principal_email: str = ""
+    query_text: str | None = None
 
 
 def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
@@ -66,6 +72,15 @@ def _parse_billed_bytes(raw: str | None) -> int:
         return 0
 
 
+def _parse_query_text(job: dict) -> str | None:
+    raw = job.get("jobConfiguration", {}).get("query", {}).get("query")
+    if not raw:
+        return None
+    if len(raw) > _QUERY_TEXT_MAX_CHARS:
+        return raw[:_QUERY_TEXT_MAX_CHARS] + "…"
+    return raw
+
+
 def _parse_entry(entry: cloud_logging.LogEntry) -> ScanEvent | None:
     payload = entry.payload if isinstance(entry.payload, dict) else None
     if payload is None:
@@ -81,10 +96,17 @@ def _parse_entry(entry: cloud_logging.LogEntry) -> ScanEvent | None:
     timestamp = _parse_timestamp(job_stats.get("endTime"))
     total_billed_bytes = _parse_billed_bytes(job_stats.get("totalBilledBytes"))
 
+    job_name = job.get("jobName", {})
+    job_id = job_name.get("jobId", "") if isinstance(job_name, dict) else ""
+    principal_email = payload.get("authenticationInfo", {}).get("principalEmail", "")
+
     return ScanEvent(
+        job_id=job_id,
+        principal_email=principal_email,
         timestamp=timestamp,
         referenced_tables=referenced,
         total_billed_bytes=total_billed_bytes,
+        query_text=_parse_query_text(job),
     )
 
 

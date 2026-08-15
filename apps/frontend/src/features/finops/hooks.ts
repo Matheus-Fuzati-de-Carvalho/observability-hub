@@ -17,3 +17,11 @@ export function usePartitionCandidates(projectId: string | undefined) {
     enabled: Boolean(projectId),
   })
 }
+
+export function useBudget(projectId: string | undefined, limit = 10) {
+  return useQuery({
+    queryKey: ['finops-budget', projectId, limit],
+    queryFn: () => finopsApi.getBudget(projectId as string, limit),
+    enabled: Boolean(projectId),
+  })
+}

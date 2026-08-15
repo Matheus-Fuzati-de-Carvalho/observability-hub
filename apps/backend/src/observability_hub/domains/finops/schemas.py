@@ -53,3 +53,46 @@ class PartitionCandidatesResponse(BaseModel):
     lookback_days: int
     candidates: list[PartitionCandidate]
     warning: str | None = None
+
+
+class DatasetCost(BaseModel):
+    dataset_id: str
+    cost_usd: float
+    billed_bytes: int
+
+
+class CostlyQuery(BaseModel):
+    job_id: str
+    principal_email: str
+    executed_at: datetime
+    billed_bytes: int
+    cost_usd: float
+    tables: list[str]
+    query_text: str | None
+
+
+class TopSpender(BaseModel):
+    principal_email: str
+    is_service_account: bool
+    cost_usd: float
+    billed_bytes: int
+    job_count: int
+
+
+class CostProjection(BaseModel):
+    days_elapsed: int
+    days_in_month: int
+    cost_so_far_usd: float
+    daily_average_usd: float
+    projected_month_total_usd: float
+
+
+class BudgetResponse(BaseModel):
+    project_id: str
+    period_start: datetime
+    lookback_days: int
+    by_dataset: list[DatasetCost]
+    top_queries: list[CostlyQuery]
+    top_spenders: list[TopSpender]
+    projection: CostProjection
+    warning: str | None = None

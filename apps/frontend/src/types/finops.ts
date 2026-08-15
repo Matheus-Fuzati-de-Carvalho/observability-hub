@@ -38,3 +38,46 @@ export interface PartitionCandidatesResponse {
   candidates: PartitionCandidate[]
   warning: string | null
 }
+
+export interface DatasetCost {
+  dataset_id: string
+  cost_usd: number
+  billed_bytes: number
+}
+
+export interface CostlyQuery {
+  job_id: string
+  principal_email: string
+  executed_at: string
+  billed_bytes: number
+  cost_usd: number
+  tables: string[]
+  query_text: string | null
+}
+
+export interface TopSpender {
+  principal_email: string
+  is_service_account: boolean
+  cost_usd: number
+  billed_bytes: number
+  job_count: number
+}
+
+export interface CostProjection {
+  days_elapsed: number
+  days_in_month: number
+  cost_so_far_usd: number
+  daily_average_usd: number
+  projected_month_total_usd: number
+}
+
+export interface BudgetResponse {
+  project_id: string
+  period_start: string
+  lookback_days: number
+  by_dataset: DatasetCost[]
+  top_queries: CostlyQuery[]
+  top_spenders: TopSpender[]
+  projection: CostProjection
+  warning: string | null
+}

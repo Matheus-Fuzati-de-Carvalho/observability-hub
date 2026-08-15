@@ -80,6 +80,60 @@ def test_parse_entry_extracts_referenced_tables_timestamp_and_billed_bytes():
     assert event.timestamp is not None
 
 
+def test_parse_entry_extracts_job_id_principal_and_query_text():
+    payload = {
+        "authenticationInfo": {"principalEmail": "ana@dp6.com.br"},
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobName": {"jobId": "job-123", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": {"query": {"query": "SELECT 1"}},
+                    "jobStatistics": {"endTime": "2026-08-14T10:00:00Z", "referencedTables": []},
+                }
+            }
+        },
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.job_id == "job-123"
+    assert event.principal_email == "ana@dp6.com.br"
+    assert event.query_text == "SELECT 1"
+
+
+def test_parse_entry_truncates_long_query_text():
+    long_query = "SELECT " + "x" * 3000
+    payload = {
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobConfiguration": {"query": {"query": long_query}},
+                    "jobStatistics": {"referencedTables": []},
+                }
+            }
+        }
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.query_text is not None
+    assert len(event.query_text) == repository._QUERY_TEXT_MAX_CHARS + 1  # +1 do "…"
+    assert event.query_text.endswith("…")
+
+
+def test_parse_entry_query_text_is_none_when_missing():
+    payload = {
+        "serviceData": {"jobCompletedEvent": {"job": {"jobStatistics": {"referencedTables": []}}}}
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.query_text is None
+
+
 def test_parse_entry_defaults_billed_bytes_to_zero_when_missing():
     payload = {
         "serviceData": {

@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from observability_hub.domains.finops import service
 from observability_hub.domains.finops.repository import ScanEvent
 
@@ -41,9 +43,21 @@ def _stub_common(monkeypatch, all_tables, metadata):
     monkeypatch.setattr(service, "get_tables_metadata", lambda client, refs: metadata)
 
 
-def _event(referenced, timestamp, total_billed_bytes=0):
+def _event(
+    referenced,
+    timestamp,
+    total_billed_bytes=0,
+    job_id="job1",
+    principal_email="user@dp6.com.br",
+    query_text=None,
+):
     return ScanEvent(
-        timestamp=timestamp, referenced_tables=referenced, total_billed_bytes=total_billed_bytes
+        timestamp=timestamp,
+        referenced_tables=referenced,
+        total_billed_bytes=total_billed_bytes,
+        job_id=job_id,
+        principal_email=principal_email,
+        query_text=query_text,
     )
 
 
@@ -339,3 +353,192 @@ def test_scan_partition_candidates_sorts_by_observed_cost_descending(monkeypatch
     result = service.scan_partition_candidates(_fake_client(), MagicMock(), "proj")
 
     assert [c.table_id for c in result.candidates] == ["expensive", "cheap"]
+
+
+# --- get_budget --------------------------------------------------------------
+
+
+def _stub_budget_events(monkeypatch, events):
+    monkeypatch.setattr(service.repository, "list_scan_events", lambda *a, **kw: events)
+
+
+def _last_day_of_previous_month():
+    return _now().replace(day=1) - timedelta(days=1)
+
+
+def test_get_budget_aggregates_cost_by_dataset(monkeypatch):
+    events = [
+        _event([("proj", "RAW", "a"), ("proj", "TRUSTED", "b")], _now(), total_billed_bytes=10**12),
+        _event([("proj", "RAW", "a")], _now(), total_billed_bytes=10**11),
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    by_dataset = {d.dataset_id: d for d in result.by_dataset}
+    assert set(by_dataset) == {"RAW", "TRUSTED"}
+    assert by_dataset["RAW"].billed_bytes == 10**12 + 10**11
+    assert by_dataset["TRUSTED"].billed_bytes == 10**12
+    assert by_dataset["RAW"].cost_usd > by_dataset["TRUSTED"].cost_usd
+
+
+def test_get_budget_ranks_top_queries_by_cost(monkeypatch):
+    events = [
+        _event([("proj", "RAW", "a")], _now(), total_billed_bytes=10**9, job_id="cheap-job"),
+        _event([("proj", "RAW", "b")], _now(), total_billed_bytes=10**13, job_id="expensive-job"),
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert [q.job_id for q in result.top_queries] == ["expensive-job", "cheap-job"]
+
+
+def test_get_budget_includes_query_text_and_tables_in_top_queries(monkeypatch):
+    events = [
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**9,
+            job_id="job1",
+            query_text="SELECT * FROM a",
+        )
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.top_queries[0].query_text == "SELECT * FROM a"
+    assert result.top_queries[0].tables == ["proj.RAW.a"]
+
+
+def test_get_budget_ranks_top_spenders_by_cost(monkeypatch):
+    events = [
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**9,
+            principal_email="ana@dp6.com.br",
+        ),
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**13,
+            principal_email="backend-run@proj.iam.gserviceaccount.com",
+        ),
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.top_spenders[0].principal_email == "backend-run@proj.iam.gserviceaccount.com"
+    assert result.top_spenders[0].is_service_account is True
+    assert result.top_spenders[1].principal_email == "ana@dp6.com.br"
+    assert result.top_spenders[1].is_service_account is False
+
+
+def test_get_budget_aggregates_multiple_jobs_from_same_spender(monkeypatch):
+    events = [
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**9,
+            principal_email="ana@dp6.com.br",
+            job_id="job1",
+        ),
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**9,
+            principal_email="ana@dp6.com.br",
+            job_id="job2",
+        ),
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert len(result.top_spenders) == 1
+    assert result.top_spenders[0].job_count == 2
+    assert result.top_spenders[0].billed_bytes == 2 * 10**9
+
+
+def test_get_budget_ignores_zero_cost_events(monkeypatch):
+    events = [_event([("proj", "RAW", "a")], _now(), total_billed_bytes=0)]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.by_dataset == []
+    assert result.top_queries == []
+    assert result.top_spenders == []
+
+
+def test_get_budget_ignores_events_before_month_start(monkeypatch):
+    events = [
+        _event([("proj", "RAW", "a")], _last_day_of_previous_month(), total_billed_bytes=10**12)
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.by_dataset == []
+
+
+def test_get_budget_ignores_events_from_other_projects(monkeypatch):
+    events = [_event([("other-proj", "RAW", "a")], _now(), total_billed_bytes=10**12)]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.by_dataset == []
+
+
+def test_get_budget_respects_limit(monkeypatch):
+    events = [
+        _event(
+            [("proj", "RAW", "a")],
+            _now(),
+            total_billed_bytes=10**9 * (i + 1),
+            job_id=f"job{i}",
+            principal_email=f"user{i}@dp6.com.br",
+        )
+        for i in range(5)
+    ]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj", limit=2)
+
+    assert len(result.top_queries) == 2
+    assert len(result.top_spenders) == 2
+
+
+def test_get_budget_computes_projection(monkeypatch):
+    events = [_event([("proj", "RAW", "a")], _now(), total_billed_bytes=10**12)]
+    _stub_budget_events(monkeypatch, events)
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.projection.days_elapsed == result.lookback_days
+    assert result.projection.days_in_month >= result.projection.days_elapsed
+    assert result.projection.cost_so_far_usd > 0
+    assert result.projection.daily_average_usd == round(
+        result.projection.cost_so_far_usd / result.projection.days_elapsed, 6
+    )
+    # projected_month_total_usd é derivado do daily_average NÃO arredondado
+    # (mais preciso) — comparar contra o daily_average já arredondado da
+    # resposta dá uma diferença de poucos milionésimos, por isso a
+    # tolerância em vez de igualdade exata.
+    assert result.projection.projected_month_total_usd == pytest.approx(
+        result.projection.daily_average_usd * result.projection.days_in_month, abs=1e-4
+    )
+    assert result.projection.projected_month_total_usd >= result.projection.cost_so_far_usd
+
+
+def test_get_budget_sets_warning_when_no_events(monkeypatch):
+    _stub_budget_events(monkeypatch, [])
+
+    result = service.get_budget(MagicMock(), "proj")
+
+    assert result.warning is not None
+    assert "proj" in result.warning

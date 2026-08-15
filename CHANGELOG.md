@@ -5,7 +5,78 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
-## Fase 4 — FinOps: scanner de desperdício (em andamento, 1ª de 3 frentes)
+## Fase 4 — FinOps: budget de custo (em andamento, 2ª de 3 frentes)
+
+Branch `feat/finops-budget`, criada a partir de `feat/finops-waste-scanner`
+(PR #19 do scanner de desperdício ainda não mergeado — mesma decisão de
+não bloquear a próxima frente esperando review, já usada entre
+sprint-3.2 e o scanner).
+
+### O que foi feito
+
+Quatro visões de custo do mês corrente em `GET /api/v1/finops/{project}/budget`,
+todas derivadas dos **mesmos audit logs** que o scanner de desperdício já
+lê — nenhuma integração nova, nenhuma role de IAM nova:
+- **Custo por dataset**: soma `totalBilledBytes` de todo job que
+  referenciou uma tabela daquele dataset no mês.
+- **Top N queries mais caras**: job_id, quem rodou, tabelas tocadas,
+  texto da query (truncado em 2000 caracteres), ordenadas por custo.
+- **Top N gastadores**: humano vs. service account, custo total,
+  contagem de jobs.
+- **Projeção do mês**: custo até agora ÷ dias corridos do mês × dias no
+  mês.
+
+Nova página `/finops/budget`, com stat cards de projeção + três tabelas
+(reaproveitando `useTableFilterSort`, mesmo hook do scanner de
+desperdício). Sidebar ganhou uma segunda entrada no grupo FinOps.
+
+### Erros e decisões desta sessão
+
+**Decisão 1 — Descartada a ideia de usar BigQuery Billing Export**
+- Cogitado inicialmente (e chegou a ser mencionado errado numa resposta
+  pro usuário) que essa frente precisaria de uma fonte de dados nova
+  (Cloud Billing Export ou API). Corrigido antes de implementar: Billing
+  Export só quebra custo por **projeto + SKU**, nunca por dataset —
+  não resolveria a pergunta que esta feature responde, mesmo se
+  configurado. A granularidade certa só existe nos audit logs de job
+  (mesma fonte já integrada), então nada precisou ser configurado a
+  mais no projeto do cliente.
+- Reforça a mesma premissa já embutida em `domains/quality` e no
+  scanner de desperdício: a estimativa é on-demand (bytes escaneados ×
+  preço/TiB) — não reflete gasto real em projetos com preço flat-rate/
+  Editions. Documentado explicitamente em `docs/specs/finops-budget.md`
+  por ser o lugar onde um número errado mais provavelmente vira decisão
+  financeira.
+
+**Decisão 2 — SA do próprio Hub CONTA aqui, diferente do mapa de acesso**
+- `domains/access` exclui a SA de runtime do Hub porque ali a pergunta é
+  "quem consome essa tabela de fora" (inspecionar pelo Hub não é
+  consumo externo real). Budget pergunta outra coisa — "quanto está
+  sendo gasto de verdade" — e profiling/PII rodados pela UI custam
+  dinheiro real, então devem contar. Nenhuma exclusão aplicada aqui,
+  documentado o contraste explicitamente pra não parecer inconsistência
+  acidental entre os dois domínios.
+
+**Decisão 3 — `ScanEvent` estendido em vez de mais um parser duplicado**
+- `job_id`/`principal_email`/`query_text` foram adicionados ao mesmo
+  `ScanEvent` que o scanner de desperdício já usa (com default vazio,
+  no fim da dataclass, pra não quebrar as chamadas existentes) em vez
+  de criar uma quarta cópia quase idêntica do parsing de audit log —
+  as duas funcionalidades do domínio finops compartilham o mesmo
+  repository.py.
+
+### Status até o momento
+- Backend: 425 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos
+- Ainda não validado em dev — branch não deployada nesta sessão até este
+  registro
+- Falta a 3ª frente de FinOps (otimizações sugeridas) e a lacuna da v1
+  do PII (adiada, não esquecida)
+
+---
+
+## Fase 4 — FinOps: scanner de desperdício (concluída, PR #19)
 
 Branch `feat/finops-waste-scanner`, criada a partir de `feat/sprint-3.2`
 (PR #18 da Sprint 3.2 ainda não mergeado em `main` no momento desta
@@ -74,13 +145,21 @@ vez de duplicar mais uma vez**
   precisa de `destination_table`/`principal_email`, só leitura.
 
 ### Status até o momento
-- Backend: 406 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 411 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
 - Frontend: `biome check`, `tsc -b`, `vite build` limpos
-- Ainda não validado em dev — branch não deployada nesta sessão até este
-  registro
-- Faltam as outras 2 frentes de FinOps (budget/custo, otimizações
-  sugeridas) e a lacuna da v1 do PII (adiada, não esquecida)
+- Validado em dev pelo usuário — incluindo dois bugs pegos e corrigidos
+  ao vivo depois do deploy: `min_days_unused` como `Literal[int,...]`
+  causando 422 (trocado por `IntEnum`) e retry do TanStack Query
+  insuficiente pra sobreviver ao cold start do Cloud Run em dev
+  (`minScale=0`, decisão consciente do usuário de não mudar).
+- Aproveitado o momento pra reorganizar o sidebar em grupos e adicionar
+  filtro/ordenação reutilizável (`hooks/useTableFilterSort`) nas tabelas
+  de "Tabelas sem consumidor" e do próprio scanner.
+- **PR #19 aberto** (`feat/finops-waste-scanner` → `main`, diff limpo
+  contra `main` já com a Sprint 3.2 mergeada).
+- Faltam a 3ª frente de FinOps (otimizações sugeridas) e a lacuna da v1
+  do PII (adiada, não esquecida)
 
 ---
 
@@ -585,4 +664,4 @@ implementação**
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
 | Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
 | Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
-| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício concluído, faltam budget e otimizações) |
+| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício e budget concluídos, falta otimizações sugeridas) |

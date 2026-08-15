@@ -1,4 +1,13 @@
-import { ChevronDown, Clock, History, PiggyBank, Search, Star, Unlink } from 'lucide-react'
+import {
+  ChevronDown,
+  Clock,
+  DollarSign,
+  History,
+  PiggyBank,
+  Search,
+  Star,
+  Unlink,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -74,9 +83,13 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
 
       <div className="mb-4 flex flex-col gap-0.5">
         <p className={cn(SECTION_LABEL_CLASS, 'mb-2')}>FinOps</p>
-        <NavLink to="/finops" className={NAV_LINK_CLASS}>
+        <NavLink to="/finops" end className={NAV_LINK_CLASS}>
           <PiggyBank size={16} />
           Scanner de desperdício
+        </NavLink>
+        <NavLink to="/finops/budget" className={NAV_LINK_CLASS}>
+          <DollarSign size={16} />
+          Budget de custo
         </NavLink>
       </div>
 

@@ -1,11 +1,12 @@
-"""Orquestra o domínio finops (scanner de desperdício): combina
-enumeração de tabelas (BigQuery INFORMATION_SCHEMA + client.get_table()
-via core/bigquery.py) com audit logs de jobs (Cloud Logging, via
-repository) pra achar tabelas sem uso e candidatas a particionamento.
-api/v1 só chama estas funções — CLAUDE.md proíbe lógica de negócio em
-api/.
+"""Orquestra o domínio finops: scanner de desperdício (tabelas sem uso,
+candidatas a particionamento) e budget (custo por dataset, queries mais
+caras, top gastadores, projeção do mês) — combina enumeração de tabelas
+(BigQuery INFORMATION_SCHEMA + client.get_table() via core/bigquery.py)
+com audit logs de jobs (Cloud Logging, via repository). api/v1 só chama
+estas funções — CLAUDE.md proíbe lógica de negócio em api/.
 """
 
+import calendar
 from datetime import UTC, datetime
 
 from google.cloud import bigquery
@@ -19,9 +20,14 @@ from observability_hub.core.bigquery import (
 from observability_hub.core.config import settings
 from observability_hub.domains.finops import repository
 from observability_hub.domains.finops.schemas import (
+    BudgetResponse,
+    CostlyQuery,
+    CostProjection,
+    DatasetCost,
     MinDaysUnused,
     PartitionCandidate,
     PartitionCandidatesResponse,
+    TopSpender,
     UnusedTable,
     UnusedTablesResponse,
 )
@@ -32,6 +38,7 @@ _LONG_TERM_STORAGE_THRESHOLD_DAYS = 90
 _MIN_TABLE_SIZE_BYTES_FOR_PARTITION_CANDIDATE = 1_073_741_824  # 1 GB
 _CONSERVATIVE_REDUCTION = 0.30
 _OPTIMISTIC_REDUCTION = 0.70
+_BUDGET_TOP_N_DEFAULT = 10
 
 _EMPTY_RESULT_WARNING = (
     "Nenhum evento de job encontrado nos audit logs dos últimos {days} dias. "
@@ -59,6 +66,14 @@ _SAVINGS_DISCLAIMER = (
     "custo mostrado é o da query inteira, não isolado só desta tabela."
 )
 
+_BUDGET_RETENTION_CAVEAT = (
+    "Já estamos {days} dias dentro do mês, e Data Access audit logs no "
+    "Cloud Logging têm retenção padrão de 30 dias (salvo bucket/sink "
+    "customizado). Se esse for o caso aqui, o início do mês pode estar "
+    "faltando neste relatório — custo por dataset, top queries e projeção "
+    "ficariam subestimados."
+)
+
 
 def _human_bytes(num_bytes: int) -> str:
     value = float(num_bytes)
@@ -72,6 +87,14 @@ def _human_bytes(num_bytes: int) -> str:
 def _estimate_query_cost_usd(num_bytes: int) -> float:
     tib = num_bytes / (1024**4)
     return round(tib * settings.bigquery_price_usd_per_tib, 6)
+
+
+def _is_service_account(principal_email: str) -> bool:
+    return principal_email.endswith("gserviceaccount.com")
+
+
+def _month_start(now: datetime) -> datetime:
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _estimate_storage_cost_usd(size_bytes: int, modified: datetime | None, now: datetime) -> float:
@@ -241,4 +264,111 @@ def scan_partition_candidates(
         )
         if not events
         else None,
+    )
+
+
+def get_budget(
+    logging_client: cloud_logging.Client,
+    project_id: str,
+    limit: int = _BUDGET_TOP_N_DEFAULT,
+) -> BudgetResponse:
+    now = datetime.now(UTC)
+    month_start = _month_start(now)
+    lookback_days = (now - month_start).days + 1
+
+    events = repository.list_scan_events(logging_client, project_id, lookback_days)
+
+    by_dataset_bytes: dict[str, int] = {}
+    by_principal_bytes: dict[str, int] = {}
+    by_principal_jobs: dict[str, int] = {}
+    queries: list[CostlyQuery] = []
+
+    for event in events:
+        if event.timestamp is None or event.timestamp < month_start:
+            continue
+        if event.total_billed_bytes <= 0:
+            continue
+
+        datasets_touched = {ref[1] for ref in event.referenced_tables if ref[0] == project_id}
+        for dataset_id in datasets_touched:
+            by_dataset_bytes[dataset_id] = (
+                by_dataset_bytes.get(dataset_id, 0) + event.total_billed_bytes
+            )
+
+        by_principal_bytes[event.principal_email] = (
+            by_principal_bytes.get(event.principal_email, 0) + event.total_billed_bytes
+        )
+        by_principal_jobs[event.principal_email] = (
+            by_principal_jobs.get(event.principal_email, 0) + 1
+        )
+
+        queries.append(
+            CostlyQuery(
+                job_id=event.job_id,
+                principal_email=event.principal_email,
+                executed_at=event.timestamp,
+                billed_bytes=event.total_billed_bytes,
+                cost_usd=_estimate_query_cost_usd(event.total_billed_bytes),
+                tables=[f"{p}.{d}.{t}" for p, d, t in event.referenced_tables],
+                query_text=event.query_text,
+            )
+        )
+
+    by_dataset = sorted(
+        (
+            DatasetCost(
+                dataset_id=dataset_id,
+                cost_usd=_estimate_query_cost_usd(billed),
+                billed_bytes=billed,
+            )
+            for dataset_id, billed in by_dataset_bytes.items()
+        ),
+        key=lambda d: d.cost_usd,
+        reverse=True,
+    )
+
+    top_queries = sorted(queries, key=lambda q: q.cost_usd, reverse=True)[:limit]
+
+    top_spenders = sorted(
+        (
+            TopSpender(
+                principal_email=principal,
+                is_service_account=_is_service_account(principal),
+                cost_usd=_estimate_query_cost_usd(billed),
+                billed_bytes=billed,
+                job_count=by_principal_jobs[principal],
+            )
+            for principal, billed in by_principal_bytes.items()
+        ),
+        key=lambda s: s.cost_usd,
+        reverse=True,
+    )[:limit]
+
+    total_billed_bytes = sum(by_principal_bytes.values())
+    cost_so_far = _estimate_query_cost_usd(total_billed_bytes)
+    daily_average = cost_so_far / lookback_days if lookback_days else 0.0
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    projection = CostProjection(
+        days_elapsed=lookback_days,
+        days_in_month=days_in_month,
+        cost_so_far_usd=cost_so_far,
+        daily_average_usd=round(daily_average, 6),
+        projected_month_total_usd=round(daily_average * days_in_month, 6),
+    )
+
+    warning = None
+    if not events:
+        warning = _EMPTY_RESULT_WARNING.format(days=lookback_days, project_id=project_id)
+    elif lookback_days > 30:
+        warning = _BUDGET_RETENTION_CAVEAT.format(days=lookback_days)
+
+    return BudgetResponse(
+        project_id=project_id,
+        period_start=month_start,
+        lookback_days=lookback_days,
+        by_dataset=by_dataset,
+        top_queries=top_queries,
+        top_spenders=top_spenders,
+        projection=projection,
+        warning=warning,
     )
