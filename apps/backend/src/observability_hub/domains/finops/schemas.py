@@ -1,9 +1,19 @@
 from datetime import datetime
-from typing import Literal
+from enum import IntEnum
 
 from pydantic import BaseModel
 
-MinDaysUnused = Literal[30, 60, 90]
+
+class MinDaysUnused(IntEnum):
+    """IntEnum, não Literal[int,...] — Literal não faz coerção de string
+    pra int em parâmetro de query (FastAPI/Pydantic recebem "30" como
+    string e Literal exige o tipo exato, sem lax-coercion — resultava em
+    422 pra toda chamada com min_days_unused na URL). IntEnum resolve
+    porque seus membros aceitam coerção de string na validação."""
+
+    THIRTY = 30
+    SIXTY = 60
+    NINETY = 90
 
 
 class UnusedTable(BaseModel):
