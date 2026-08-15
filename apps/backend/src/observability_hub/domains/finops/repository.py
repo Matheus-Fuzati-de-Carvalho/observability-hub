@@ -1,0 +1,163 @@
+"""Fala com o Cloud Logging (jobs completados, pra saber quem escaneou o
+quê e quanto pagou) e com o BigQuery (INFORMATION_SCHEMA, pra enumerar
+tabelas do projeto — custo $0). domains/finops/service.py combina os
+dois; core/bigquery.py::get_tables_metadata resolve tamanho/partição/
+last_modified por tabela (REST, cacheado, já usado por catalog/
+freshness — reaproveitado direto, é core/, não outro domínio).
+
+Duplica o parsing de audit log de domains/lineage/repository.py (não
+importa — nenhum domínio deste projeto importa de outro, ver CLAUDE.md).
+Diferença: aqui só interessa leitura (referenced_tables), não destino, e
+o campo novo é jobStatistics.totalBilledBytes — custo real já pago
+escaneando a tabela, usado pra ancorar a estimativa de economia de
+particionamento em dado observado, não em suposição (ver
+docs/specs/finops-waste-scanner.md).
+"""
+
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from google.api_core.exceptions import Forbidden
+from google.cloud import bigquery
+from google.cloud import logging as cloud_logging
+
+from observability_hub.core.exceptions import LoggingAccessDeniedError
+
+_PAGE_SIZE = 1000
+_DATE_LIKE_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
+
+TableRefTuple = tuple[str, str, str]  # (project_id, dataset_id, table_id)
+
+
+@dataclass(frozen=True)
+class ScanEvent:
+    timestamp: datetime | None
+    referenced_tables: list[TableRefTuple]
+    total_billed_bytes: int
+
+
+def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
+    if not ref:
+        return None
+    project_id = ref.get("projectId")
+    dataset_id = ref.get("datasetId")
+    table_id = ref.get("tableId")
+    if not project_id or not dataset_id or not table_id:
+        return None
+    return project_id, dataset_id, table_id
+
+
+def _parse_timestamp(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _parse_billed_bytes(raw: str | None) -> int:
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _parse_entry(entry: cloud_logging.LogEntry) -> ScanEvent | None:
+    payload = entry.payload if isinstance(entry.payload, dict) else None
+    if payload is None:
+        return None
+
+    job = payload.get("serviceData", {}).get("jobCompletedEvent", {}).get("job", {})
+    if not job:
+        return None
+
+    job_stats = job.get("jobStatistics", {})
+    raw_referenced = job_stats.get("referencedTables", [])
+    referenced = [ref for r in raw_referenced if (ref := _parse_table_ref(r)) is not None]
+    timestamp = _parse_timestamp(job_stats.get("endTime"))
+    total_billed_bytes = _parse_billed_bytes(job_stats.get("totalBilledBytes"))
+
+    return ScanEvent(
+        timestamp=timestamp,
+        referenced_tables=referenced,
+        total_billed_bytes=total_billed_bytes,
+    )
+
+
+def list_scan_events(
+    client: cloud_logging.Client, project_id: str, lookback_days: int
+) -> list[ScanEvent]:
+    """Levanta LoggingAccessDeniedError se a SA de runtime não tiver
+    roles/logging.viewer no projeto. Lista vazia (sem erro) é o resultado
+    tanto de "nenhum job rodou na janela" quanto de "Data Access audit
+    logs desabilitados" — indistinguível por aqui, ver aviso estático em
+    domains/finops/service.py.
+
+    lookback_days > 30 esbarra na retenção padrão dos audit logs do Cloud
+    Logging (30 dias, salvo bucket/sink customizado) — ver
+    docs/specs/finops-waste-scanner.md, "Casos de borda"."""
+    cutoff = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    filter_ = (
+        'resource.type="bigquery_resource" '
+        'protoPayload.methodName="jobservice.jobcompleted" '
+        f'timestamp>="{cutoff}"'
+    )
+    try:
+        entries = client.list_entries(
+            resource_names=[f"projects/{project_id}"],
+            filter_=filter_,
+            page_size=_PAGE_SIZE,
+        )
+        return [event for entry in entries if (event := _parse_entry(entry)) is not None]
+    except Forbidden as exc:
+        raise LoggingAccessDeniedError(project_id) from exc
+
+
+def list_all_table_refs(
+    client: bigquery.Client, project_id: str, regions: list[str], max_workers: int = 8
+) -> list[tuple[str, str]]:
+    """Todas as (dataset_id, table_id) do projeto, via INFORMATION_SCHEMA
+    por região em paralelo — custo $0, mesma técnica de
+    domains/lineage/repository.py::list_all_table_refs (duplicado, não
+    importado — domínios isolados)."""
+    if not regions:
+        return []
+
+    def _list_region(region: str) -> list[tuple[str, str]]:
+        sql = f"""
+            SELECT table_schema AS dataset_id, table_name AS table_id
+            FROM `{project_id}.region-{region}.INFORMATION_SCHEMA.TABLES`
+        """
+        rows = client.query(sql).result()
+        return [(row.dataset_id, row.table_id) for row in rows]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(_list_region, regions))
+    return [ref for region_refs in results for ref in region_refs]
+
+
+def get_date_like_columns(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> list[str]:
+    """Colunas DATE/DATETIME/TIMESTAMP da tabela — candidatas a chave de
+    partição. Custo $0 (INFORMATION_SCHEMA.COLUMNS)."""
+    query = f"""
+        SELECT column_name
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMNS`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+          AND data_type IN UNNEST(@date_like_types)
+        ORDER BY ordinal_position
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+            bigquery.ArrayQueryParameter("date_like_types", "STRING", sorted(_DATE_LIKE_TYPES)),
+        ]
+    )
+    rows = client.query(query, job_config=job_config).result()
+    return [row.column_name for row in rows]

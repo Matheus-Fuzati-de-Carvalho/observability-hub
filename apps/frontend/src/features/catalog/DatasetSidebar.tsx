@@ -1,4 +1,4 @@
-import { ChevronDown, Clock, History, Search, Star, Unlink } from 'lucide-react'
+import { ChevronDown, Clock, History, PiggyBank, Search, Star, Unlink } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -13,6 +13,15 @@ const MAX_RECENT_TABLES_SHOWN = 5
 interface DatasetSidebarProps {
   projectId: string
 }
+
+const NAV_LINK_CLASS = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+    isActive ? 'bg-primary font-bold text-primary-foreground' : 'text-foreground hover:bg-muted',
+  )
+
+const SECTION_LABEL_CLASS =
+  'px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase'
 
 // Só mostra "· views" quando há tabelas e views ao mesmo tempo — dataset só
 // de views (ou só de tabelas) mostra um único número, sem "0 tabelas"/"0
@@ -35,6 +44,8 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
     .slice(0, MAX_RECENT_TABLES_SHOWN)
 
   const [datasetsOpen, setDatasetsOpen] = useState(true)
+  const [favoritesOpen, setFavoritesOpen] = useState(true)
+  const [recentOpen, setRecentOpen] = useState(true)
   const [datasetFilter, setDatasetFilter] = useState('')
   const visibleDatasets = datasetsQuery.data?.datasets.filter((dataset) =>
     dataset.dataset_id.toLowerCase().includes(datasetFilter.toLowerCase()),
@@ -43,52 +54,36 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-card p-4">
       <div className="mb-4 flex flex-col gap-0.5">
-        <NavLink
-          to="/freshness"
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-primary font-bold text-primary-foreground'
-                : 'text-foreground hover:bg-muted',
-            )
-          }
-        >
+        <NavLink to="/search" className={NAV_LINK_CLASS}>
+          <Search size={16} />
+          Buscar tabelas
+        </NavLink>
+      </div>
+
+      <div className="mb-4 flex flex-col gap-0.5">
+        <p className={cn(SECTION_LABEL_CLASS, 'mb-2')}>Governança</p>
+        <NavLink to="/freshness" className={NAV_LINK_CLASS}>
           <Clock size={16} />
           Freshness
         </NavLink>
-        <NavLink
-          to="/orphans"
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-primary font-bold text-primary-foreground'
-                : 'text-foreground hover:bg-muted',
-            )
-          }
-        >
+        <NavLink to="/orphans" className={NAV_LINK_CLASS}>
           <Unlink size={16} />
-          Tabelas órfãs
+          Tabelas sem consumidor
         </NavLink>
-        <NavLink
-          to="/search"
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-              isActive
-                ? 'bg-primary font-bold text-primary-foreground'
-                : 'text-foreground hover:bg-muted',
-            )
-          }
-        >
-          <Search size={16} />
-          Busca
+      </div>
+
+      <div className="mb-4 flex flex-col gap-0.5">
+        <p className={cn(SECTION_LABEL_CLASS, 'mb-2')}>FinOps</p>
+        <NavLink to="/finops" className={NAV_LINK_CLASS}>
+          <PiggyBank size={16} />
+          Scanner de desperdício
         </NavLink>
       </div>
 
       <Collapsible open={datasetsOpen} onOpenChange={setDatasetsOpen}>
-        <CollapsibleTrigger className="mb-2 flex w-full items-center justify-between px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <CollapsibleTrigger
+          className={cn(SECTION_LABEL_CLASS, 'mb-2 flex w-full items-center justify-between')}
+        >
           Datasets disponíveis
           <ChevronDown
             size={14}
@@ -148,49 +143,65 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
       </Collapsible>
 
       {projectFavorites && projectFavorites.length > 0 && (
-        <>
-          <p className="mt-4 mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <Collapsible open={favoritesOpen} onOpenChange={setFavoritesOpen} className="mt-4">
+          <CollapsibleTrigger
+            className={cn(SECTION_LABEL_CLASS, 'mb-2 flex w-full items-center justify-between')}
+          >
             Favoritos
-          </p>
-          <nav className="flex flex-col gap-0.5">
-            {projectFavorites.map((favorite) => (
-              <Link
-                key={`${favorite.dataset_id}.${favorite.table_id}`}
-                to={`/datasets/${favorite.dataset_id}`}
-                state={{ highlightTable: favorite.table_id }}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-              >
-                <Star size={12} className="shrink-0 fill-primary text-primary" />
-                <span className="truncate">
-                  {favorite.dataset_id}.{favorite.table_id}
-                </span>
-              </Link>
-            ))}
-          </nav>
-        </>
+            <ChevronDown
+              size={14}
+              className={cn('transition-transform', !favoritesOpen && '-rotate-90')}
+            />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <nav className="flex flex-col gap-0.5">
+              {projectFavorites.map((favorite) => (
+                <Link
+                  key={`${favorite.dataset_id}.${favorite.table_id}`}
+                  to={`/datasets/${favorite.dataset_id}`}
+                  state={{ highlightTable: favorite.table_id }}
+                  className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <Star size={12} className="shrink-0 fill-primary text-primary" />
+                  <span className="truncate">
+                    {favorite.dataset_id}.{favorite.table_id}
+                  </span>
+                </Link>
+              ))}
+            </nav>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {recentTables && recentTables.length > 0 && (
-        <>
-          <p className="mt-4 mb-2 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <Collapsible open={recentOpen} onOpenChange={setRecentOpen} className="mt-4">
+          <CollapsibleTrigger
+            className={cn(SECTION_LABEL_CLASS, 'mb-2 flex w-full items-center justify-between')}
+          >
             Recentes
-          </p>
-          <nav className="flex flex-col gap-0.5">
-            {recentTables.map((view) => (
-              <Link
-                key={`${view.dataset_id}.${view.table_id}.${view.viewed_at}`}
-                to={`/datasets/${view.dataset_id}`}
-                state={{ highlightTable: view.table_id }}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-              >
-                <History size={12} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">
-                  {view.dataset_id}.{view.table_id}
-                </span>
-              </Link>
-            ))}
-          </nav>
-        </>
+            <ChevronDown
+              size={14}
+              className={cn('transition-transform', !recentOpen && '-rotate-90')}
+            />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <nav className="flex flex-col gap-0.5">
+              {recentTables.map((view) => (
+                <Link
+                  key={`${view.dataset_id}.${view.table_id}.${view.viewed_at}`}
+                  to={`/datasets/${view.dataset_id}`}
+                  state={{ highlightTable: view.table_id }}
+                  className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <History size={12} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">
+                    {view.dataset_id}.{view.table_id}
+                  </span>
+                </Link>
+              ))}
+            </nav>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </aside>
   )
