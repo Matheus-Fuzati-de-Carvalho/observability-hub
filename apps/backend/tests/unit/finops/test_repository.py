@@ -27,6 +27,27 @@ def test_parse_table_ref_returns_none_for_malformed_input(ref):
     assert repository._parse_table_ref(ref) is None
 
 
+@pytest.mark.parametrize(
+    "table_id",
+    [
+        "INFORMATION_SCHEMA.SCHEMATA",
+        "INFORMATION_SCHEMA.TABLES",
+        "INFORMATION_SCHEMA.TABLE_STORAGE",
+    ],
+)
+def test_parse_table_ref_filters_information_schema_probes(table_id):
+    # discover_regions/list_all_table_refs/get_date_like_columns do
+    # próprio Hub rodam `project.region-X.INFORMATION_SCHEMA.*` — o audit
+    # log real captura isso como datasetId="region-US" (ou outra região),
+    # tableId="INFORMATION_SCHEMA.SCHEMATA" etc. Sem o filtro, isso
+    # aparece como se "region-US" fosse um dataset real de cliente no
+    # budget (bug real encontrado em dev).
+    result = repository._parse_table_ref(
+        {"projectId": "proj", "datasetId": "region-US", "tableId": table_id}
+    )
+    assert result is None
+
+
 # --- _parse_timestamp / _parse_billed_bytes -------------------------------------
 
 

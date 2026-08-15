@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { finopsApi } from '@/lib/api/finops'
-import type { MinDaysUnused } from '@/types/finops'
+import type { BudgetGroupBy, MinDaysUnused } from '@/types/finops'
 
 export function useUnusedTables(projectId: string | undefined, minDaysUnused: MinDaysUnused = 30) {
   return useQuery({
@@ -18,10 +18,14 @@ export function usePartitionCandidates(projectId: string | undefined) {
   })
 }
 
-export function useBudget(projectId: string | undefined, limit = 10) {
+export function useBudget(
+  projectId: string | undefined,
+  groupBy: BudgetGroupBy = 'table',
+  limit = 10,
+) {
   return useQuery({
-    queryKey: ['finops-budget', projectId, limit],
-    queryFn: () => finopsApi.getBudget(projectId as string, limit),
+    queryKey: ['finops-budget', projectId, groupBy, limit],
+    queryFn: () => finopsApi.getBudget(projectId as string, groupBy, limit),
     enabled: Boolean(projectId),
   })
 }

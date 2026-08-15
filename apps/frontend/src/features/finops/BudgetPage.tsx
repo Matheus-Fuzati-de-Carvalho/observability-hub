@@ -1,34 +1,57 @@
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SortableTableHead } from '@/components/SortableTableHead'
+import { SqlPreview } from '@/components/SqlPreview'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useBudget } from '@/features/finops/hooks'
 import { useProjectContext } from '@/features/projects/ProjectContext'
 import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import { formatBytes, formatDate, formatNumber } from '@/lib/format'
-import type { CostlyQuery, DatasetCost, TopSpender } from '@/types/finops'
+import { cn } from '@/lib/utils'
+import type { BudgetGroupBy, CostGroup, CostlyQuery } from '@/types/finops'
+
+const COST_TAB = 'cost'
+const QUERIES_TAB = 'queries'
+
+const GROUP_BY_OPTIONS: { value: BudgetGroupBy; label: string }[] = [
+  { value: 'table', label: 'Tabela' },
+  { value: 'user', label: 'Usuário' },
+  { value: 'day', label: 'Dia' },
+  { value: 'month', label: 'Mês' },
+  { value: 'year', label: 'Ano' },
+]
+
+const GROUP_KEY_COLUMN_LABEL: Record<BudgetGroupBy, string> = {
+  table: 'Tabela',
+  user: 'Usuário',
+  day: 'Dia',
+  month: 'Mês',
+  year: 'Ano',
+}
 
 function formatUsd(value: number): string {
   return `US$ ${value.toFixed(value < 0.01 ? 6 : 2)}`
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text
-}
+type GroupSortKey = 'key' | 'cost_usd' | 'billed_bytes' | 'job_count'
 
-type DatasetSortKey = 'dataset_id' | 'cost_usd'
-
-function compareDataset(a: DatasetCost, b: DatasetCost, key: DatasetSortKey): number {
-  if (key === 'cost_usd') return a.cost_usd - b.cost_usd
-  return a.dataset_id.localeCompare(b.dataset_id)
+function compareGroup(a: CostGroup, b: CostGroup, key: GroupSortKey): number {
+  if (key === 'key') return a.key.localeCompare(b.key)
+  return a[key] - b[key]
 }
 
 type QuerySortKey = 'executed_at' | 'cost_usd' | 'billed_bytes'
@@ -39,54 +62,11 @@ function compareQuery(a: CostlyQuery, b: CostlyQuery, key: QuerySortKey): number
   return a.executed_at.localeCompare(b.executed_at)
 }
 
-type SpenderSortKey = 'principal_email' | 'cost_usd' | 'job_count'
-
-function compareSpender(a: TopSpender, b: TopSpender, key: SpenderSortKey): number {
-  if (key === 'cost_usd') return a.cost_usd - b.cost_usd
-  if (key === 'job_count') return a.job_count - b.job_count
-  return a.principal_email.localeCompare(b.principal_email)
-}
-
 export function BudgetPage() {
   const { projectId } = useProjectContext()
-  const query = useBudget(projectId)
+  const [groupBy, setGroupBy] = useState<BudgetGroupBy>('table')
+  const query = useBudget(projectId, groupBy)
   const data = query.data
-
-  const {
-    sortKey: datasetSortKey,
-    sortDir: datasetSortDir,
-    toggleSort: toggleDatasetSort,
-    visibleRows: visibleDatasets,
-  } = useTableFilterSort<DatasetCost, DatasetSortKey>({
-    rows: data?.by_dataset ?? [],
-    initialSortKey: 'cost_usd',
-    compare: compareDataset,
-    matches: () => true,
-  })
-
-  const {
-    sortKey: querySortKey,
-    sortDir: querySortDir,
-    toggleSort: toggleQuerySort,
-    visibleRows: visibleQueries,
-  } = useTableFilterSort<CostlyQuery, QuerySortKey>({
-    rows: data?.top_queries ?? [],
-    initialSortKey: 'cost_usd',
-    compare: compareQuery,
-    matches: () => true,
-  })
-
-  const {
-    sortKey: spenderSortKey,
-    sortDir: spenderSortDir,
-    toggleSort: toggleSpenderSort,
-    visibleRows: visibleSpenders,
-  } = useTableFilterSort<TopSpender, SpenderSortKey>({
-    rows: data?.top_spenders ?? [],
-    initialSortKey: 'cost_usd',
-    compare: compareSpender,
-    matches: () => true,
-  })
 
   return (
     <div className="flex flex-col gap-6">
@@ -94,8 +74,8 @@ export function BudgetPage() {
         <div>
           <h1 className="text-2xl font-bold">FinOps — Budget de custo</h1>
           <p className="text-sm text-muted-foreground">
-            Custo por dataset, queries mais caras e top gastadores do mês corrente — estimativa
-            baseada em bytes escaneados, cobrança on-demand.
+            Custo por agrupamento e queries mais caras do mês corrente — estimativa baseada em bytes
+            escaneados, cobrança on-demand.
           </p>
         </div>
         <RefreshButton isRefreshing={query.isFetching} onRefresh={() => query.refetch()} />
@@ -137,173 +117,279 @@ export function BudgetPage() {
             ))}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-semibold">Custo por dataset</p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <SortableTableHead
-                    label="Dataset"
-                    active={datasetSortKey === 'dataset_id'}
-                    direction={datasetSortDir}
-                    onClick={() => toggleDatasetSort('dataset_id')}
-                  />
-                  <SortableTableHead
-                    label="Custo"
-                    active={datasetSortKey === 'cost_usd'}
-                    direction={datasetSortDir}
-                    onClick={() => toggleDatasetSort('cost_usd')}
-                    align="right"
-                  />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleDatasets.map((d) => (
-                  <TableRow key={d.dataset_id}>
-                    <TableCell className="font-medium">{d.dataset_id}</TableCell>
-                    <TableCell className="text-right">{formatUsd(d.cost_usd)}</TableCell>
-                  </TableRow>
-                ))}
-                {visibleDatasets.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={2} className="text-center text-muted-foreground">
-                      Nenhum custo registrado neste mês.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          <Tabs defaultValue={COST_TAB}>
+            <TabsList className="w-fit">
+              <TabsTrigger value={COST_TAB}>Custo por agrupamento</TabsTrigger>
+              <TabsTrigger value={QUERIES_TAB}>Queries mais caras</TabsTrigger>
+            </TabsList>
 
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-semibold">Queries mais caras</p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <SortableTableHead
-                    label="Executado em"
-                    active={querySortKey === 'executed_at'}
-                    direction={querySortDir}
-                    onClick={() => toggleQuerySort('executed_at')}
-                  />
-                  <TableHead>Usuário</TableHead>
-                  <TableHead>Tabelas</TableHead>
-                  <TableHead>Query</TableHead>
-                  <SortableTableHead
-                    label="Bytes cobrados"
-                    active={querySortKey === 'billed_bytes'}
-                    direction={querySortDir}
-                    onClick={() => toggleQuerySort('billed_bytes')}
-                    align="right"
-                  />
-                  <SortableTableHead
-                    label="Custo"
-                    active={querySortKey === 'cost_usd'}
-                    direction={querySortDir}
-                    onClick={() => toggleQuerySort('cost_usd')}
-                    align="right"
-                  />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleQueries.map((q) => (
-                  <TableRow key={q.job_id}>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(q.executed_at)}
-                    </TableCell>
-                    <TableCell>{q.principal_email}</TableCell>
-                    <TableCell>
-                      <div className="flex max-w-[200px] flex-wrap gap-1">
-                        {q.tables.map((t) => (
-                          <Badge key={t} variant="outline" className="truncate" title={t}>
-                            {t.split('.').slice(1).join('.')}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell
-                      className="max-w-[240px] truncate font-mono text-xs text-muted-foreground"
-                      title={q.query_text ?? undefined}
-                    >
-                      {q.query_text ? truncate(q.query_text, 60) : '—'}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {formatBytes(q.billed_bytes)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatUsd(q.cost_usd)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {visibleQueries.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      Nenhuma query com custo neste mês.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+            <TabsContent value={COST_TAB}>
+              <CostByGroupTab
+                projectId={data.project_id}
+                groups={data.groups}
+                totalCostUsd={data.total_cost_usd}
+                groupBy={groupBy}
+                onGroupByChange={setGroupBy}
+              />
+            </TabsContent>
 
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-semibold">Top gastadores</p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <SortableTableHead
-                    label="Usuário"
-                    active={spenderSortKey === 'principal_email'}
-                    direction={spenderSortDir}
-                    onClick={() => toggleSpenderSort('principal_email')}
-                  />
-                  <SortableTableHead
-                    label="Jobs"
-                    active={spenderSortKey === 'job_count'}
-                    direction={spenderSortDir}
-                    onClick={() => toggleSpenderSort('job_count')}
-                    align="right"
-                  />
-                  <SortableTableHead
-                    label="Custo"
-                    active={spenderSortKey === 'cost_usd'}
-                    direction={spenderSortDir}
-                    onClick={() => toggleSpenderSort('cost_usd')}
-                    align="right"
-                  />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleSpenders.map((s) => (
-                  <TableRow key={s.principal_email}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{s.principal_email}</span>
-                        <Badge variant={s.is_service_account ? 'outline' : 'default'}>
-                          {s.is_service_account ? 'Service account' : 'Humano'}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {formatNumber(s.job_count)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatUsd(s.cost_usd)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {visibleSpenders.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      Nenhum gasto registrado neste mês.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+            <TabsContent value={QUERIES_TAB}>
+              <QueriesTab queries={data.top_queries} />
+            </TabsContent>
+          </Tabs>
         </>
       )}
+    </div>
+  )
+}
+
+function tableGroupLink(
+  projectId: string,
+  key: string,
+): { datasetId: string; label: string } | null {
+  if (!key.startsWith(`${projectId}.`)) return null
+  const rest = key.slice(projectId.length + 1)
+  const [datasetId] = rest.split('.')
+  if (!datasetId) return null
+  return { datasetId, label: rest }
+}
+
+function CostByGroupTab({
+  projectId,
+  groups,
+  totalCostUsd,
+  groupBy,
+  onGroupByChange,
+}: {
+  projectId: string
+  groups: CostGroup[]
+  totalCostUsd: number
+  groupBy: BudgetGroupBy
+  onGroupByChange: (value: BudgetGroupBy) => void
+}) {
+  const {
+    sortKey,
+    sortDir,
+    toggleSort,
+    visibleRows: visibleGroups,
+  } = useTableFilterSort<CostGroup, GroupSortKey>({
+    rows: groups,
+    initialSortKey: 'cost_usd',
+    compare: compareGroup,
+    matches: () => true,
+  })
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <div className="flex gap-2">
+        {GROUP_BY_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onGroupByChange(option.value)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              groupBy === option.value
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border text-muted-foreground hover:bg-muted',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <SortableTableHead
+              label={GROUP_KEY_COLUMN_LABEL[groupBy]}
+              active={sortKey === 'key'}
+              direction={sortDir}
+              onClick={() => toggleSort('key')}
+            />
+            <SortableTableHead
+              label="Bytes cobrados"
+              active={sortKey === 'billed_bytes'}
+              direction={sortDir}
+              onClick={() => toggleSort('billed_bytes')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Jobs"
+              active={sortKey === 'job_count'}
+              direction={sortDir}
+              onClick={() => toggleSort('job_count')}
+              align="right"
+            />
+            <SortableTableHead
+              label="Custo"
+              active={sortKey === 'cost_usd'}
+              direction={sortDir}
+              onClick={() => toggleSort('cost_usd')}
+              align="right"
+            />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visibleGroups.map((group) => {
+            const link = groupBy === 'table' ? tableGroupLink(projectId, group.key) : null
+            return (
+              <TableRow key={group.key}>
+                <TableCell className="font-medium">
+                  {link ? (
+                    <Link to={`/datasets/${link.datasetId}`} className="hover:text-primary">
+                      {link.label}
+                    </Link>
+                  ) : (
+                    group.key
+                  )}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {formatBytes(group.billed_bytes)}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {formatNumber(group.job_count)}
+                </TableCell>
+                <TableCell className="text-right font-medium">
+                  {formatUsd(group.cost_usd)}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+          {visibleGroups.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="text-center text-muted-foreground">
+                Nenhum custo registrado neste mês.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+        {visibleGroups.length > 0 && (
+          <TableFooter>
+            <TableRow>
+              <TableCell>Total</TableCell>
+              <TableCell />
+              <TableCell />
+              <TableCell className="text-right">{formatUsd(totalCostUsd)}</TableCell>
+            </TableRow>
+          </TableFooter>
+        )}
+      </Table>
+    </div>
+  )
+}
+
+function QueriesTab({ queries }: { queries: CostlyQuery[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  function toggleExpanded(jobId: string) {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(jobId)) {
+        next.delete(jobId)
+      } else {
+        next.add(jobId)
+      }
+      return next
+    })
+  }
+
+  const {
+    sortKey,
+    sortDir,
+    toggleSort,
+    visibleRows: visibleQueries,
+  } = useTableFilterSort<CostlyQuery, QuerySortKey>({
+    rows: queries,
+    initialSortKey: 'cost_usd',
+    compare: compareQuery,
+    matches: () => true,
+  })
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <SortableTableHead
+              label="Custo"
+              active={sortKey === 'cost_usd'}
+              direction={sortDir}
+              onClick={() => toggleSort('cost_usd')}
+              align="right"
+            />
+            <TableHead>Usuário</TableHead>
+            <SortableTableHead
+              label="Data"
+              active={sortKey === 'executed_at'}
+              direction={sortDir}
+              onClick={() => toggleSort('executed_at')}
+            />
+            <TableHead>Tabelas</TableHead>
+            <SortableTableHead
+              label="Bytes cobrados"
+              active={sortKey === 'billed_bytes'}
+              direction={sortDir}
+              onClick={() => toggleSort('billed_bytes')}
+              align="right"
+            />
+            <TableHead>Query</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visibleQueries.map((q) => {
+            const isExpanded = expanded.has(q.job_id)
+            return (
+              <Fragment key={q.job_id}>
+                <TableRow>
+                  <TableCell className="text-right font-medium">{formatUsd(q.cost_usd)}</TableCell>
+                  <TableCell>{q.principal_email}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(q.executed_at)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex max-w-[220px] flex-wrap gap-1">
+                      {q.tables.map((t) => (
+                        <Badge key={t} variant="outline" className="truncate" title={t}>
+                          {t.split('.').slice(1).join('.')}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {formatBytes(q.billed_bytes)}
+                  </TableCell>
+                  <TableCell>
+                    {q.query_text ? (
+                      <Button size="sm" variant="ghost" onClick={() => toggleExpanded(q.job_id)}>
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        {isExpanded ? 'Ocultar query' : 'Ver query'}
+                      </Button>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+                {isExpanded && q.query_text && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="bg-background/50">
+                      <SqlPreview sql={q.query_text} defaultOpen />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            )
+          })}
+          {visibleQueries.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-center text-muted-foreground">
+                Nenhuma query com custo neste mês.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
     </div>
   )
 }

@@ -51,6 +51,16 @@ def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
     table_id = ref.get("tableId")
     if not project_id or not dataset_id or not table_id:
         return None
+    if table_id.startswith("INFORMATION_SCHEMA."):
+        # Query de metadado do próprio Hub (discover_regions,
+        # list_all_table_refs, get_date_like_columns — todas rodam
+        # `project.region-X.INFORMATION_SCHEMA.*`) — não é uma tabela
+        # real de cliente. Sem esse filtro, "region-US"/"region-EU"/etc.
+        # aparecem como se fossem datasets reais no budget, com custo
+        # real (pequeno, mas não-zero) de cada probe de região — bug
+        # real encontrado em dev, não hipotético (ver
+        # docs/specs/finops-budget.md, "Casos de borda").
+        return None
     return project_id, dataset_id, table_id
 
 

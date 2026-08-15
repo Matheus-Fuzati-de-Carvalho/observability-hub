@@ -39,10 +39,13 @@ export interface PartitionCandidatesResponse {
   warning: string | null
 }
 
-export interface DatasetCost {
-  dataset_id: string
+export type BudgetGroupBy = 'table' | 'user' | 'day' | 'month' | 'year'
+
+export interface CostGroup {
+  key: string
   cost_usd: number
   billed_bytes: number
+  job_count: number
 }
 
 export interface CostlyQuery {
@@ -53,14 +56,6 @@ export interface CostlyQuery {
   cost_usd: number
   tables: string[]
   query_text: string | null
-}
-
-export interface TopSpender {
-  principal_email: string
-  is_service_account: boolean
-  cost_usd: number
-  billed_bytes: number
-  job_count: number
 }
 
 export interface CostProjection {
@@ -75,9 +70,10 @@ export interface BudgetResponse {
   project_id: string
   period_start: string
   lookback_days: number
-  by_dataset: DatasetCost[]
+  group_by: BudgetGroupBy
+  groups: CostGroup[]
+  total_cost_usd: number
   top_queries: CostlyQuery[]
-  top_spenders: TopSpender[]
   projection: CostProjection
   warning: string | null
 }

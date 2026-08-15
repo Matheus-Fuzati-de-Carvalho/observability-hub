@@ -1,9 +1,10 @@
 """Orquestra o domínio finops: scanner de desperdício (tabelas sem uso,
-candidatas a particionamento) e budget (custo por dataset, queries mais
-caras, top gastadores, projeção do mês) — combina enumeração de tabelas
-(BigQuery INFORMATION_SCHEMA + client.get_table() via core/bigquery.py)
-com audit logs de jobs (Cloud Logging, via repository). api/v1 só chama
-estas funções — CLAUDE.md proíbe lógica de negócio em api/.
+candidatas a particionamento) e budget (custo agrupável por
+tabela/usuário/dia/mês/ano, queries mais caras, projeção do mês) —
+combina enumeração de tabelas (BigQuery INFORMATION_SCHEMA +
+client.get_table() via core/bigquery.py) com audit logs de jobs (Cloud
+Logging, via repository). api/v1 só chama estas funções — CLAUDE.md
+proíbe lógica de negócio em api/.
 """
 
 import calendar
@@ -19,15 +20,16 @@ from observability_hub.core.bigquery import (
 )
 from observability_hub.core.config import settings
 from observability_hub.domains.finops import repository
+from observability_hub.domains.finops.repository import ScanEvent, TableRefTuple
 from observability_hub.domains.finops.schemas import (
+    BudgetGroupBy,
     BudgetResponse,
+    CostGroup,
     CostlyQuery,
     CostProjection,
-    DatasetCost,
     MinDaysUnused,
     PartitionCandidate,
     PartitionCandidatesResponse,
-    TopSpender,
     UnusedTable,
     UnusedTablesResponse,
 )
@@ -70,7 +72,7 @@ _BUDGET_RETENTION_CAVEAT = (
     "Já estamos {days} dias dentro do mês, e Data Access audit logs no "
     "Cloud Logging têm retenção padrão de 30 dias (salvo bucket/sink "
     "customizado). Se esse for o caso aqui, o início do mês pode estar "
-    "faltando neste relatório — custo por dataset, top queries e projeção "
+    "faltando neste relatório — custo agrupado, top queries e projeção "
     "ficariam subestimados."
 )
 
@@ -87,10 +89,6 @@ def _human_bytes(num_bytes: int) -> str:
 def _estimate_query_cost_usd(num_bytes: int) -> float:
     tib = num_bytes / (1024**4)
     return round(tib * settings.bigquery_price_usd_per_tib, 6)
-
-
-def _is_service_account(principal_email: str) -> bool:
-    return principal_email.endswith("gserviceaccount.com")
 
 
 def _month_start(now: datetime) -> datetime:
@@ -267,9 +265,29 @@ def scan_partition_candidates(
     )
 
 
+def _group_keys(
+    group_by: BudgetGroupBy, event: ScanEvent, real_tables: list[TableRefTuple]
+) -> list[str]:
+    """Uma chave por tabela real tocada (fan-out, mesma lógica de
+    by_dataset da v1 — uma query com JOIN entre tabelas conta em cada
+    uma) pra group_by=TABLE; uma chave só pras demais dimensões, que são
+    por evento, não por tabela."""
+    if group_by == BudgetGroupBy.TABLE:
+        return sorted({f"{p}.{d}.{t}" for p, d, t in real_tables})
+    if group_by == BudgetGroupBy.USER:
+        return [event.principal_email]
+    assert event.timestamp is not None  # já filtrado antes de chamar
+    if group_by == BudgetGroupBy.DAY:
+        return [event.timestamp.date().isoformat()]
+    if group_by == BudgetGroupBy.MONTH:
+        return [event.timestamp.strftime("%Y-%m")]
+    return [str(event.timestamp.year)]  # YEAR
+
+
 def get_budget(
     logging_client: cloud_logging.Client,
     project_id: str,
+    group_by: BudgetGroupBy = BudgetGroupBy.TABLE,
     limit: int = _BUDGET_TOP_N_DEFAULT,
 ) -> BudgetResponse:
     now = datetime.now(UTC)
@@ -278,10 +296,10 @@ def get_budget(
 
     events = repository.list_scan_events(logging_client, project_id, lookback_days)
 
-    by_dataset_bytes: dict[str, int] = {}
-    by_principal_bytes: dict[str, int] = {}
-    by_principal_jobs: dict[str, int] = {}
+    group_bytes: dict[str, int] = {}
+    group_jobs: dict[str, int] = {}
     queries: list[CostlyQuery] = []
+    total_billed_bytes = 0
 
     for event in events:
         if event.timestamp is None or event.timestamp < month_start:
@@ -289,18 +307,20 @@ def get_budget(
         if event.total_billed_bytes <= 0:
             continue
 
-        datasets_touched = {ref[1] for ref in event.referenced_tables if ref[0] == project_id}
-        for dataset_id in datasets_touched:
-            by_dataset_bytes[dataset_id] = (
-                by_dataset_bytes.get(dataset_id, 0) + event.total_billed_bytes
-            )
+        real_tables = [ref for ref in event.referenced_tables if ref[0] == project_id]
+        if not real_tables:
+            # Só referencia INFORMATION_SCHEMA (já filtrado em
+            # repository._parse_table_ref) ou tabela de outro projeto —
+            # não é atividade de dado real deste projeto, não entra em
+            # nenhuma agregação de budget (ver docs/specs/finops-budget.md,
+            # "Casos de borda").
+            continue
 
-        by_principal_bytes[event.principal_email] = (
-            by_principal_bytes.get(event.principal_email, 0) + event.total_billed_bytes
-        )
-        by_principal_jobs[event.principal_email] = (
-            by_principal_jobs.get(event.principal_email, 0) + 1
-        )
+        total_billed_bytes += event.total_billed_bytes
+
+        for key in _group_keys(group_by, event, real_tables):
+            group_bytes[key] = group_bytes.get(key, 0) + event.total_billed_bytes
+            group_jobs[key] = group_jobs.get(key, 0) + 1
 
         queries.append(
             CostlyQuery(
@@ -309,49 +329,34 @@ def get_budget(
                 executed_at=event.timestamp,
                 billed_bytes=event.total_billed_bytes,
                 cost_usd=_estimate_query_cost_usd(event.total_billed_bytes),
-                tables=[f"{p}.{d}.{t}" for p, d, t in event.referenced_tables],
+                tables=[f"{p}.{d}.{t}" for p, d, t in real_tables],
                 query_text=event.query_text,
             )
         )
 
-    by_dataset = sorted(
+    groups = sorted(
         (
-            DatasetCost(
-                dataset_id=dataset_id,
+            CostGroup(
+                key=key,
                 cost_usd=_estimate_query_cost_usd(billed),
                 billed_bytes=billed,
+                job_count=group_jobs[key],
             )
-            for dataset_id, billed in by_dataset_bytes.items()
+            for key, billed in group_bytes.items()
         ),
-        key=lambda d: d.cost_usd,
+        key=lambda g: g.cost_usd,
         reverse=True,
     )
 
     top_queries = sorted(queries, key=lambda q: q.cost_usd, reverse=True)[:limit]
 
-    top_spenders = sorted(
-        (
-            TopSpender(
-                principal_email=principal,
-                is_service_account=_is_service_account(principal),
-                cost_usd=_estimate_query_cost_usd(billed),
-                billed_bytes=billed,
-                job_count=by_principal_jobs[principal],
-            )
-            for principal, billed in by_principal_bytes.items()
-        ),
-        key=lambda s: s.cost_usd,
-        reverse=True,
-    )[:limit]
-
-    total_billed_bytes = sum(by_principal_bytes.values())
-    cost_so_far = _estimate_query_cost_usd(total_billed_bytes)
-    daily_average = cost_so_far / lookback_days if lookback_days else 0.0
+    total_cost_usd = _estimate_query_cost_usd(total_billed_bytes)
+    daily_average = total_cost_usd / lookback_days if lookback_days else 0.0
     days_in_month = calendar.monthrange(now.year, now.month)[1]
     projection = CostProjection(
         days_elapsed=lookback_days,
         days_in_month=days_in_month,
-        cost_so_far_usd=cost_so_far,
+        cost_so_far_usd=total_cost_usd,
         daily_average_usd=round(daily_average, 6),
         projected_month_total_usd=round(daily_average * days_in_month, 6),
     )
@@ -366,9 +371,10 @@ def get_budget(
         project_id=project_id,
         period_start=month_start,
         lookback_days=lookback_days,
-        by_dataset=by_dataset,
+        group_by=group_by,
+        groups=groups,
+        total_cost_usd=total_cost_usd,
         top_queries=top_queries,
-        top_spenders=top_spenders,
         projection=projection,
         warning=warning,
     )

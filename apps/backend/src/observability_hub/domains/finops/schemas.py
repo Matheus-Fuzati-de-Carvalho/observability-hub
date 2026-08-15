@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 from pydantic import BaseModel
 
@@ -55,10 +55,19 @@ class PartitionCandidatesResponse(BaseModel):
     warning: str | None = None
 
 
-class DatasetCost(BaseModel):
-    dataset_id: str
+class BudgetGroupBy(str, Enum):
+    TABLE = "table"
+    USER = "user"
+    DAY = "day"
+    MONTH = "month"
+    YEAR = "year"
+
+
+class CostGroup(BaseModel):
+    key: str
     cost_usd: float
     billed_bytes: int
+    job_count: int
 
 
 class CostlyQuery(BaseModel):
@@ -69,14 +78,6 @@ class CostlyQuery(BaseModel):
     cost_usd: float
     tables: list[str]
     query_text: str | None
-
-
-class TopSpender(BaseModel):
-    principal_email: str
-    is_service_account: bool
-    cost_usd: float
-    billed_bytes: int
-    job_count: int
 
 
 class CostProjection(BaseModel):
@@ -91,8 +92,9 @@ class BudgetResponse(BaseModel):
     project_id: str
     period_start: datetime
     lookback_days: int
-    by_dataset: list[DatasetCost]
+    group_by: BudgetGroupBy
+    groups: list[CostGroup]
+    total_cost_usd: float
     top_queries: list[CostlyQuery]
-    top_spenders: list[TopSpender]
     projection: CostProjection
     warning: str | None = None

@@ -65,12 +65,58 @@ desperdício). Sidebar ganhou uma segunda entrada no grupo FinOps.
   as duas funcionalidades do domínio finops compartilham o mesmo
   repository.py.
 
+### Correções e melhorias pós-review (mesma branch, v1.1 da spec)
+
+Ticket do usuário reportando dois bugs e duas melhorias na tela de
+budget. Ver `docs/specs/finops-budget.md` (v1.1) para o detalhe completo.
+
+**Bug real encontrado durante a investigação — regiões fantasma**
+- O ticket original descrevia a causa como "busca custo em todas as
+  regiões do `BQ_REGIONS` via `INFORMATION_SCHEMA.JOBS`" — verificado
+  via grep que isso é **factualmente incorreto**: `get_budget()` nunca
+  iterou regiões nem leu `INFORMATION_SCHEMA.JOBS`, só Cloud Logging.
+  Perguntado ao usuário se o sintoma ($0.07 fantasma) era real ou
+  hipotético antes de implementar o fix descrito — confirmado real.
+- Causa raiz investigada com `gcloud logging read` (5000 eventos reais
+  de agosto/2026 em `observability-hub-dev`) + replay da lógica de
+  agregação: `discover_regions()`/`list_all_table_refs()`/
+  `get_date_like_columns()` (usadas por catalog/freshness/finops para
+  descoberta de metadados a custo ~zero) rodam
+  `` `project.region-X.INFORMATION_SCHEMA.*` `` — o audit log dessas
+  queries tem `datasetId="region-US"` e `tableId="INFORMATION_SCHEMA.*"`,
+  contado como se fosse um dataset real. **4989 de 5000 jobs amostrados
+  (99,8%) eram esse ruído.**
+- Fix: `repository._parse_table_ref()` descarta `table_id` que comece
+  com `INFORMATION_SCHEMA.` na origem (beneficia todas as funções do
+  domínio); `get_budget()` pula o evento inteiro quando não sobra
+  nenhuma tabela real do projeto após o filtro.
+
+**Bug 2 — sobreposição visual em "queries mais caras"**
+- Texto da query inline na célula colidia visualmente com a coluna de
+  tabelas. Fix: texto oculto por padrão, toggle "Ver query"/"Ocultar
+  query" por linha expande um bloco `SqlPreview` (componente já
+  compartilhado com o preview de SQL do profiling) abaixo da linha.
+
+**Melhoria 1 — agrupamento configurável**
+- `by_dataset`/`top_spenders` (visões fixas da v1.0) substituídos por
+  `groups: CostGroup[]` + `group_by: table|user|day|month|year`. O
+  ticket original descrevia isso via `GROUP BY` em SQL sobre
+  `INFORMATION_SCHEMA.JOBS` — reimplementado sobre a arquitetura real
+  do domínio (Cloud Logging, sem query BQ nova, sem custo/IAM
+  adicional): `service._group_keys()` deriva a chave a partir do
+  `ScanEvent` já em memória.
+
+**Melhoria 2 — layout em duas abas**
+- `BudgetPage.tsx` reescrita: seções empilhadas → `Tabs` do shadcn/ui
+  ("Custo por agrupamento" com pill buttons de `group_by` + total no
+  rodapé via `TableFooter`; "Queries mais caras" com o toggle do Bug 2).
+
 ### Status até o momento
-- Backend: 425 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 431 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
-- Frontend: `biome check`, `tsc -b`, `vite build` limpos
-- Ainda não validado em dev — branch não deployada nesta sessão até este
-  registro
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Commitado na branch `feat/finops-budget`, push e PR **não** feitos —
+  aguardando validação manual em dev e aprovação do usuário
 - Falta a 3ª frente de FinOps (otimizações sugeridas) e a lacuna da v1
   do PII (adiada, não esquecida)
 

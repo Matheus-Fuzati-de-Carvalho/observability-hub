@@ -1,5 +1,6 @@
 import { httpClient } from '@/lib/http-client'
 import type {
+  BudgetGroupBy,
   BudgetResponse,
   MinDaysUnused,
   PartitionCandidatesResponse,
@@ -15,6 +16,8 @@ export const finopsApi = {
   getPartitionCandidates: (projectId: string) =>
     httpClient.get<PartitionCandidatesResponse>(`/api/v1/finops/${projectId}/partition-candidates`),
 
-  getBudget: (projectId: string, limit = 10) =>
-    httpClient.get<BudgetResponse>(`/api/v1/finops/${projectId}/budget?limit=${limit}`),
+  getBudget: (projectId: string, groupBy: BudgetGroupBy = 'table', limit = 10) =>
+    httpClient.get<BudgetResponse>(
+      `/api/v1/finops/${projectId}/budget?group_by=${groupBy}&limit=${limit}`,
+    ),
 }
