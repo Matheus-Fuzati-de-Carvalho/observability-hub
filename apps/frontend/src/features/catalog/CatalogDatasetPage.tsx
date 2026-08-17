@@ -1,8 +1,10 @@
+import { Star } from 'lucide-react'
 import { useLocation, useParams } from 'react-router-dom'
 import { RefreshButton } from '@/components/RefreshButton'
 import { AssetsTable } from '@/features/catalog/AssetsTable'
 import { useDatasets, useTables } from '@/features/catalog/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
+import { isFavoriteDataset, useFavorites, useToggleFavorite } from '@/features/favorites/hooks'
 import { useProjectFreshness } from '@/features/freshness/hooks'
 import { SLA_LABELS } from '@/features/freshness/sla'
 import { useProjectContext } from '@/features/projects/ProjectContext'
@@ -17,6 +19,8 @@ export function CatalogDatasetPage() {
   const tablesQuery = useTables(projectId, datasetId)
   const datasetsQuery = useDatasets(projectId)
   const freshnessQuery = useProjectFreshness(projectId)
+  const favoritesQuery = useFavorites()
+  const toggleFavorite = useToggleFavorite()
 
   if (tablesQuery.isLoading) {
     return <p className="text-muted-foreground">Carregando…</p>
@@ -32,12 +36,37 @@ export function CatalogDatasetPage() {
   )?.worst_status
   const isRefreshing =
     tablesQuery.isFetching || datasetsQuery.isFetching || freshnessQuery.isFetching
+  const isDatasetFavorite = isFavoriteDataset(
+    favoritesQuery.data,
+    projectId as string,
+    tablesQuery.data.dataset_id,
+  )
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{tablesQuery.data.dataset_id}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">{tablesQuery.data.dataset_id}</h1>
+            <button
+              type="button"
+              onClick={() =>
+                toggleFavorite.mutate({
+                  projectId: projectId as string,
+                  datasetId: tablesQuery.data.dataset_id,
+                  tableId: null,
+                  isFavorite: isDatasetFavorite,
+                })
+              }
+              aria-label={isDatasetFavorite ? 'Remover dataset dos favoritos' : 'Favoritar dataset'}
+              className="text-muted-foreground hover:text-primary"
+            >
+              <Star
+                size={18}
+                className={isDatasetFavorite ? 'fill-primary text-primary' : undefined}
+              />
+            </button>
+          </div>
           <p className="text-sm text-muted-foreground">{tablesQuery.data.total_tables} ativos</p>
         </div>
         <RefreshButton

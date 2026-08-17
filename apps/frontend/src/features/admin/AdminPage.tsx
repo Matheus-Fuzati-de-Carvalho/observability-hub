@@ -1,3 +1,5 @@
+import { ArrowLeft } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AdminAccessRequestsTab } from '@/features/admin/AdminAccessRequestsTab'
@@ -15,6 +17,14 @@ export function AdminPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <Link
+        to="/"
+        className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft size={14} />
+        Voltar
+      </Link>
+
       <div>
         <h1 className="text-2xl font-bold">Administração — usuários e acesso</h1>
         <p className="text-sm text-muted-foreground">

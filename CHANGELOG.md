@@ -5,6 +5,76 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## 4 ajustes de UX: busca no menu, contraste, voltar no admin, favoritos por dataset/apelido
+
+Branch `feat/sprint-3.2`. Usuário validou a reorganização da sidebar por
+serviço e o admin em uso real e voltou com 4 pedidos, em ordem de
+prioridade declarada.
+
+### O que foi feito
+
+1. **"Buscar tabelas" dentro de "Datasets disponíveis"** — era um link
+   solto acima das seções da sidebar; movido pra dentro da seção, como
+   primeiro item.
+2. **Contraste de `--muted-foreground` corrigido** — `#5b626c` sobre
+   `#1d1d1b` media ~2.74:1 (WCAG AA exige ≥4.5:1 pra texto normal),
+   calculado via fórmula de luminância relativa (sRGB → linear →
+   contraste), não só "parecia ruim". Trocado por `#8f96a1` (mesma
+   família azul-acinzentada, 5.66:1 contra `--background`, 4.82:1
+   contra `--card`, fundo real da sidebar). Atualizado em `index.css`
+   **e** em `docs/skills/frontend.md` juntos — a skill é a fonte de
+   verdade documentada da paleta dp6 e precisa ficar sincronizada.
+3. **Botão de voltar no `/admin`** — primeira tela do app com esse
+   padrão; link discreto (`ArrowLeft` + "Voltar") pra `/`.
+4. **Favoritos com dois níveis (tabela/dataset) + apelido** — reescrita
+   do domínio `favorites`: `FavoriteTable` virou `Favorite`
+   (`table_id: str | None`, `None` = favorito do dataset inteiro) e
+   ganhou `nickname: str | None`. Nova rota
+   `DELETE /favorites/{project_id}/{dataset_id}` (nível dataset,
+   coexiste com a de nível tabela por diferença de segmentos de path).
+   Estrela de favoritar dataset adicionada em duas navegações novas: a
+   lista "Datasets disponíveis" da sidebar e o cabeçalho de
+   `CatalogDatasetPage.tsx`. Seção "Favoritos" da sidebar dividida em
+   "Tabelas favoritas" / "Datasets favoritos". Apelido editável inline
+   (lápis no hover → input, sem dialog) via `FavoriteNickname.tsx`.
+
+### Decisões desta sessão
+
+**Decisão 1 — `added_at` e `nickname` preservados em upsert repetido**
+- Mesmo racional já usado em `domains/admin/repository.py::upsert_user`
+  pra `created_at`: sem preservar `added_at`, editar só o apelido de um
+  favorito existente reordenaria a lista (ordenada por `added_at`
+  desc) — efeito colateral indesejado de uma ação que devia ser só
+  renomear. `nickname` ganhou semântica de três estados na chamada de
+  `add_favorite`, não dois: `None` = não mexe no apelido já salvo
+  (o toggle de favoritar/desfavoritar nunca passa `nickname`, e não
+  pode apagar um apelido existente sem querer); `""` = remove o
+  apelido de propósito; qualquer outra string = define o apelido.
+
+**Decisão 2 — Contraste corrigido com medição, não só percepção**
+- Perguntado e confirmado com o usuário: atualizar `index.css` e
+  `docs/skills/frontend.md` juntos. O valor novo foi calculado (não
+  escolhido a olho) pra garantir ≥4.5:1 contra os fundos reais onde o
+  token aparece.
+
+**Decisão 3 — Apelido editado inline, sem dialog**
+- Perguntado e confirmado com o usuário: lápis aparece no hover do
+  item (`group-hover`), clique troca o texto por um `Input` autofocado
+  ali mesmo — consistente com a preferência por menos fricção nessa
+  interação específica (diferente do padrão de dialog já usado em
+  `AdminUsersTab.tsx`, mantido lá por ser uma edição com mais campos).
+
+### Status até o momento
+- Backend: 534 testes unitários, 100% passando, `ruff check`/`ruff
+  format --check` sem erros.
+- Frontend: `tsc --noEmit` limpo, `pnpm lint` (biome) sem erros,
+  `pnpm build` concluído.
+- Validação visual (legibilidade do contraste, favoritos de dataset,
+  apelido inline, botão voltar) fica a cargo do usuário após o deploy
+  — sem ferramenta de browser neste ambiente.
+
+---
+
 ## Admin v1.1: projetos públicos, visão por projeto, solicitação de acesso, mensagens de erro
 
 Branch `feat/finops-budget`. Extensão do ACL v1.0 (ADR-009) — usuário

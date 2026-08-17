@@ -15,9 +15,16 @@ import { Link, NavLink } from 'react-router-dom'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { useDatasets } from '@/features/catalog/hooks'
-import { useFavorites } from '@/features/favorites/hooks'
+import { FavoriteNickname } from '@/features/favorites/FavoriteNickname'
+import {
+  isFavoriteDataset,
+  useFavorites,
+  useToggleFavorite,
+  useUpdateFavoriteNickname,
+} from '@/features/favorites/hooks'
 import { useHistory } from '@/features/history/hooks'
 import { cn } from '@/lib/utils'
+import type { Favorite } from '@/types/favorites'
 
 const MAX_RECENT_TABLES_SHOWN = 5
 
@@ -107,7 +114,13 @@ function SidebarSection({
 export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
   const datasetsQuery = useDatasets(projectId)
   const favoritesQuery = useFavorites()
+  const toggleFavorite = useToggleFavorite()
+  const updateNickname = useUpdateFavoriteNickname()
   const projectFavorites = favoritesQuery.data?.favorites.filter((f) => f.project_id === projectId)
+  const tableFavorites = projectFavorites?.filter(
+    (f): f is Favorite & { table_id: string } => f.table_id !== null,
+  )
+  const datasetFavorites = projectFavorites?.filter((f) => f.table_id === null)
   const historyQuery = useHistory()
   const recentTables = historyQuery.data?.recent_tables
     .filter((t) => t.project_id === projectId)
@@ -135,11 +148,6 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
         open={bigQueryOpen}
         onOpenChange={setBigQueryOpen}
       >
-        <NavLink to="/search" className={NAV_LINK_CLASS}>
-          <Search size={16} />
-          Buscar tabelas
-        </NavLink>
-
         <SidebarSection label="Governança" open={governanceOpen} onOpenChange={setGovernanceOpen}>
           <nav className="flex flex-col gap-0.5">
             <NavLink to="/freshness" className={NAV_LINK_CLASS}>
@@ -171,6 +179,11 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
           open={datasetsOpen}
           onOpenChange={setDatasetsOpen}
         >
+          <NavLink to="/search" className={NAV_LINK_CLASS}>
+            <Search size={16} />
+            Buscar tabelas
+          </NavLink>
+
           {datasetsQuery.isLoading && (
             <p className="px-3 text-sm text-muted-foreground">Carregando…</p>
           )}
@@ -195,25 +208,53 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
           )}
 
           <nav className="flex flex-col gap-0.5">
-            {visibleDatasets?.map((dataset) => (
-              <NavLink
-                key={dataset.dataset_id}
-                to={`/datasets/${dataset.dataset_id}`}
-                className={({ isActive }) =>
-                  cn(
-                    'flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-primary font-bold text-primary-foreground'
-                      : 'text-foreground hover:bg-muted',
-                  )
-                }
-              >
-                <span className="truncate">{dataset.dataset_id}</span>
-                <span className="shrink-0 text-xs opacity-70">
-                  [{formatAssetCounts(dataset.total_tables, dataset.total_views)}]
-                </span>
-              </NavLink>
-            ))}
+            {visibleDatasets?.map((dataset) => {
+              const isDatasetFavorite = isFavoriteDataset(
+                favoritesQuery.data,
+                projectId,
+                dataset.dataset_id,
+              )
+              return (
+                <div key={dataset.dataset_id} className="flex items-center gap-1">
+                  <NavLink
+                    to={`/datasets/${dataset.dataset_id}`}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex min-w-0 flex-1 items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
+                        isActive
+                          ? 'bg-primary font-bold text-primary-foreground'
+                          : 'text-foreground hover:bg-muted',
+                      )
+                    }
+                  >
+                    <span className="truncate">{dataset.dataset_id}</span>
+                    <span className="shrink-0 text-xs opacity-70">
+                      [{formatAssetCounts(dataset.total_tables, dataset.total_views)}]
+                    </span>
+                  </NavLink>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleFavorite.mutate({
+                        projectId,
+                        datasetId: dataset.dataset_id,
+                        tableId: null,
+                        isFavorite: isDatasetFavorite,
+                      })
+                    }
+                    aria-label={
+                      isDatasetFavorite ? 'Remover dataset dos favoritos' : 'Favoritar dataset'
+                    }
+                    className="shrink-0 px-1 text-muted-foreground hover:text-primary"
+                  >
+                    <Star
+                      size={13}
+                      className={isDatasetFavorite ? 'fill-primary text-primary' : undefined}
+                    />
+                  </button>
+                </div>
+              )
+            })}
             {visibleDatasets && visibleDatasets.length === 0 && (
               <p className="px-3 text-sm text-muted-foreground">Nenhum dataset encontrado.</p>
             )}
@@ -222,21 +263,80 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
 
         {projectFavorites && projectFavorites.length > 0 && (
           <SidebarSection label="Favoritos" open={favoritesOpen} onOpenChange={setFavoritesOpen}>
-            <nav className="flex flex-col gap-0.5">
-              {projectFavorites.map((favorite) => (
-                <Link
-                  key={`${favorite.dataset_id}.${favorite.table_id}`}
-                  to={`/datasets/${favorite.dataset_id}`}
-                  state={{ highlightTable: favorite.table_id }}
-                  className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                >
-                  <Star size={12} className="shrink-0 fill-primary text-primary" />
-                  <span className="truncate">
-                    {favorite.dataset_id}.{favorite.table_id}
-                  </span>
-                </Link>
-              ))}
-            </nav>
+            <div className="flex flex-col gap-3">
+              {tableFavorites && tableFavorites.length > 0 && (
+                <div>
+                  <p className="px-3 text-[11px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
+                    Tabelas favoritas
+                  </p>
+                  <nav className="flex flex-col gap-0.5">
+                    {tableFavorites.map((favorite) => (
+                      <div
+                        key={`${favorite.dataset_id}.${favorite.table_id}`}
+                        className="group flex flex-col gap-0.5 rounded-md px-3 py-2 transition-colors hover:bg-muted"
+                      >
+                        <Link
+                          to={`/datasets/${favorite.dataset_id}`}
+                          state={{ highlightTable: favorite.table_id }}
+                          className="flex items-center gap-2 text-sm text-foreground"
+                        >
+                          <Star size={12} className="shrink-0 fill-primary text-primary" />
+                          <span className="truncate">
+                            {favorite.dataset_id}.{favorite.table_id}
+                          </span>
+                        </Link>
+                        <FavoriteNickname
+                          nickname={favorite.nickname}
+                          onSave={(nickname) =>
+                            updateNickname.mutate({
+                              projectId,
+                              datasetId: favorite.dataset_id,
+                              tableId: favorite.table_id,
+                              nickname,
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </nav>
+                </div>
+              )}
+
+              {datasetFavorites && datasetFavorites.length > 0 && (
+                <div>
+                  <p className="px-3 text-[11px] font-semibold tracking-wide text-muted-foreground/70 uppercase">
+                    Datasets favoritos
+                  </p>
+                  <nav className="flex flex-col gap-0.5">
+                    {datasetFavorites.map((favorite) => (
+                      <div
+                        key={favorite.dataset_id}
+                        className="group flex flex-col gap-0.5 rounded-md px-3 py-2 transition-colors hover:bg-muted"
+                      >
+                        <Link
+                          to={`/datasets/${favorite.dataset_id}`}
+                          className="flex items-center gap-2 text-sm text-foreground"
+                        >
+                          <Star size={12} className="shrink-0 fill-primary text-primary" />
+                          <span className="truncate">{favorite.dataset_id}</span>
+                        </Link>
+                        <FavoriteNickname
+                          nickname={favorite.nickname}
+                          onSave={(nickname) =>
+                            updateNickname.mutate({
+                              projectId,
+                              datasetId: favorite.dataset_id,
+                              tableId: null,
+                              nickname,
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </nav>
+                </div>
+              )}
+            </div>
           </SidebarSection>
         )}
 
