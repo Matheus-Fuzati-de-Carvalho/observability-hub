@@ -1,9 +1,9 @@
 # Spec — Domínio: PII (fingerprinting de dados pessoais)
 
-**Versão:** 1.0
+**Versão:** 1.1
 **Status:** Aprovada
 **Fase:** 3 — Sprint 3.2
-**Última atualização:** 2026-08-14
+**Última atualização:** 2026-08-17
 
 ---
 
@@ -142,6 +142,35 @@ cheio de zeros).
 
 ---
 
+## Histórico de scans (v1.1 desta spec, Admin v1.3)
+
+Cada execução real do `/run` (cache miss — ver `_scan_cache` em
+`service.py`, TTL de 300s) grava um resumo em
+`pii_scan_history/{project}_{dataset}_{table}/scans/{auto-id}`:
+`project_id`, `dataset_id`, `table_id`, `executed_by`, `executed_at`,
+`flagged_columns_count`, `columns` (resumo mínimo por coluna:
+`column_name`, `flagged`, `confidence` — sem valores de amostra, que já
+não existem no schema de resposta hoje). Cap de 30 por tabela, mesmo
+trim-to-max de `domains/quality/history_repository.py`.
+
+Um **cache hit** não grava histórico de novo — o resultado devolvido é
+o mesmo de uma execução anterior, não uma execução nova.
+
+O nome da subcoleção é `scans`, deliberadamente diferente de `runs`
+(usado por `profiling_history`) — a agregação administrativa em
+`domains/admin/analytics_repository.py` lê ambos via
+`collection_group`, que ignora o caminho do documento-pai e enxerga só
+o nome da subcoleção; nomes iguais fariam os dois históricos se
+misturarem.
+
+Esse histórico alimenta só a visão administrativa agregada
+(`GET /api/v1/admin/analytics/pii-scans`, ver `docs/specs/admin.md`) —
+não existe endpoint de histórico por tabela nesta versão (diferente de
+`quality`, que tem `GET /api/v1/quality/history/...`); adicionar um, se
+algum dia for pedido, é extensão pequena sobre o mesmo repository.
+
+---
+
 ## Lógica de geração de SQL
 
 ### Query de scan (gerada dinamicamente, uma linha só por tabela)
@@ -217,10 +246,12 @@ apps/backend/src/observability_hub/
 │   ├── __init__.py
 │   ├── service.py
 │   ├── repository.py
+│   ├── history_repository.py  # novo (v1.1) — pii_scan_history/{doc}/scans
 │   ├── sql_builder.py      # Padrões regex, heurística de nome, geração de SQL
 │   └── schemas.py
 └── tests/unit/pii/
     ├── test_service.py
+    ├── test_history_repository.py  # novo (v1.1)
     └── test_sql_builder.py  # Testa geração de SQL sem tocar BQ
 ```
 
@@ -240,6 +271,8 @@ apps/backend/src/observability_hub/
 | Timeout > 60s | HTTP 504 com sugestão de reduzir amostragem |
 | `sample_percent < 1` | HTTP 400 |
 | `match_threshold_pct` fora de 0–100 | HTTP 422 (validação Pydantic) |
+| Cache hit dentro dos 5min | Não grava novo doc em `pii_scan_history` — não é uma execução real |
+| Tabela escaneada mais de 30 vezes | Trim automático mantém só os 30 scans mais recentes |
 
 ---
 

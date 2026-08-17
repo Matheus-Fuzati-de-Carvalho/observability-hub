@@ -800,6 +800,16 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     causa do `recharts` (histórico de qualidade). Item 6 do backlog da
     Sprint 2 (code-splitting) fica mais urgente a cada domínio novo —
     ainda não implementado.
+
+13. **Expansão de cobertura pra além do BigQuery** — hoje os 7 domínios
+    (catálogo, lineage, PII, mapa de acesso, qualidade, freshness,
+    FinOps) só observam BigQuery/Cloud Logging/Cloud Billing. Cliente
+    (via usuário, 2026-08-17) confirmou interesse em mapear outros
+    serviços GCP do lado do cliente (ex: Cloud Storage, Pub/Sub,
+    Dataflow) no futuro, mas decidiu conscientemente adiar — quer
+    terminar de fechar os mapeamentos de uso do Hub em si (painel
+    admin — ver Admin v1.2 acima) e mais alguns pontos antes de abrir
+    essa frente nova. Não iniciar sem alinhamento explícito do usuário.
 ```
 
 ---

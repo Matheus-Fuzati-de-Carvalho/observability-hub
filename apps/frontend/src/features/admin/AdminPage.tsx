@@ -4,12 +4,14 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AdminAccessRequestsTab } from '@/features/admin/AdminAccessRequestsTab'
 import { AdminProjectsTab } from '@/features/admin/AdminProjectsTab'
+import { AdminUsageTab } from '@/features/admin/AdminUsageTab'
 import { AdminUsersTab } from '@/features/admin/AdminUsersTab'
 import { usePendingAccessRequests } from '@/features/admin/hooks'
 
 const USERS_TAB = 'users'
 const PROJECTS_TAB = 'projects'
 const REQUESTS_TAB = 'requests'
+const USAGE_TAB = 'usage'
 
 export function AdminPage() {
   const pendingQuery = usePendingAccessRequests()
@@ -49,6 +51,7 @@ export function AdminPage() {
               </Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value={USAGE_TAB}>Uso do Hub</TabsTrigger>
         </TabsList>
 
         <TabsContent value={USERS_TAB}>
@@ -61,6 +64,10 @@ export function AdminPage() {
 
         <TabsContent value={REQUESTS_TAB}>
           <AdminAccessRequestsTab />
+        </TabsContent>
+
+        <TabsContent value={USAGE_TAB}>
+          <AdminUsageTab />
         </TabsContent>
       </Tabs>
     </div>

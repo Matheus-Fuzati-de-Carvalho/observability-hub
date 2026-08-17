@@ -46,6 +46,9 @@ def test_save_run_writes_then_trims():
     )
     runs.add.assert_called_once()
     added = runs.add.call_args[0][0]
+    assert added["project_id"] == "observability-hub-dev"
+    assert added["dataset_id"] == "RAW"
+    assert added["table_id"] == "crm_leads"
     assert added["overall_density"] == 91.3
     assert added["estimated_duplicate_pct"] == 1.5
     assert added["executed_by"] == "a@dp6.com.br"

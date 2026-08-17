@@ -5,6 +5,141 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Admin v1.3: solicitações de acesso, navegação agregada, atividade de scans de PII
+
+Branch `feature/admin-usage-analytics` (mesma do Admin v1.2, ainda sem
+push/PR). Usuário pediu um brainstorm de que outros serviços/
+funcionalidades já existentes valeria mapear no painel "Uso do Hub" —
+escolheu, em ordem de custo/valor, os 3 desta rodada; deixou expansão
+pra serviços GCP fora do BigQuery registrada como backlog
+(`SESSIONLOG.md`, item 13), adiada por decisão explícita.
+
+### O que foi feito
+
+Mais 3 seções na aba "Uso do Hub":
+
+1. **Solicitações de acesso** — zero gravação nova. `access_requests`
+   (já existia desde a v1.1) já tinha tudo; nova leitura agrega por mês
+   (`{period, total, approved, denied, pending}`), lista os 10 projetos
+   mais pedidos e calcula taxa de aprovação (`null` se nada foi
+   resolvido ainda, não `0%`). Gráfico de barras empilhado por status.
+2. **Navegação agregada** — zero gravação nova. `domains/history` já
+   persistia `history_table_views`/`history_searches` por usuário; nova
+   leitura via `collection_group` agrega entre todos (mesmo padrão de
+   favoritos). "Tabelas mais vistas" (gráfico de barras horizontal) +
+   "buscas mais frequentes" (tabela). Ressalva explícita na UI: cada
+   usuário só guarda os 20 itens mais recentes, é uma métrica de uso
+   recente, não histórico completo.
+3. **Atividade de scans de PII** — gravação nova, mesmo padrão do
+   profiling. `domains/pii` não persistia nada até aqui (só cache em
+   memória, TTL 5min, sem usuário). Novo `history_repository.py` grava
+   em `pii_scan_history/{doc}/scans` a cada execução real (não em cache
+   hit). Tabela de atividade idêntica à de profiling.
+
+### Decisões desta sessão
+
+**Decisão 1 — Nome de subcoleção `scans`, não `runs`, pro histórico de PII**
+- Achado durante a investigação, não pedido pelo usuário: profiling já
+  usa `collection_group("runs")` pra agregação global. Se PII também
+  usasse `runs` como nome de subcoleção, a mesma query passaria a
+  devolver os dois históricos misturados — `collection_group` ignora o
+  caminho do documento-pai, só olha o nome da subcoleção. Confirmado
+  por grep antes de implementar que nenhum domínio usava `scans`.
+
+**Decisão 2 — Histórico de PII só grava em execução real, não em cache hit**
+- `run_pii_scan` tem cache em memória (TTL 300s) que devolve o mesmo
+  resultado sem recomputar. Gravar histórico incondicionalmente faria
+  um cache hit parecer uma execução nova (mesmo `executed_at`/
+  `executed_by` de uma ação que não aconteceu de fato). A gravação fica
+  só no branch de cache miss.
+
+**Decisão 3 — Listas achatadas com agregação client-side, mesmo padrão da v1.2**
+- Solicitações de acesso é a exceção (agregação já pronta no backend,
+  porque o volume é pequeno e as métricas — mês/status/projeto — são
+  fixas); navegação segue o padrão de favoritos (lista achatada, front
+  agrega do jeito que precisar) porque "top tabelas"/"top buscas" são
+  cálculos simples e mantém o backend sem opinião sobre quantos itens
+  mostrar.
+
+### Status até o momento
+- Backend: 556 testes unitários, 100% passando, `ruff check`/`ruff
+  format --check` sem erros.
+- Frontend: `tsc --noEmit` limpo, `pnpm lint` (biome) sem erros,
+  `pnpm build` concluído (bundle: 1.311 kB / gzip 389 kB — backlog de
+  code-splitting, item 12 do `SESSIONLOG.md`, cresce a cada rodada).
+- Validação visual (gráficos novos, números batendo) fica a cargo do
+  usuário após deploy em dev.
+
+---
+
+## Admin v1.2: painel de uso/gestão — acessos ao Hub, favoritos entre usuários, atividade de profiling
+
+Branch `feature/admin-usage-analytics`. Brainstorm do usuário: quer
+visão gerencial de uso do Hub em `/admin` — acessos por dia/semana/mês,
+quem acessou e quando, bases mais favoritadas, favoritos por usuário (e
+o inverso), histórico de quais tabelas tiveram profile executado.
+
+### O que foi feito
+
+Nova aba "Uso do Hub" em `/admin`, com três seções:
+
+1. **Acessos ao Hub** — login era 100% stateless até aqui (JWT em
+   cookie, nenhum registro em lugar nenhum). Nova coleção Firestore
+   `login_events/{auto_id}` (email + `logged_in_at`), gravada
+   best-effort em `POST /auth/callback` (falha na gravação nunca
+   derruba o login). KPIs (hoje/semana/mês + usuários únicos), gráfico
+   de tendência diária, tabela de acessos recentes.
+2. **Favoritos entre usuários** — `domains/favorites` só tinha visão
+   por usuário (`users/{email}/favorites/`); nova leitura via
+   `collection_group("favorites")` agrega todo mundo. "Bases mais
+   favoritadas" (top 10) + drill-down bidirecional (usuário → itens
+   favoritados, base → usuários que favoritaram), pedido explícito do
+   usuário ("nos dois sentidos").
+3. **Atividade de profiling** — `domains/quality/history_repository.py`
+   já gravava `executed_by`/`executed_at` por tabela; ganhou também
+   `project_id`/`dataset_id`/`table_id` dentro de cada run (antes só
+   existiam implícitos no ID do documento-pai, sem como parsear de volta
+   com segurança) pra permitir uma leitura global via
+   `collection_group("runs")`.
+
+### Decisões desta sessão
+
+**Decisão 1 — Login events em Firestore, não Cloud Logging**
+- Perguntado e confirmado com o usuário. Cloud Logging já mordeu o
+  projeto duas vezes (`roles/logging.privateLogViewer` — falha
+  silenciosa sem essa role, ver `docs/onboarding-cliente.md`); Firestore
+  é consistente com o resto do app (favorites/history/admin) e muito
+  mais simples de agregar por dia/semana/mês.
+
+**Decisão 2 — Drill-down bidirecional de favoritos, não só contagem**
+- Perguntado e confirmado com o usuário ("nos dois sentidos"). Resolvido
+  com um único endpoint retornando a lista achatada de favoritos (com
+  `owner_email` derivado do path do Firestore) — o front-end agrupa dos
+  dois lados a partir do mesmo payload, sem precisar de dois endpoints
+  nem agregação server-side.
+
+**Decisão 3 — `unique_users` além de `login_count` por bucket**
+- Não pedido explicitamente, mas adicionado como boa prática de mercado
+  (padrão DAU/WAU/MAU) — mesma passada em Python que agrupa por
+  dia/semana/mês já computa isso sem custo extra de leitura no Firestore.
+
+**Decisão 4 — Agregações via `collection_group` sem `order_by` combinado**
+- Mesma disciplina já estabelecida em `domains/admin/repository.py::
+  list_access_requests`: evita depender de índice composto/de
+  collection-group manual no Firestore (que falharia silenciosamente em
+  produção sem esse índice existir) — ordenação e agrupamento sempre em
+  Python.
+
+### Status até o momento
+- Backend: 545 testes unitários, 100% passando, `ruff check`/
+  `ruff format --check` sem erros.
+- Frontend: `tsc --noEmit` limpo, `pnpm lint` (biome) sem erros,
+  `pnpm build` concluído.
+- Validação visual (gráficos, drill-down, KPIs) fica a cargo do usuário
+  após deploy em dev — sem ferramenta de browser neste ambiente.
+
+---
+
 ## 4 ajustes de UX: busca no menu, contraste, voltar no admin, favoritos por dataset/apelido
 
 Branch `feat/sprint-3.2`. Usuário validou a reorganização da sidebar por

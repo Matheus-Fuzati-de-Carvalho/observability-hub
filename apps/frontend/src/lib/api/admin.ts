@@ -1,12 +1,18 @@
 import { httpClient } from '@/lib/http-client'
 import type {
   AccessRequest,
+  AccessRequestAnalyticsResponse,
   AccessRequestStatus,
   AccessRequestsListResponse,
+  FavoritesAnalyticsResponse,
   HubProject,
   HubProjectsListResponse,
   HubUser,
   HubUsersListResponse,
+  LoginAnalyticsResponse,
+  NavigationAnalyticsResponse,
+  PiiScanActivityResponse,
+  ProfilingActivityResponse,
   ProjectUsersResponse,
   UpsertHubProjectRequest,
   UpsertHubUserRequest,
@@ -54,5 +60,29 @@ export const adminApi = {
   denyAccessRequest: (requestId: string) =>
     httpClient.post<AccessRequest>(
       `/api/v1/admin/access-requests/${encodeURIComponent(requestId)}/deny`,
+    ),
+
+  getLoginAnalytics: (lookbackDays?: number) =>
+    httpClient.get<LoginAnalyticsResponse>(
+      `/api/v1/admin/analytics/logins${lookbackDays ? `?lookback_days=${lookbackDays}` : ''}`,
+    ),
+
+  getFavoritesAnalytics: () =>
+    httpClient.get<FavoritesAnalyticsResponse>('/api/v1/admin/analytics/favorites'),
+
+  getProfilingActivity: (limit?: number) =>
+    httpClient.get<ProfilingActivityResponse>(
+      `/api/v1/admin/analytics/profiling${limit ? `?limit=${limit}` : ''}`,
+    ),
+
+  getAccessRequestAnalytics: () =>
+    httpClient.get<AccessRequestAnalyticsResponse>('/api/v1/admin/analytics/access-requests'),
+
+  getNavigationAnalytics: () =>
+    httpClient.get<NavigationAnalyticsResponse>('/api/v1/admin/analytics/navigation'),
+
+  getPiiScanActivity: (limit?: number) =>
+    httpClient.get<PiiScanActivityResponse>(
+      `/api/v1/admin/analytics/pii-scans${limit ? `?limit=${limit}` : ''}`,
     ),
 }

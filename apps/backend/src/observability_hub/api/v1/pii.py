@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends
-from google.cloud import bigquery
+from google.cloud import bigquery, firestore
 
-from observability_hub.core.auth import require_project_access
+from observability_hub.core.auth import get_current_user, require_project_access
 from observability_hub.core.bigquery import get_client
+from observability_hub.core.firestore import get_firestore_client
+from observability_hub.domains.auth.schemas import UserInfo
 from observability_hub.domains.pii import service
 from observability_hub.domains.pii.schemas import (
     PiiEstimateResponse,
@@ -39,5 +41,9 @@ def run(
     table_id: str,
     request: PiiScanRequest,
     client: bigquery.Client = Depends(get_client),
+    user: UserInfo = Depends(get_current_user),
+    firestore_client: firestore.Client = Depends(get_firestore_client),
 ) -> PiiScanResponse:
-    return service.run_pii_scan(client, project_id, dataset_id, table_id, request)
+    return service.run_pii_scan(
+        client, firestore_client, project_id, dataset_id, table_id, request, user.email
+    )

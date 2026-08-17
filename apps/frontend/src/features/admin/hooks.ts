@@ -142,3 +142,45 @@ export function useCreateAccessRequests() {
     mutationFn: (projectIds: string[]) => accessRequestsApi.create(projectIds),
   })
 }
+
+export function useLoginAnalytics(lookbackDays?: number) {
+  return useQuery({
+    queryKey: ['admin-login-analytics', lookbackDays],
+    queryFn: () => adminApi.getLoginAnalytics(lookbackDays),
+  })
+}
+
+export function useFavoritesAnalytics() {
+  return useQuery({
+    queryKey: ['admin-favorites-analytics'],
+    queryFn: adminApi.getFavoritesAnalytics,
+  })
+}
+
+export function useProfilingActivity(limit?: number) {
+  return useQuery({
+    queryKey: ['admin-profiling-activity', limit],
+    queryFn: () => adminApi.getProfilingActivity(limit),
+  })
+}
+
+export function useAccessRequestAnalytics() {
+  return useQuery({
+    queryKey: ['admin-access-request-analytics'],
+    queryFn: adminApi.getAccessRequestAnalytics,
+  })
+}
+
+export function useNavigationAnalytics() {
+  return useQuery({
+    queryKey: ['admin-navigation-analytics'],
+    queryFn: adminApi.getNavigationAnalytics,
+  })
+}
+
+export function usePiiScanActivity(limit?: number) {
+  return useQuery({
+    queryKey: ['admin-pii-scan-activity', limit],
+    queryFn: () => adminApi.getPiiScanActivity(limit),
+  })
+}

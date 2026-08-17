@@ -70,3 +70,102 @@ export interface AccessRequestsListResponse {
 export interface CreateAccessRequestsRequest {
   project_ids: string[]
 }
+
+export interface LoginEvent {
+  email: string
+  logged_in_at: string
+}
+
+export interface LoginCountBucket {
+  // "2026-08-17" (dia), "2026-W33" (semana ISO) ou "2026-08" (mês).
+  period: string
+  login_count: number
+  unique_users: number
+}
+
+export interface LoginAnalyticsResponse {
+  daily: LoginCountBucket[]
+  weekly: LoginCountBucket[]
+  monthly: LoginCountBucket[]
+  recent_events: LoginEvent[]
+}
+
+export interface FavoriteEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string | null
+  nickname: string | null
+  owner_email: string
+  added_at: string
+}
+
+export interface FavoritesAnalyticsResponse {
+  favorites: FavoriteEntry[]
+}
+
+export interface ProfilingRunEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  executed_by: string
+  executed_at: string
+  overall_density: number
+  estimated_duplicate_pct: number
+}
+
+export interface ProfilingActivityResponse {
+  runs: ProfilingRunEntry[]
+}
+
+export interface AccessRequestMonthBucket {
+  period: string
+  total: number
+  approved: number
+  denied: number
+  pending: number
+}
+
+export interface ProjectRequestCount {
+  project_id: string
+  request_count: number
+}
+
+export interface AccessRequestAnalyticsResponse {
+  monthly: AccessRequestMonthBucket[]
+  top_projects: ProjectRequestCount[]
+  approval_rate: number | null
+}
+
+export interface TableViewEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  owner_email: string
+  viewed_at: string
+}
+
+export interface SearchEntry {
+  query: string
+  mode: string
+  project_id: string
+  owner_email: string
+  searched_at: string
+}
+
+export interface NavigationAnalyticsResponse {
+  table_views: TableViewEntry[]
+  searches: SearchEntry[]
+}
+
+export interface PiiScanEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  executed_by: string
+  executed_at: string
+  flagged_columns_count: number
+}
+
+export interface PiiScanActivityResponse {
+  scans: PiiScanEntry[]
+}

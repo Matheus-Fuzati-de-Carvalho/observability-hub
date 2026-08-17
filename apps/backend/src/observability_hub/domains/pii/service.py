@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import UTC, datetime
 
-from google.cloud import bigquery
+from google.cloud import bigquery, firestore
 
 from observability_hub.core.bigquery import discover_regions, resolve_dataset_region
 from observability_hub.core.config import settings
@@ -22,7 +22,7 @@ from observability_hub.core.exceptions import (
     PiiScanTimeoutError,
     TableNotFoundError,
 )
-from observability_hub.domains.pii import repository, sql_builder
+from observability_hub.domains.pii import history_repository, repository, sql_builder
 from observability_hub.domains.pii.schemas import (
     PiiColumnResult,
     PiiEstimateResponse,
@@ -180,10 +180,12 @@ def estimate_pii_scan(
 
 def run_pii_scan(
     client: bigquery.Client,
+    firestore_client: firestore.Client,
     project_id: str,
     dataset_id: str,
     table_id: str,
     request: PiiScanRequest,
+    executed_by: str,
 ) -> PiiScanResponse:
     _validate_sample_percent(request.sample_percent)
     cache_key = _cache_key(
@@ -258,4 +260,21 @@ def run_pii_scan(
         warning=warning,
     )
     _cache_set(cache_key, response)
+
+    # Só grava histórico em cache miss (chegou até aqui) — um cache hit
+    # (linha 194) devolve o resultado antigo sem rodar nada de novo, então
+    # não representa uma execução real.
+    history_repository.save_scan(
+        firestore_client,
+        project_id,
+        dataset_id,
+        table_id,
+        executed_by=executed_by,
+        flagged_columns_count=sum(1 for c in columns if c.flagged),
+        columns=[
+            {"column_name": c.column_name, "flagged": c.flagged, "confidence": c.confidence}
+            for c in columns
+        ],
+    )
+
     return response
