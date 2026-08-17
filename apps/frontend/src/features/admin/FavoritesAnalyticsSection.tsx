@@ -17,7 +17,7 @@ import type { FavoriteEntry } from '@/types/admin'
 
 const TOP_BASES_LIMIT = 10
 
-type View = 'user' | 'base'
+type View = 'user' | 'project' | 'dataset' | 'table'
 
 function baseKey(f: FavoriteEntry): string {
   return `${f.project_id}__${f.dataset_id}__${f.table_id ?? ''}`
@@ -27,6 +27,20 @@ function baseLabel(f: FavoriteEntry): string {
   return f.table_id
     ? `${f.project_id} · ${f.dataset_id}.${f.table_id}`
     : `${f.project_id} · ${f.dataset_id} (dataset completo)`
+}
+
+// Rótulo do item dentro de um grupo já agrupado por `view` — mostra só a
+// parte do caminho que o agrupamento não cobre (ex: em "Por projeto",
+// omite o projeto e mostra dataset.tabela).
+function itemLabel(f: FavoriteEntry, view: View): string {
+  if (view === 'user') return baseLabel(f)
+  if (view === 'project') {
+    return f.table_id ? `${f.dataset_id}.${f.table_id}` : `${f.dataset_id} (dataset completo)`
+  }
+  if (view === 'dataset') {
+    return f.table_id ? f.table_id : '(dataset completo)'
+  }
+  return f.owner_email
 }
 
 interface Group {
@@ -47,7 +61,33 @@ function groupByUser(favorites: FavoriteEntry[]): Group[] {
     .sort((a, b) => b.items.length - a.items.length)
 }
 
-function groupByBase(favorites: FavoriteEntry[]): Group[] {
+function groupByProject(favorites: FavoriteEntry[]): Group[] {
+  const map = new Map<string, FavoriteEntry[]>()
+  for (const f of favorites) {
+    const list = map.get(f.project_id) ?? []
+    list.push(f)
+    map.set(f.project_id, list)
+  }
+  return [...map.entries()]
+    .map(([project_id, items]) => ({ key: project_id, label: project_id, items }))
+    .sort((a, b) => b.items.length - a.items.length)
+}
+
+function groupByDataset(favorites: FavoriteEntry[]): Group[] {
+  const map = new Map<string, Group>()
+  for (const f of favorites) {
+    const key = `${f.project_id}__${f.dataset_id}`
+    const existing = map.get(key)
+    if (existing) {
+      existing.items.push(f)
+    } else {
+      map.set(key, { key, label: `${f.project_id} · ${f.dataset_id}`, items: [f] })
+    }
+  }
+  return [...map.values()].sort((a, b) => b.items.length - a.items.length)
+}
+
+function groupByTable(favorites: FavoriteEntry[]): Group[] {
   const map = new Map<string, Group>()
   for (const f of favorites) {
     const key = baseKey(f)
@@ -61,8 +101,15 @@ function groupByBase(favorites: FavoriteEntry[]): Group[] {
   return [...map.values()].sort((a, b) => b.items.length - a.items.length)
 }
 
+function groupByView(favorites: FavoriteEntry[], view: View): Group[] {
+  if (view === 'user') return groupByUser(favorites)
+  if (view === 'project') return groupByProject(favorites)
+  if (view === 'dataset') return groupByDataset(favorites)
+  return groupByTable(favorites)
+}
+
 export function FavoritesAnalyticsSection() {
-  const [view, setView] = useState<View>('base')
+  const [view, setView] = useState<View>('table')
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const favoritesQuery = useFavoritesAnalytics()
 
@@ -75,8 +122,8 @@ export function FavoritesAnalyticsSection() {
   }
 
   const favorites = favoritesQuery.data.favorites
-  const topBases = groupByBase(favorites).slice(0, TOP_BASES_LIMIT)
-  const groups = view === 'user' ? groupByUser(favorites) : groupByBase(favorites)
+  const topBases = groupByTable(favorites).slice(0, TOP_BASES_LIMIT)
+  const groups = groupByView(favorites, view)
 
   return (
     <div className="flex flex-col gap-4">
@@ -125,13 +172,33 @@ export function FavoritesAnalyticsSection() {
             </Button>
             <Button
               size="sm"
-              variant={view === 'base' ? 'default' : 'outline'}
+              variant={view === 'project' ? 'default' : 'outline'}
               onClick={() => {
-                setView('base')
+                setView('project')
                 setExpandedKey(null)
               }}
             >
-              Por base
+              Por projeto
+            </Button>
+            <Button
+              size="sm"
+              variant={view === 'dataset' ? 'default' : 'outline'}
+              onClick={() => {
+                setView('dataset')
+                setExpandedKey(null)
+              }}
+            >
+              Por dataset
+            </Button>
+            <Button
+              size="sm"
+              variant={view === 'table' ? 'default' : 'outline'}
+              onClick={() => {
+                setView('table')
+                setExpandedKey(null)
+              }}
+            >
+              Por tabela
             </Button>
           </div>
         </div>
@@ -166,7 +233,7 @@ export function FavoritesAnalyticsSection() {
                         className="flex items-center justify-between gap-2 text-muted-foreground"
                       >
                         <span className="truncate">
-                          {view === 'user' ? baseLabel(item) : item.owner_email}
+                          {itemLabel(item, view)}
                           {item.nickname && (
                             <span className="ml-1.5 text-xs italic">"{item.nickname}"</span>
                           )}

@@ -7,14 +7,22 @@ import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import { formatDate } from '@/lib/format'
 import type { PiiScanEntry } from '@/types/admin'
 
-type SortKey = 'table' | 'executed_by' | 'executed_at' | 'flagged_columns_count'
+type SortKey =
+  | 'project'
+  | 'dataset'
+  | 'table'
+  | 'executed_by'
+  | 'executed_at'
+  | 'flagged_columns_count'
 
 function fullTableName(scan: PiiScanEntry): string {
   return `${scan.project_id}.${scan.dataset_id}.${scan.table_id}`
 }
 
 function compare(a: PiiScanEntry, b: PiiScanEntry, key: SortKey): number {
-  if (key === 'table') return fullTableName(a).localeCompare(fullTableName(b))
+  if (key === 'project') return a.project_id.localeCompare(b.project_id)
+  if (key === 'dataset') return a.dataset_id.localeCompare(b.dataset_id)
+  if (key === 'table') return a.table_id.localeCompare(b.table_id)
   if (key === 'executed_by') return a.executed_by.localeCompare(b.executed_by)
   if (key === 'executed_at') return a.executed_at.localeCompare(b.executed_at)
   return a.flagged_columns_count - b.flagged_columns_count
@@ -34,9 +42,15 @@ export function PiiScanActivitySection() {
     rows: activityQuery.data?.scans ?? [],
     initialSortKey: 'executed_at',
     compare,
-    matches: (scan, term) =>
-      fullTableName(scan).toLowerCase().includes(term.toLowerCase()) ||
-      scan.executed_by.toLowerCase().includes(term.toLowerCase()),
+    matches: (scan, term) => {
+      const t = term.toLowerCase()
+      return (
+        scan.project_id.toLowerCase().includes(t) ||
+        scan.dataset_id.toLowerCase().includes(t) ||
+        scan.table_id.toLowerCase().includes(t) ||
+        scan.executed_by.toLowerCase().includes(t)
+      )
+    },
   })
 
   if (activityQuery.isLoading) {
@@ -68,6 +82,18 @@ export function PiiScanActivitySection() {
         <TableHeader>
           <TableRow>
             <SortableTableHead
+              label="Projeto"
+              active={sortKey === 'project'}
+              direction={sortDir}
+              onClick={() => toggleSort('project')}
+            />
+            <SortableTableHead
+              label="Dataset"
+              active={sortKey === 'dataset'}
+              direction={sortDir}
+              onClick={() => toggleSort('dataset')}
+            />
+            <SortableTableHead
               label="Tabela"
               active={sortKey === 'table'}
               direction={sortDir}
@@ -97,7 +123,9 @@ export function PiiScanActivitySection() {
         <TableBody>
           {visibleScans.map((scan) => (
             <TableRow key={`${fullTableName(scan)}-${scan.executed_at}`}>
-              <TableCell className="font-medium">{fullTableName(scan)}</TableCell>
+              <TableCell className="font-medium">{scan.project_id}</TableCell>
+              <TableCell className="font-medium">{scan.dataset_id}</TableCell>
+              <TableCell className="font-medium">{scan.table_id}</TableCell>
               <TableCell className="text-muted-foreground">{scan.executed_by}</TableCell>
               <TableCell className="text-muted-foreground">
                 {formatDate(scan.executed_at)}
@@ -107,7 +135,7 @@ export function PiiScanActivitySection() {
           ))}
           {visibleScans.length === 0 && (
             <TableRow>
-              <TableCell colSpan={4} className="text-muted-foreground">
+              <TableCell colSpan={6} className="text-muted-foreground">
                 Nenhum scan de PII executado ainda.
               </TableCell>
             </TableRow>

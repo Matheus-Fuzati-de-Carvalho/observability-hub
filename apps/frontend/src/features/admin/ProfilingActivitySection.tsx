@@ -8,6 +8,8 @@ import { formatDate, formatPercent } from '@/lib/format'
 import type { ProfilingRunEntry } from '@/types/admin'
 
 type SortKey =
+  | 'project'
+  | 'dataset'
   | 'table'
   | 'executed_by'
   | 'executed_at'
@@ -19,7 +21,9 @@ function fullTableName(run: ProfilingRunEntry): string {
 }
 
 function compare(a: ProfilingRunEntry, b: ProfilingRunEntry, key: SortKey): number {
-  if (key === 'table') return fullTableName(a).localeCompare(fullTableName(b))
+  if (key === 'project') return a.project_id.localeCompare(b.project_id)
+  if (key === 'dataset') return a.dataset_id.localeCompare(b.dataset_id)
+  if (key === 'table') return a.table_id.localeCompare(b.table_id)
   if (key === 'executed_by') return a.executed_by.localeCompare(b.executed_by)
   if (key === 'executed_at') return a.executed_at.localeCompare(b.executed_at)
   return a[key] - b[key]
@@ -39,9 +43,15 @@ export function ProfilingActivitySection() {
     rows: activityQuery.data?.runs ?? [],
     initialSortKey: 'executed_at',
     compare,
-    matches: (run, term) =>
-      fullTableName(run).toLowerCase().includes(term.toLowerCase()) ||
-      run.executed_by.toLowerCase().includes(term.toLowerCase()),
+    matches: (run, term) => {
+      const t = term.toLowerCase()
+      return (
+        run.project_id.toLowerCase().includes(t) ||
+        run.dataset_id.toLowerCase().includes(t) ||
+        run.table_id.toLowerCase().includes(t) ||
+        run.executed_by.toLowerCase().includes(t)
+      )
+    },
   })
 
   if (activityQuery.isLoading) {
@@ -72,6 +82,18 @@ export function ProfilingActivitySection() {
       <Table>
         <TableHeader>
           <TableRow>
+            <SortableTableHead
+              label="Projeto"
+              active={sortKey === 'project'}
+              direction={sortDir}
+              onClick={() => toggleSort('project')}
+            />
+            <SortableTableHead
+              label="Dataset"
+              active={sortKey === 'dataset'}
+              direction={sortDir}
+              onClick={() => toggleSort('dataset')}
+            />
             <SortableTableHead
               label="Tabela"
               active={sortKey === 'table'}
@@ -109,7 +131,9 @@ export function ProfilingActivitySection() {
         <TableBody>
           {visibleRuns.map((run) => (
             <TableRow key={`${fullTableName(run)}-${run.executed_at}`}>
-              <TableCell className="font-medium">{fullTableName(run)}</TableCell>
+              <TableCell className="font-medium">{run.project_id}</TableCell>
+              <TableCell className="font-medium">{run.dataset_id}</TableCell>
+              <TableCell className="font-medium">{run.table_id}</TableCell>
               <TableCell className="text-muted-foreground">{run.executed_by}</TableCell>
               <TableCell className="text-muted-foreground">{formatDate(run.executed_at)}</TableCell>
               <TableCell className="text-right">{formatPercent(run.overall_density)}</TableCell>
@@ -120,7 +144,7 @@ export function ProfilingActivitySection() {
           ))}
           {visibleRuns.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-muted-foreground">
+              <TableCell colSpan={7} className="text-muted-foreground">
                 Nenhum profiling executado ainda.
               </TableCell>
             </TableRow>
