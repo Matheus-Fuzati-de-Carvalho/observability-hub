@@ -142,3 +142,24 @@ export function useCreateAccessRequests() {
     mutationFn: (projectIds: string[]) => accessRequestsApi.create(projectIds),
   })
 }
+
+export function useLoginAnalytics(lookbackDays?: number) {
+  return useQuery({
+    queryKey: ['admin-login-analytics', lookbackDays],
+    queryFn: () => adminApi.getLoginAnalytics(lookbackDays),
+  })
+}
+
+export function useFavoritesAnalytics() {
+  return useQuery({
+    queryKey: ['admin-favorites-analytics'],
+    queryFn: adminApi.getFavoritesAnalytics,
+  })
+}
+
+export function useProfilingActivity(limit?: number) {
+  return useQuery({
+    queryKey: ['admin-profiling-activity', limit],
+    queryFn: () => adminApi.getProfilingActivity(limit),
+  })
+}

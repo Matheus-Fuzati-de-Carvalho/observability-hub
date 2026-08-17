@@ -1,9 +1,9 @@
 # Spec — Domínio: Admin (controle de acesso por usuário × projeto)
 
-**Versão:** 1.1
+**Versão:** 1.2
 **Status:** Aprovada
 **Fase:** Transversal (não faz parte do roadmap de observabilidade de `docs/prd.md`) — plataforma
-**Última atualização:** 2026-08-20
+**Última atualização:** 2026-08-17
 
 ---
 
@@ -27,6 +27,12 @@ sessão Google OAuth já existente:
 erro mais visíveis, visão inversa projeto→usuários com opção de liberar
 um projeto pra todo mundo (`hub_projects`), e um fluxo de solicitação de
 acesso self-service (`access_requests`) — ver seções abaixo.
+
+**Novo na v1.2**: painel de uso/gestão pra admins — aba "Uso do Hub" em
+`/admin` com acessos ao Hub (contagem por dia/semana/mês, quem acessou e
+quando), bases mais favoritadas e favoritos com drill-down bidirecional
+(usuário → itens, base → usuários) e histórico global de execuções de
+profiling (tabela, quem, quando) — ver "Analytics de uso (v1.2)" abaixo.
 
 Ver [ADR-009](../adr/ADR-009-acl-usuario-projeto.md) para o contexto da
 decisão arquitetural (não revisado nesta versão — a v1.1 é uma extensão
@@ -153,6 +159,64 @@ nada.
 
 ---
 
+## Analytics de uso (v1.2)
+
+Três leituras cross-usuário/cross-tabela pra dar visão gerencial em
+`/admin` → aba "Uso do Hub". Diferente do resto do domínio (`hub_users`,
+`hub_projects`, `access_requests`, todos com dado próprio), essas
+analytics leem/agregam dado que **já existe em outros domínios**
+(favorites, quality) mais uma coleção nova (login events) — service.py
+deste domínio orquestra, mas o dado de origem não pertence a `admin`.
+
+### Login events (novo)
+
+Antes da v1.2, login no Hub era 100% stateless (JWT em cookie,
+`domains/auth`) — nenhum registro de quem/quando. Nova coleção
+`login_events/{auto_id}` (top-level, dado gerencial do Hub, mesmo
+raciocínio de `hub_users`/`hub_projects`):
+
+```json
+{"email": "consultor.a@dp6.com.br", "logged_in_at": "2026-08-17T09:00:00Z"}
+```
+
+Gravado em `POST /auth/callback` (best-effort — falha aqui **nunca**
+pode impedir o login, que é o caminho crítico; erro só é logado). Sem
+trim-to-max (ao contrário de `history`/`profiling_history`): volume
+esperado é baixo pra escala de time interno, revisitar se isso mudar.
+
+### Favoritos entre usuários
+
+`domains/favorites` já guarda favoritos em `users/{email}/favorites/`
+(um doc por usuário). A v1.2 lê **todos** os usuários via
+`collection_group("favorites")` sem filtro nem `order_by` (evita
+qualquer necessidade de índice manual de collection-group) — cada doc
+ganha `owner_email` derivado do path (`users/{email}/...`, o e-mail é o
+ID do documento-pai). O endpoint devolve a lista achatada; o front-end
+agrupa dos dois lados (por usuário, por base) a partir do mesmo payload
+— drill-down bidirecional sem precisar de dois endpoints.
+
+### Atividade de profiling
+
+`domains/quality/history_repository.py::save_run` passou a gravar
+`project_id`/`dataset_id`/`table_id` dentro de cada run (antes só
+existiam implícitos no ID do documento-pai, com separador `_` ambíguo
+pra parsear de volta). A v1.2 lê tudo via `collection_group("runs")`,
+filtra runs antigos sem `project_id` (saem sozinhos da janela quando o
+cap de 30/tabela rotacionar — sem backfill) e ordena por `executed_at`
+desc em Python.
+
+### Endpoints (mesmo `dependencies=[Depends(require_admin)]` do router)
+
+- `GET /api/v1/admin/analytics/logins?lookback_days=90` — buckets
+  diário/semanal/mensal (`login_count` + `unique_users`, no padrão
+  DAU/WAU/MAU) desde o cutoff, mais os últimos 50 eventos (`recent_events`).
+- `GET /api/v1/admin/analytics/favorites` — lista achatada de favoritos
+  de todos os usuários, com `owner_email`.
+- `GET /api/v1/admin/analytics/profiling?limit=200` — runs de profiling
+  mais recentes de todas as tabelas.
+
+---
+
 ## Duas dependencies novas em `core/auth.py`
 
 ```python
@@ -248,6 +312,11 @@ Cria pedidos pra si mesmo. Body: `{"project_ids": ["proj-a", "proj-b"]}`.
 Filtra silenciosamente projetos já acessíveis ou com pedido pendente
 duplicado — ver "Solicitação de acesso" acima.
 
+### GET /api/v1/admin/analytics/logins?lookback_days=90
+### GET /api/v1/admin/analytics/favorites
+### GET /api/v1/admin/analytics/profiling?limit=200
+Ver "Analytics de uso (v1.2)" acima.
+
 ---
 
 ## `is_admin` exposto só em `GET /auth/me`
@@ -298,9 +367,11 @@ apps/backend/src/observability_hub/
 ├── domains/
 │   ├── admin/                  # schemas, repository, service — hub_users + hub_projects (v1.1)
 │   │                           # + access_requests (v1.1)
+│   │                           # + analytics_{schemas,repository,service}.py (v1.2)
+│   ├── quality/history_repository.py  # + project_id/dataset_id/table_id no run (v1.2)
 │   └── auth/schemas.py         # UserInfo + is_admin
 └── tests/unit/
-    ├── admin/
+    ├── admin/                  # + test_analytics_repository.py, test_analytics_service.py (v1.2)
     └── core/test_auth.py       # require_admin/require_project_access
 
 scripts/seed_admin.py           # bootstrap do primeiro admin
@@ -318,6 +389,10 @@ apps/frontend/src/
 │   │   ├── ProjectChipEditor.tsx       # novo (v1.1) — compartilhado
 │   │   ├── RequestAccessDialog.tsx     # novo (v1.1)
 │   │   ├── RequireAdmin.tsx
+│   │   ├── AdminUsageTab.tsx           # novo (v1.2) — orquestra as 3 seções abaixo
+│   │   ├── LoginAnalyticsSection.tsx   # novo (v1.2)
+│   │   ├── FavoritesAnalyticsSection.tsx  # novo (v1.2)
+│   │   ├── ProfilingActivitySection.tsx   # novo (v1.2)
 │   │   └── hooks.ts
 │   └── projects/ProjectSelector.tsx    # erro visível + CTA "Solicitar acesso" (v1.1)
 ├── app/
@@ -330,6 +405,8 @@ apps/frontend/src/
 └── types/
     ├── auth.ts                   # + is_admin
     └── admin.ts                  # + HubProject, AccessRequest, etc. (v1.1)
+                                   # + LoginAnalyticsResponse, FavoritesAnalyticsResponse,
+                                   #   ProfilingActivityResponse (v1.2)
 ```
 
 ---
@@ -351,6 +428,9 @@ apps/frontend/src/
 | Aprovar pedido de projeto que virou público nesse meio-tempo | `grant_project_to_user` roda normalmente (idempotente — resultado final é o mesmo) |
 | Revogar (`DELETE .../projects/{id}/users/{email}`) o único acesso explícito de alguém a um projeto público | Sem efeito real — o projeto continua público, `is_public` não muda por essa chamada (eixos independentes) |
 | `request_id` inexistente em approve/deny | 404 (`AccessRequestNotFoundError`) |
+| Firestore indisponível no momento do login | Login continua funcionando; gravação de `login_events` falha silenciosamente (logada), sem expor erro ao usuário |
+| Run de profiling gravado antes da v1.2 (sem `project_id`) | Filtrado da visão global de atividade; sai da janela sozinho quando o cap de 30/tabela rotacionar |
+| Favorito de dataset inteiro (`table_id: null`) na visão "por base" | Agrupado como linha própria, separado de favoritos de tabelas específicas do mesmo dataset |
 
 ---
 

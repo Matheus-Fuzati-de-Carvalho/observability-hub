@@ -70,3 +70,49 @@ export interface AccessRequestsListResponse {
 export interface CreateAccessRequestsRequest {
   project_ids: string[]
 }
+
+export interface LoginEvent {
+  email: string
+  logged_in_at: string
+}
+
+export interface LoginCountBucket {
+  // "2026-08-17" (dia), "2026-W33" (semana ISO) ou "2026-08" (mês).
+  period: string
+  login_count: number
+  unique_users: number
+}
+
+export interface LoginAnalyticsResponse {
+  daily: LoginCountBucket[]
+  weekly: LoginCountBucket[]
+  monthly: LoginCountBucket[]
+  recent_events: LoginEvent[]
+}
+
+export interface FavoriteEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string | null
+  nickname: string | null
+  owner_email: string
+  added_at: string
+}
+
+export interface FavoritesAnalyticsResponse {
+  favorites: FavoriteEntry[]
+}
+
+export interface ProfilingRunEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  executed_by: string
+  executed_at: string
+  overall_density: number
+  estimated_duplicate_pct: number
+}
+
+export interface ProfilingActivityResponse {
+  runs: ProfilingRunEntry[]
+}

@@ -4,6 +4,7 @@ from google.cloud import firestore
 
 from observability_hub.core.auth import get_current_user
 from observability_hub.core.firestore import get_firestore_client
+from observability_hub.domains.admin import analytics_service
 from observability_hub.domains.admin import service as admin_service
 from observability_hub.domains.auth import service
 from observability_hub.domains.auth.schemas import TokenResponse, UserInfo
@@ -35,9 +36,11 @@ def callback(
     code: str,
     state: str,
     oauth_state: str | None = Cookie(default=None, alias=service.STATE_COOKIE_NAME),
+    client: firestore.Client = Depends(get_firestore_client),
 ) -> Response:
     user = service.handle_callback(code, state, oauth_state)
     token = service.issue_session_token(user)
+    analytics_service.record_login(client, user.email)
 
     response = Response(
         content=TokenResponse(user=user).model_dump_json(), media_type="application/json"

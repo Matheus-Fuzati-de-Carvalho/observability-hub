@@ -3,10 +3,13 @@ import type {
   AccessRequest,
   AccessRequestStatus,
   AccessRequestsListResponse,
+  FavoritesAnalyticsResponse,
   HubProject,
   HubProjectsListResponse,
   HubUser,
   HubUsersListResponse,
+  LoginAnalyticsResponse,
+  ProfilingActivityResponse,
   ProjectUsersResponse,
   UpsertHubProjectRequest,
   UpsertHubUserRequest,
@@ -54,5 +57,18 @@ export const adminApi = {
   denyAccessRequest: (requestId: string) =>
     httpClient.post<AccessRequest>(
       `/api/v1/admin/access-requests/${encodeURIComponent(requestId)}/deny`,
+    ),
+
+  getLoginAnalytics: (lookbackDays?: number) =>
+    httpClient.get<LoginAnalyticsResponse>(
+      `/api/v1/admin/analytics/logins${lookbackDays ? `?lookback_days=${lookbackDays}` : ''}`,
+    ),
+
+  getFavoritesAnalytics: () =>
+    httpClient.get<FavoritesAnalyticsResponse>('/api/v1/admin/analytics/favorites'),
+
+  getProfilingActivity: (limit?: number) =>
+    httpClient.get<ProfilingActivityResponse>(
+      `/api/v1/admin/analytics/profiling${limit ? `?limit=${limit}` : ''}`,
     ),
 }

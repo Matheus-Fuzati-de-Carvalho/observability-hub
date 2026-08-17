@@ -9,6 +9,12 @@ profiling_history/{project}_{dataset}_{table}/runs/{auto-id} — uma
 subcoleção "runs" por tabela, mesmo padrão de trim-to-max de
 domains/history/repository.py (order_by + offset + delete do excedente),
 só que aqui o limite é 30 em vez de 20.
+
+Cada run também grava project_id/dataset_id/table_id (redundante com o ID
+do doc-pai, que usa "_" como separador e por isso não dá pra parsear de
+volta com segurança) — existe só pra domains/admin/analytics_repository.py
+poder rodar um collection_group("runs") global sem precisar decompor o
+ID do documento-pai.
 """
 
 from datetime import UTC, datetime
@@ -50,6 +56,9 @@ def save_run(
     collection = _runs_collection(client, project_id, dataset_id, table_id)
     collection.add(
         {
+            "project_id": project_id,
+            "dataset_id": dataset_id,
+            "table_id": table_id,
             "executed_at": datetime.now(UTC),
             "executed_by": executed_by,
             "overall_density": overall_density,
