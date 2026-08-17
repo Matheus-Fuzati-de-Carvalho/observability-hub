@@ -24,11 +24,17 @@ from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
 from google.cloud import logging as cloud_logging
 
-from observability_hub.core.exceptions import LoggingAccessDeniedError
+from observability_hub.core.exceptions import LoggingAccessDeniedError, ProjectAccessDeniedError
 
 _PAGE_SIZE = 1000
 _DATE_LIKE_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
 _QUERY_TEXT_MAX_CHARS = 2000
+
+# INFORMATION_SCHEMA.TABLES.table_type usa "VIEW" e "MATERIALIZED VIEW"
+# (com espaço) — nenhum dos dois suporta TABLESAMPLE no BigQuery. Mesma
+# constante de domains/pii/repository.py (duplicada, não importada —
+# domínios isolados, ver CLAUDE.md).
+_VIEW_TABLE_TYPES = {"VIEW", "MATERIALIZED VIEW"}
 
 TableRefTuple = tuple[str, str, str]  # (project_id, dataset_id, table_id)
 
@@ -193,3 +199,71 @@ def get_date_like_columns(
     )
     rows = client.query(query, job_config=job_config).result()
     return [row.column_name for row in rows]
+
+
+def get_string_columns(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> list[str]:
+    """Nomes das colunas STRING da tabela — únicas elegíveis pra
+    sugestão de tipo nesta v1 (ver docs/specs/finops-column-types.md,
+    "Fora do escopo"). Custo $0 (INFORMATION_SCHEMA)."""
+    query = f"""
+        SELECT column_name
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMNS`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+          AND data_type = 'STRING'
+        ORDER BY ordinal_position
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+        ]
+    )
+    rows = client.query(query, job_config=job_config).result()
+    return [row.column_name for row in rows]
+
+
+def is_view(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> bool:
+    """VIEW e MATERIALIZED VIEW não suportam TABLESAMPLE no BigQuery — o
+    sql_builder precisa saber disso antes de montar a query de scan.
+    Duplica domains/pii/repository.py::is_view (não importa — domínios
+    isolados)."""
+    query = f"""
+        SELECT table_type
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+    return bool(rows) and rows[0].table_type in _VIEW_TABLE_TYPES
+
+
+def dry_run(client: bigquery.Client, project_id: str, sql: str) -> int:
+    """Bytes que a query processaria, sem executar de fato — usado pelo
+    endpoint /column-type-suggestions/estimate, gratuito por definição
+    (dry run não cobra)."""
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    try:
+        job = client.query(sql, job_config=job_config)
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
+    return job.total_bytes_processed
+
+
+def execute_scan_query(client: bigquery.Client, project_id: str, sql: str, timeout: float) -> dict:
+    """Query de scan é sempre uma única linha agregada — mesmo tabela
+    com 0 linhas amostradas retorna 1 linha com contagens zeradas."""
+    try:
+        rows = list(client.query(sql).result(timeout=timeout))
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
+    row = rows[0]
+    return dict(row.items())

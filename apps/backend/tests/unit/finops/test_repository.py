@@ -4,8 +4,12 @@ from unittest.mock import MagicMock
 import pytest
 from google.api_core.exceptions import Forbidden
 
-from observability_hub.core.exceptions import LoggingAccessDeniedError
+from observability_hub.core.exceptions import LoggingAccessDeniedError, ProjectAccessDeniedError
 from observability_hub.domains.finops import repository
+
+
+def _row(**kwargs):
+    return SimpleNamespace(**kwargs)
 
 
 def _entry(payload: dict | None):
@@ -261,3 +265,113 @@ def test_get_date_like_columns_returns_column_names():
     job_config = call_args.kwargs["job_config"]
     param_names = {p.name for p in job_config.query_parameters}
     assert param_names == {"dataset_id", "table_id", "date_like_types"}
+
+
+# --- get_string_columns -----------------------------------------------------------
+
+
+def test_get_string_columns_returns_column_names():
+    client = MagicMock()
+    result = MagicMock()
+    result.result.return_value = [
+        _row(column_name="customer_id"),
+        _row(column_name="signup_date_raw"),
+    ]
+    client.query.return_value = result
+
+    columns = repository.get_string_columns(client, "proj", "RAW", "crm_leads", "US")
+
+    assert columns == ["customer_id", "signup_date_raw"]
+    call_args = client.query.call_args
+    assert "INFORMATION_SCHEMA.COLUMNS" in call_args.args[0]
+    assert "data_type = 'STRING'" in call_args.args[0]
+
+
+def test_get_string_columns_returns_empty_list_when_no_string_columns():
+    client = MagicMock()
+    client.query.return_value.result.return_value = []
+
+    assert repository.get_string_columns(client, "proj", "RAW", "crm_leads", "US") == []
+
+
+# --- is_view (finops) -------------------------------------------------------------
+
+
+def test_is_view_true_for_view_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="VIEW")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is True
+
+
+def test_is_view_true_for_materialized_view_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="MATERIALIZED VIEW")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is True
+
+
+def test_is_view_false_for_base_table_type():
+    client = MagicMock()
+    client.query.return_value.result.return_value = [_row(table_type="BASE TABLE")]
+
+    assert repository.is_view(client, "proj", "RAW", "leads", "US") is False
+
+
+def test_is_view_false_when_no_rows_found():
+    client = MagicMock()
+    client.query.return_value.result.return_value = []
+
+    assert repository.is_view(client, "proj", "RAW", "ghost", "US") is False
+
+
+# --- dry_run (finops) --------------------------------------------------------------
+
+
+def test_dry_run_uses_dry_run_job_config_and_returns_bytes():
+    captured = {}
+
+    def fake_query(sql, job_config=None):
+        captured["job_config"] = job_config
+        return SimpleNamespace(total_bytes_processed=12345)
+
+    client = MagicMock()
+    client.query.side_effect = fake_query
+
+    result = repository.dry_run(client, "proj", "SELECT 1")
+
+    assert result == 12345
+    assert captured["job_config"].dry_run is True
+
+
+def test_dry_run_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.dry_run(client, "proj", "SELECT 1")
+
+    assert exc_info.value.project_id == "proj"
+
+
+# --- execute_scan_query (finops) ----------------------------------------------------
+
+
+def test_execute_scan_query_returns_first_row_as_dict():
+    row = {"customer_id__non_null": 950, "customer_id__INT64": 950}
+    client = MagicMock()
+    client.query.return_value.result.return_value = [row]
+
+    result = repository.execute_scan_query(client, "proj", "SELECT ...", timeout=60.0)
+
+    assert result == row
+
+
+def test_execute_scan_query_raises_project_access_denied_on_forbidden():
+    client = MagicMock()
+    client.query.side_effect = Forbidden("Access Denied")
+
+    with pytest.raises(ProjectAccessDeniedError) as exc_info:
+        repository.execute_scan_query(client, "proj", "SELECT ...", timeout=60.0)
+
+    assert exc_info.value.project_id == "proj"

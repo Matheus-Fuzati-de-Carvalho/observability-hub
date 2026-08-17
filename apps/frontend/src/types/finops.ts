@@ -77,3 +77,44 @@ export interface BudgetResponse {
   projection: CostProjection
   warning: string | null
 }
+
+export type SuggestedColumnType = 'INT64' | 'FLOAT64' | 'BOOL' | 'DATE' | 'DATETIME' | 'TIMESTAMP'
+
+export interface ColumnTypeEstimateResponse {
+  project_id: string
+  tables_scanned: number
+  tables_skipped_view: number
+  columns_scanned: number
+  estimated_bytes: number
+  estimated_bytes_human: string
+  estimated_cost_usd: number
+  warning: string | null
+}
+
+export interface ColumnTypeSuggestion {
+  column_name: string
+  current_type: string
+  suggested_type: SuggestedColumnType
+  sample_non_null_count: number
+  avg_current_bytes: number
+  suggested_type_bytes: number
+  estimated_storage_savings_usd_month: number
+}
+
+export interface ColumnTypeCandidate {
+  dataset_id: string
+  table_id: string
+  size_bytes: number
+  row_count: number | null
+  suggestions: ColumnTypeSuggestion[]
+}
+
+export interface ColumnTypeSuggestionsResponse {
+  project_id: string
+  executed_at: string
+  sample_percent: number
+  tables_scanned: number
+  tables_skipped_view: number
+  candidates: ColumnTypeCandidate[]
+  warning: string | null
+}

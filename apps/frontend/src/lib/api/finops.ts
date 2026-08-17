@@ -2,6 +2,8 @@ import { httpClient } from '@/lib/http-client'
 import type {
   BudgetGroupBy,
   BudgetResponse,
+  ColumnTypeEstimateResponse,
+  ColumnTypeSuggestionsResponse,
   MinDaysUnused,
   PartitionCandidatesResponse,
   UnusedTablesResponse,
@@ -19,5 +21,17 @@ export const finopsApi = {
   getBudget: (projectId: string, groupBy: BudgetGroupBy = 'table', limit = 10) =>
     httpClient.get<BudgetResponse>(
       `/api/v1/finops/${projectId}/budget?group_by=${groupBy}&limit=${limit}`,
+    ),
+
+  estimateColumnTypeSuggestions: (projectId: string, samplePercent: number) =>
+    httpClient.post<ColumnTypeEstimateResponse>(
+      `/api/v1/finops/${projectId}/column-type-suggestions/estimate`,
+      { sample_percent: samplePercent },
+    ),
+
+  runColumnTypeSuggestions: (projectId: string, samplePercent: number) =>
+    httpClient.post<ColumnTypeSuggestionsResponse>(
+      `/api/v1/finops/${projectId}/column-type-suggestions/run`,
+      { sample_percent: samplePercent },
     ),
 }

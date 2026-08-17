@@ -9,6 +9,9 @@ from observability_hub.domains.finops import service
 from observability_hub.domains.finops.schemas import (
     BudgetGroupBy,
     BudgetResponse,
+    ColumnTypeEstimateResponse,
+    ColumnTypeScanRequest,
+    ColumnTypeSuggestionsResponse,
     MinDaysUnused,
     PartitionCandidatesResponse,
     UnusedTablesResponse,
@@ -48,3 +51,25 @@ def get_budget(
     logging_client: cloud_logging.Client = Depends(get_logging_client),
 ) -> BudgetResponse:
     return service.get_budget(logging_client, project_id, group_by=group_by, limit=limit)
+
+
+@router.post(
+    "/{project_id}/column-type-suggestions/estimate", response_model=ColumnTypeEstimateResponse
+)
+def estimate_column_type_suggestions(
+    project_id: str,
+    request: ColumnTypeScanRequest,
+    client: bigquery.Client = Depends(get_client),
+) -> ColumnTypeEstimateResponse:
+    return service.estimate_column_type_suggestions(client, project_id, request)
+
+
+@router.post(
+    "/{project_id}/column-type-suggestions/run", response_model=ColumnTypeSuggestionsResponse
+)
+def run_column_type_suggestions(
+    project_id: str,
+    request: ColumnTypeScanRequest,
+    client: bigquery.Client = Depends(get_client),
+) -> ColumnTypeSuggestionsResponse:
+    return service.run_column_type_suggestions(client, project_id, request)

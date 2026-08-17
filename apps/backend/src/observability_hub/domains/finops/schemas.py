@@ -98,3 +98,55 @@ class BudgetResponse(BaseModel):
     top_queries: list[CostlyQuery]
     projection: CostProjection
     warning: str | None = None
+
+
+class SuggestedColumnType(str, Enum):
+    INT64 = "INT64"
+    FLOAT64 = "FLOAT64"
+    BOOL = "BOOL"
+    DATE = "DATE"
+    DATETIME = "DATETIME"
+    TIMESTAMP = "TIMESTAMP"
+
+
+class ColumnTypeScanRequest(BaseModel):
+    sample_percent: float = 10
+
+
+class ColumnTypeEstimateResponse(BaseModel):
+    project_id: str
+    tables_scanned: int
+    tables_skipped_view: int
+    columns_scanned: int
+    estimated_bytes: int
+    estimated_bytes_human: str
+    estimated_cost_usd: float
+    warning: str | None = None
+
+
+class ColumnTypeSuggestion(BaseModel):
+    column_name: str
+    current_type: str
+    suggested_type: SuggestedColumnType
+    sample_non_null_count: int
+    avg_current_bytes: float
+    suggested_type_bytes: int
+    estimated_storage_savings_usd_month: float
+
+
+class ColumnTypeCandidate(BaseModel):
+    dataset_id: str
+    table_id: str
+    size_bytes: int
+    row_count: int | None
+    suggestions: list[ColumnTypeSuggestion]
+
+
+class ColumnTypeSuggestionsResponse(BaseModel):
+    project_id: str
+    executed_at: datetime
+    sample_percent: float
+    tables_scanned: int
+    tables_skipped_view: int
+    candidates: list[ColumnTypeCandidate]
+    warning: str | None = None

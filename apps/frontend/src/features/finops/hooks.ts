@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { finopsApi } from '@/lib/api/finops'
 import type { BudgetGroupBy, MinDaysUnused } from '@/types/finops'
 
@@ -27,5 +27,19 @@ export function useBudget(
     queryKey: ['finops-budget', projectId, groupBy, limit],
     queryFn: () => finopsApi.getBudget(projectId as string, groupBy, limit),
     enabled: Boolean(projectId),
+  })
+}
+
+export function useEstimateColumnTypeSuggestions() {
+  return useMutation({
+    mutationFn: ({ projectId, samplePercent }: { projectId: string; samplePercent: number }) =>
+      finopsApi.estimateColumnTypeSuggestions(projectId, samplePercent),
+  })
+}
+
+export function useRunColumnTypeSuggestions() {
+  return useMutation({
+    mutationFn: ({ projectId, samplePercent }: { projectId: string; samplePercent: number }) =>
+      finopsApi.runColumnTypeSuggestions(projectId, samplePercent),
   })
 }

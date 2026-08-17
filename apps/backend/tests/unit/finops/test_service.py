@@ -1,12 +1,18 @@
+import time as time_module
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from observability_hub.domains.finops import service
+from observability_hub.core.exceptions import InvalidSamplePercentError
+from observability_hub.domains.finops import service, sql_builder
 from observability_hub.domains.finops.repository import ScanEvent
-from observability_hub.domains.finops.schemas import BudgetGroupBy
+from observability_hub.domains.finops.schemas import (
+    BudgetGroupBy,
+    ColumnTypeScanRequest,
+    SuggestedColumnType,
+)
 
 
 def _fake_client() -> MagicMock:
@@ -42,6 +48,37 @@ def _stub_common(monkeypatch, all_tables, metadata):
     monkeypatch.setattr(service, "discover_regions", lambda project_id, client: ["US"])
     monkeypatch.setattr(service.repository, "list_all_table_refs", lambda *a, **kw: all_tables)
     monkeypatch.setattr(service, "get_tables_metadata", lambda client, refs: metadata)
+
+
+def _stub_column_type_common(
+    monkeypatch, all_tables, metadata, view_tables=None, string_columns_by_table=None
+):
+    _stub_common(monkeypatch, all_tables, metadata)
+    monkeypatch.setattr(
+        service, "resolve_dataset_region", lambda client, project_id, dataset_id, regions: "US"
+    )
+    view_tables = view_tables or set()
+    string_columns_by_table = string_columns_by_table or {}
+    monkeypatch.setattr(
+        service.repository,
+        "is_view",
+        lambda client, project_id, dataset_id, table_id, location: (
+            (dataset_id, table_id) in view_tables
+        ),
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "get_string_columns",
+        lambda client, project_id, dataset_id, table_id, location: string_columns_by_table.get(
+            (dataset_id, table_id), []
+        ),
+    )
+
+
+def _no_match_row(non_null=0):
+    row = {"col__non_null": non_null, "col__avg_bytes": None}
+    row.update({f"col__{t}": 0 for t in sql_builder.CANDIDATE_TYPES})
+    return row
 
 
 def _event(
@@ -577,3 +614,279 @@ def test_get_budget_sets_warning_when_no_events(monkeypatch):
 
     assert result.warning is not None
     assert "proj" in result.warning
+
+
+# --- _pick_suggestion ----------------------------------------------------------
+
+
+def test_pick_suggestion_returns_none_when_no_non_null_sampled_values():
+    assert service._pick_suggestion("col", _no_match_row(non_null=0), row_count=1_000_000) is None
+
+
+def test_pick_suggestion_returns_none_when_no_candidate_type_matches_fully():
+    row = _no_match_row(non_null=100)
+    row["col__INT64"] = 80  # não bateu em 100% dos valores não-nulos
+
+    assert service._pick_suggestion("col", row, row_count=1_000_000) is None
+
+
+def test_pick_suggestion_picks_int64_before_float64_when_both_match():
+    row = _no_match_row(non_null=100)
+    row["col__avg_bytes"] = 10.0  # avg_current_bytes = 12.0 > 8 (INT64) -> economiza
+    row["col__INT64"] = 100
+    row["col__FLOAT64"] = 100  # todo INT64 também bate em FLOAT64 -- INT64 deve vencer
+
+    result = service._pick_suggestion("col", row, row_count=1_000_000)
+
+    assert result is not None
+    assert result.suggested_type == SuggestedColumnType.INT64
+    assert result.sample_non_null_count == 100
+    assert result.avg_current_bytes == 12.0
+    assert result.suggested_type_bytes == 8
+    assert result.estimated_storage_savings_usd_month > 0
+
+
+def test_pick_suggestion_falls_back_to_float64_when_int64_does_not_fully_match():
+    row = _no_match_row(non_null=100)
+    row["col__avg_bytes"] = 10.0
+    row["col__INT64"] = 90  # alguns valores são decimais
+    row["col__FLOAT64"] = 100
+
+    result = service._pick_suggestion("col", row, row_count=1_000_000)
+
+    assert result is not None
+    assert result.suggested_type == SuggestedColumnType.FLOAT64
+
+
+def test_pick_suggestion_picks_bool_when_only_bool_matches():
+    row = _no_match_row(non_null=100)
+    row["col__avg_bytes"] = 5.0  # avg_current_bytes = 7.0 > 1 (BOOL) -> economiza
+    row["col__BOOL"] = 100
+
+    result = service._pick_suggestion("col", row, row_count=1_000_000)
+
+    assert result is not None
+    assert result.suggested_type == SuggestedColumnType.BOOL
+
+
+def test_pick_suggestion_returns_none_when_string_already_smaller_than_suggested_type():
+    row = _no_match_row(non_null=100)
+    row["col__avg_bytes"] = 0.5  # avg_current_bytes = 2.5 <= 8 (INT64) -> não economiza
+    row["col__INT64"] = 100
+
+    assert service._pick_suggestion("col", row, row_count=1_000_000) is None
+
+
+# --- estimate_column_type_suggestions -------------------------------------------
+
+
+def test_estimate_column_type_suggestions_raises_for_invalid_sample_percent():
+    with pytest.raises(InvalidSamplePercentError):
+        service.estimate_column_type_suggestions(
+            _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=0)
+        )
+
+
+def test_estimate_column_type_suggestions_sums_dry_run_bytes_across_eligible_tables(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a"), ("RAW", "b")],
+        metadata={
+            "proj.RAW.a": _bq_table(num_rows=1000),
+            "proj.RAW.b": _bq_table(num_rows=1000),
+        },
+        string_columns_by_table={("RAW", "a"): ["col"], ("RAW", "b"): ["col1", "col2"]},
+    )
+    monkeypatch.setattr(service.repository, "dry_run", lambda client, project_id, sql: 1000)
+
+    result = service.estimate_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 2
+    assert result.columns_scanned == 3  # 1 + 2
+    assert result.estimated_bytes == 2000  # 1000 por tabela
+    assert result.tables_skipped_view == 0
+
+
+def test_estimate_column_type_suggestions_skips_views_without_dry_run(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a_view")],
+        metadata={"proj.RAW.a_view": _bq_table(num_rows=1000)},
+        view_tables={("RAW", "a_view")},
+        string_columns_by_table={("RAW", "a_view"): ["col"]},
+    )
+    dry_run_mock = MagicMock(return_value=1000)
+    monkeypatch.setattr(service.repository, "dry_run", dry_run_mock)
+
+    result = service.estimate_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 0
+    assert result.tables_skipped_view == 1
+    assert result.estimated_bytes == 0
+    dry_run_mock.assert_not_called()
+
+
+def test_estimate_column_type_suggestions_skips_tables_without_string_columns(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "numeric_only")],
+        metadata={"proj.RAW.numeric_only": _bq_table(num_rows=1000)},
+        string_columns_by_table={},  # nenhuma coluna STRING
+    )
+
+    result = service.estimate_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 0
+    assert result.tables_skipped_view == 0
+
+
+# --- run_column_type_suggestions -------------------------------------------------
+
+
+def test_run_column_type_suggestions_raises_for_invalid_sample_percent():
+    with pytest.raises(InvalidSamplePercentError):
+        service.run_column_type_suggestions(
+            _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=0)
+        )
+
+
+def test_run_column_type_suggestions_returns_candidate_with_suggestion(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "crm_leads")],
+        metadata={"proj.RAW.crm_leads": _bq_table(num_rows=1_000_000, num_bytes=5_000_000_000)},
+        string_columns_by_table={("RAW", "crm_leads"): ["customer_id"]},
+    )
+    row = {
+        "customer_id__non_null": 950,
+        "customer_id__avg_bytes": 10.0,
+        **{f"customer_id__{t}": 0 for t in sql_builder.CANDIDATE_TYPES},
+    }
+    row["customer_id__INT64"] = 950
+    monkeypatch.setattr(
+        service.repository, "execute_scan_query", lambda client, project_id, sql, timeout: row
+    )
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 1
+    assert result.tables_skipped_view == 0
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    assert candidate.dataset_id == "RAW"
+    assert candidate.table_id == "crm_leads"
+    assert candidate.row_count == 1_000_000
+    assert len(candidate.suggestions) == 1
+    assert candidate.suggestions[0].column_name == "customer_id"
+    assert candidate.suggestions[0].suggested_type == SuggestedColumnType.INT64
+    assert result.warning is None
+
+
+def test_run_column_type_suggestions_excludes_table_with_no_viable_suggestion(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "crm_leads")],
+        metadata={"proj.RAW.crm_leads": _bq_table(num_rows=1000)},
+        string_columns_by_table={("RAW", "crm_leads"): ["col"]},
+    )
+    monkeypatch.setattr(
+        service.repository,
+        "execute_scan_query",
+        lambda client, project_id, sql, timeout: _no_match_row(non_null=100),
+    )
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 1
+    assert result.candidates == []
+
+
+def test_run_column_type_suggestions_skips_views(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a_view")],
+        metadata={"proj.RAW.a_view": _bq_table(num_rows=1000)},
+        view_tables={("RAW", "a_view")},
+        string_columns_by_table={("RAW", "a_view"): ["col"]},
+    )
+    execute_mock = MagicMock()
+    monkeypatch.setattr(service.repository, "execute_scan_query", execute_mock)
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.tables_scanned == 0
+    assert result.tables_skipped_view == 1
+    assert result.candidates == []
+    execute_mock.assert_not_called()
+
+
+def test_run_column_type_suggestions_sorts_candidates_by_total_savings_descending(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "small_savings"), ("RAW", "big_savings")],
+        metadata={
+            "proj.RAW.small_savings": _bq_table(num_rows=1_000),
+            "proj.RAW.big_savings": _bq_table(num_rows=100_000_000),
+        },
+        string_columns_by_table={
+            ("RAW", "small_savings"): ["col"],
+            ("RAW", "big_savings"): ["col"],
+        },
+    )
+
+    def fake_execute(client, project_id, sql, timeout):
+        row = {
+            "col__non_null": 100,
+            "col__avg_bytes": 10.0,
+            **{f"col__{t}": 0 for t in sql_builder.CANDIDATE_TYPES},
+        }
+        row["col__INT64"] = 100
+        return row
+
+    monkeypatch.setattr(service.repository, "execute_scan_query", fake_execute)
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert [c.table_id for c in result.candidates] == ["big_savings", "small_savings"]
+
+
+def test_run_column_type_suggestions_returns_partial_result_when_time_budget_exhausted(
+    monkeypatch,
+):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a"), ("RAW", "b")],
+        metadata={
+            "proj.RAW.a": _bq_table(num_rows=1000),
+            "proj.RAW.b": _bq_table(num_rows=1000),
+        },
+        string_columns_by_table={("RAW", "a"): ["col"], ("RAW", "b"): ["col"]},
+    )
+    monkeypatch.setattr(service, "_COLUMN_TYPE_SCAN_TIMEOUT_SECONDS", 0.01)
+
+    def slow_execute(client, project_id, sql, timeout):
+        time_module.sleep(0.3)
+        return _no_match_row(non_null=0)
+
+    monkeypatch.setattr(service.repository, "execute_scan_query", slow_execute)
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10)
+    )
+
+    assert result.warning is not None
+    assert "parcial" in result.warning

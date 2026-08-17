@@ -5,6 +5,77 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Fase 4 — FinOps: sugestão de tipo de coluna (concluída, 1ª parte da 3ª frente)
+
+Branch `feat/finops-budget` (mesma branch da 2ª frente, budget — ainda sem
+PR pra `main`). Primeira metade de "otimizações sugeridas"
+(`docs/prd.md`, 4.3) — a segunda metade (clustering) foi deliberadamente
+deferida, ver "Decisão 1" abaixo.
+
+### O que foi feito
+
+Terceira aba em `/finops` ("Tipos de coluna"): detecta colunas `STRING`
+cujos valores amostrados são compatíveis com um tipo mais estreito
+(`INT64`, `FLOAT64`, `BOOL`, `DATE`, `DATETIME`, `TIMESTAMP`), com
+estimativa de economia de storage mensal. Novo par de endpoints —
+`POST /finops/{project}/column-type-suggestions/estimate` (dry-run
+gratuito) e `.../run` (execução real) — projeto inteiro, não por tabela.
+
+### Decisões desta sessão
+
+**Decisão 1 — Onde a feature mora: nova aba no scanner de desperdício
+(projeto inteiro), não no modal de profiling**
+- Diferente do scanner de desperdício e do budget (100% metadado/audit
+  log, custo $0), esta feature precisa amostrar dado real via
+  `TABLESAMPLE` — mesmo custo real que `pii`/`quality` já têm. Perguntado
+  explicitamente ao usuário se a feature deveria viver como aba nova no
+  scanner de desperdício (visão de projeto inteiro) ou como aba nova no
+  modal de profiling (por tabela, mesmo lugar de PII) — escolhido o
+  scanner de desperdício. Consequência: fluxo em duas etapas (dry-run
+  "Estimar custo" antes de "Escanear", nunca automático ao abrir a tela)
+  pra nunca cobrar do usuário sem ele decidir antes olhando pro número.
+
+**Decisão 2 — Nunca sugerir sem economia real, nem com confiança parcial**
+- Só vira sugestão se (a) 100% dos valores não-nulos **amostrados**
+  batem no tipo candidato (não um limiar configurável tipo "a maioria" —
+  aplicar um tipo mais estreito numa coluna que não converte 100%
+  quebraria dado real) e (b) a troca de fato economiza bytes
+  (`avg_current_bytes > bytes fixos do tipo sugerido` — uma `STRING`
+  curta como `"1"` já ocupa menos espaço que um `INT64` de 8 bytes fixos,
+  então sugerir a troca nesse caso pioraria o storage). Mesma disciplina
+  de "nunca superestimar economia" já aplicada ao scanner de
+  particionamento (Fase 4, 1ª frente).
+
+**Decisão 3 — Clustering deferido, não faz parte desta v1**
+- Diferente de tipo de coluna (comparação de bytes é objetiva e
+  determinística), sugerir clustering exigiria inferir quais colunas
+  aparecem com mais frequência em `WHERE`/`GROUP BY`/`JOIN` — só
+  disponível via texto livre de query nos audit logs, sem um parser de
+  SQL de verdade isso vira heurística de regex frágil. Documentado como
+  "fora do escopo" em `docs/specs/finops-column-types.md`, não
+  esquecido — merece spec e conversa própria sobre nível de confiança
+  aceitável antes de implementar.
+
+**Decisão 4 — Orçamento de tempo por lote, não por tabela**
+- `/run` escaneia todas as tabelas elegíveis do projeto em paralelo
+  (`ThreadPoolExecutor`, `max_workers=4` — mais conservador que os
+  `max_workers=8` de operações gratuitas do domínio, porque aqui cada
+  query tem custo real). Orçamento total de 120s pro lote inteiro; se
+  esgotar no meio, retorna as tabelas já escaneadas com um `warning` de
+  resultado parcial em vez de lançar erro — parcial ainda tem valor aqui
+  (lista de oportunidades), diferente de um scan de tabela única em
+  `pii`/`quality`, onde parcial não faz sentido.
+
+### Status até o momento
+- Backend: 464 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Ainda não validado em dev nesta sessão
+- Falta: sugestão de clustering (deferida, ver Decisão 3) — depois disso
+  a Fase 4 fecha
+
+---
+
 ## Fase 4 — FinOps: budget de custo (em andamento, 2ª de 3 frentes)
 
 Branch `feat/finops-budget`, criada a partir de `feat/finops-waste-scanner`
