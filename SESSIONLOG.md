@@ -72,7 +72,7 @@ de memória de sessão, já que nenhuma sessão anterior deixou notas.
 commitada em `variables.tf` (`max_instance_count`); depois, perguntar
 qual é o próximo item de trabalho — não há nenhuma spec pendente nem
 sprint em andamento no momento. Candidatos conhecidos, nenhum iniciado:
-Backlog item 13 (expansão de cobertura pra além do BigQuery, adiada
+Backlog item 14 (expansão de cobertura pra além do BigQuery, adiada
 conscientemente pelo usuário em 2026-08-17), atualizar `CHANGELOG.md`/
 `docs/prd.md` (roadmap desatualizado desde a Sprint 3.2), e formalizar
 IAM cross-project em Terraform (Backlog item 2, cada vez mais adiado).
@@ -480,7 +480,7 @@ viraram `Collapsible`, mesmo padrão que "Datasets disponíveis" já usava.
 ganhou um nível hierárquico acima de tudo — `SidebarServiceGroup`, hoje
 só "BigQuery", **deliberadamente preparado pra o Hub expandir pra outros
 serviços GCP observáveis** (Cloud Storage, Pub/Sub, Dataflow — ver
-Backlog item 13, adiado conscientemente por decisão do usuário em
+Backlog item 14, adiado conscientemente por decisão do usuário em
 2026-08-17, mas a estrutura de sidebar já não precisará de retrabalho
 quando isso acontecer). "Governança" e "FinOps" eram headers estáticos,
 viraram seções recolhíveis de verdade; todas as subseções passaram a
@@ -1251,7 +1251,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     audit config) ser registrada no momento em que acontece, e verificada
     (não assumida) antes de marcar como feita.
 
-11. **Possíveis documentos órfãos na coleção `profiling_results` do
+12. **Possíveis documentos órfãos na coleção `profiling_results` do
     Firestore de dev** — a feature de score de qualidade escreveu nessa
     coleção enquanto esteve ativa nesta sessão (depois revertida, ver
     Sprint 3.2 acima). Nenhum código lê ou escreve mais nela, mas os
@@ -1259,7 +1259,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     alguém limpar manualmente — não afeta nada em runtime, só
     "sujeira" de dado morto.
 
-12. **Bundle do frontend** — estava em 929.60 kB / gzip 281 kB no fim da
+13. **Bundle do frontend** — estava em 929.60 kB / gzip 281 kB no fim da
     Sprint 3.2 (antes de FinOps/Admin), e ganhou mais duas dependências
     desde então (`@xyflow/react` + `dagre`, pro diagrama de lineage
     multi-hop) — tamanho atual não medido nesta reconstrução (não rodei
@@ -1267,7 +1267,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     (code-splitting) fica mais urgente a cada domínio novo — ainda não
     implementado. Medir de novo na próxima sessão que tocar frontend.
 
-13. **Expansão de cobertura pra além do BigQuery** — hoje os 7 domínios
+14. **Expansão de cobertura pra além do BigQuery** — hoje os 7 domínios
     (catálogo, lineage, PII, mapa de acesso, qualidade, freshness,
     FinOps) só observam BigQuery/Cloud Logging/Cloud Billing. Cliente
     (via usuário, 2026-08-17) confirmou interesse em mapear outros
@@ -1277,7 +1277,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     mesma data) já deixa a estrutura de navegação pronta pra isso sem
     retrabalho. Não iniciar sem alinhamento explícito do usuário.
 
-14. **`CHANGELOG.md` desatualizado** — a tabela "Próximas fases" ainda
+15. **`CHANGELOG.md` desatualizado** — a tabela "Próximas fases" ainda
     lista Fase 4 (FinOps) como "⏳ Em andamento... falta otimizações
     sugeridas", e não existe nenhuma seção "O que foi feito" pra Sprint
     3.2 (fechamento), FinOps ou Admin ACL — só a Sprint 2.2/2.3 é a mais
@@ -1287,7 +1287,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     SESSIONLOG) — próxima sessão que tocar documentação deveria fechar
     isso, CLAUDE.md pede atualização de CHANGELOG a cada fase concluída.
 
-15. **`docs/adr/ADR-009-acl-usuario-projeto.md` com datas incorretas** —
+16. **`docs/adr/ADR-009-acl-usuario-projeto.md` com datas incorretas** —
     cabeçalho diz "2026-08-18" e a "Nota de extensão" diz "2026-08-20",
     mas todos os commits reais da feature (`391d159`..`301fc59`) rodaram
     em 2026-08-17 (confirmado via `git log`). Provavelmente datas
@@ -1296,7 +1296,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     apagar um ADR", então a correção certa é uma nota de erratum, não
     reescrever a data original; sinalizar ao usuário antes de mexer.
 
-16. **Mudança não commitada em `infra/terraform/modules/cloud-run/
+17. **Mudança não commitada em `infra/terraform/modules/cloud-run/
     variables.tf`** (`max_instance_count` default `2` → `5`) — sem
     contexto na conversa desta sessão sobre motivo ou ambiente-alvo.
     Não commitado, não staged. Perguntar ao usuário antes de qualquer
@@ -1316,16 +1316,16 @@ concluído e mergeado em main/prod.
 
 Candidatos pro próximo passo, nenhum iniciado, em ordem de menor pra
 maior escopo:
-1. Resolver a mudança não commitada em variables.tf (Backlog item 16)
+1. Resolver a mudança não commitada em variables.tf (Backlog item 17)
    — perguntar ao usuário o que ela é antes de qualquer coisa.
-2. Fechar a documentação defasada: CHANGELOG.md (Backlog item 14) e
+2. Fechar a documentação defasada: CHANGELOG.md (Backlog item 15) e
    possivelmente docs/prd.md — marcar Fase 4/Sprint 3.2/Admin como
    concluídas, registrar erros/aprendizados da sessão de 2026-08-17
    (bug de regiões fantasma no finops budget é o mais rico pra registrar).
 3. Formalizar IAM cross-project em Terraform (Backlog item 2) — agora
    são 5 roles x 2 SAs = 10 bindings manuais por direção, cada vez mais
    trabalhoso de auditar só via gcloud.
-4. Expansão de cobertura pra além do BigQuery (Backlog item 13) — só
+4. Expansão de cobertura pra além do BigQuery (Backlog item 14) — só
    com alinhamento explícito do usuário, decisão consciente de adiar.
 
 Nenhum desses foi validado com o usuário nesta sessão — são só o estado
