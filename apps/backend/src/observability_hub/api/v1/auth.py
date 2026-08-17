@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Cookie, Depends
 from fastapi.responses import RedirectResponse, Response
+from google.cloud import firestore
 
 from observability_hub.core.auth import get_current_user
+from observability_hub.core.firestore import get_firestore_client
+from observability_hub.domains.admin import service as admin_service
 from observability_hub.domains.auth import service
 from observability_hub.domains.auth.schemas import TokenResponse, UserInfo
 
@@ -50,8 +53,11 @@ def callback(
 
 
 @router.get("/me", response_model=UserInfo)
-def me(user: UserInfo = Depends(get_current_user)) -> UserInfo:
-    return user
+def me(
+    user: UserInfo = Depends(get_current_user),
+    client: firestore.Client = Depends(get_firestore_client),
+) -> UserInfo:
+    return user.model_copy(update={"is_admin": admin_service.is_admin(client, user.email)})
 
 
 @router.post("/logout")

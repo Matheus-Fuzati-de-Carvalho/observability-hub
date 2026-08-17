@@ -1,5 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import { AppLayout } from '@/app/layout'
+import { AdminPage } from '@/features/admin/AdminPage'
+import { RequireAdmin } from '@/features/admin/RequireAdmin'
 import { AuthCallbackPage } from '@/features/auth/AuthCallbackPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RequireAuth } from '@/features/auth/RequireAuth'
@@ -27,6 +29,9 @@ export function AppRoutes() {
           <Route path="finops" element={<FinOpsPage />} />
           <Route path="finops/budget" element={<BudgetPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route element={<RequireAdmin />}>
+            <Route path="admin" element={<AdminPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

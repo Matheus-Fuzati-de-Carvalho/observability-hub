@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from google.cloud import bigquery
 
-from observability_hub.core.auth import get_current_user
+from observability_hub.core.auth import require_project_access
 from observability_hub.core.bigquery import get_client
 from observability_hub.domains.pii import service
 from observability_hub.domains.pii.schemas import (
@@ -10,7 +10,9 @@ from observability_hub.domains.pii.schemas import (
     PiiScanResponse,
 )
 
-router = APIRouter(prefix="/api/v1/pii", tags=["pii"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/api/v1/pii", tags=["pii"], dependencies=[Depends(require_project_access)]
+)
 
 
 @router.post(

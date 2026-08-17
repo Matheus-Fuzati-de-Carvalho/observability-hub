@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from observability_hub.api.v1 import (
     access,
+    admin,
     auth,
     catalog,
     favorites,
@@ -19,10 +20,12 @@ from observability_hub.api.v1 import (
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
+    AdminAccessRequiredError,
     DatasetNotFoundError,
     InvalidDateColumnError,
     InvalidSamplePercentError,
     InvalidSessionError,
+    LastAdminLockoutError,
     LoggingAccessDeniedError,
     OAuthEmailNotAllowedError,
     OAuthExchangeError,
@@ -30,6 +33,7 @@ from observability_hub.core.exceptions import (
     PiiScanTimeoutError,
     ProfilingTimeoutError,
     ProjectAccessDeniedError,
+    ProjectNotAuthorizedError,
     ProjectNotFoundError,
     TableNotFoundError,
     TableNotPartitionedError,
@@ -59,6 +63,7 @@ app.include_router(lineage.router)
 app.include_router(pii.router)
 app.include_router(access.router)
 app.include_router(finops.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
@@ -224,4 +229,28 @@ def handle_invalid_session(request: Request, exc: InvalidSessionError) -> JSONRe
     return JSONResponse(
         status_code=401,
         content={"error": "invalid_session", "message": str(exc)},
+    )
+
+
+@app.exception_handler(ProjectNotAuthorizedError)
+def handle_project_not_authorized(request: Request, exc: ProjectNotAuthorizedError) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"error": "project_not_authorized", "message": str(exc)},
+    )
+
+
+@app.exception_handler(AdminAccessRequiredError)
+def handle_admin_access_required(request: Request, exc: AdminAccessRequiredError) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={"error": "admin_access_required", "message": str(exc)},
+    )
+
+
+@app.exception_handler(LastAdminLockoutError)
+def handle_last_admin_lockout(request: Request, exc: LastAdminLockoutError) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"error": "last_admin_lockout", "message": str(exc)},
     )

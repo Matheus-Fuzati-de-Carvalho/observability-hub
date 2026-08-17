@@ -5,6 +5,98 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Controle de acesso por usuário × projeto + tela de admin (novo, ADR-009)
+
+Branch `feat/finops-budget`. Fora do roadmap de observabilidade
+(`docs/prd.md`) — mudança de plataforma/segurança, motivada pelo usuário
+ao perceber que o Hub, ao ser vinculado a múltiplos projetos-cliente,
+não tinha nenhuma barreira impedindo um usuário autenticado de digitar
+o `project_id` de um cliente que não é o dele e ver os dados.
+
+### O que foi feito
+
+Segunda camada de autorização em cima do login (Google OAuth) existente:
+- Novo domínio `domains/admin/` (Firestore, coleção `hub_users/{email}`)
+  com `is_admin`/`allowed_projects` (aceita wildcard `"*"`).
+- `core/auth.py::require_project_access` substitui `get_current_user`
+  como gate de router em todo endpoint com `project_id` no path
+  (catalog, freshness, profiling, quality, lineage, pii, access,
+  finops, projects — 9 routers, uma linha cada) — nega antes de
+  qualquer chamada real ao BigQuery/Cloud Logging, mesmo que a SA de
+  runtime tenha IAM no projeto.
+- `core/auth.py::require_admin` gateia a tela `/admin` nova
+  (`features/admin/AdminPage.tsx`) — CRUD de usuários administrados,
+  sem senha nova, sem Cloud Run novo, reaproveitando 100% da sessão
+  OAuth já existente. Link condicional no Topbar (`ShieldCheck`), só
+  visível pra quem `is_admin`.
+- `scripts/seed_admin.py` novo — bootstrap do primeiro admin (problema
+  de ovo-e-galinha: `hub_users` vazio bloqueia `/admin` pra todo mundo,
+  ninguém consegue criar o primeiro registro pela UI).
+- Spec completa em `docs/specs/admin.md`, decisão arquitetural em
+  `docs/adr/ADR-009-acl-usuario-projeto.md` (complementa ADR-006, não
+  substitui).
+
+### Decisões desta sessão
+
+**Decisão 1 — Firestore, não Secret Manager, pro ACL**
+- A SA de runtime já lê/escreve Firestore hoje (favoritos, histórico) —
+  zero IAM novo. Secret Manager é versionado/imutável por natureza,
+  inadequado pra CRUD via UI; e o `@lru_cache` sem TTL de
+  `get_oauth_allowlist` (Secret Manager) já causou staleness real nesta
+  mesma sessão. Leitura de ACL é sempre fresca, sem cache, de propósito.
+
+**Decisão 2 — Login (OAUTH_ALLOWLIST) continua como está, mas sem dar
+acesso implícito a projeto**
+- Perguntado explicitamente ao usuário se o allow-por-domínio do login
+  deveria ser removido (exigindo cadastro individual de todo mundo,
+  inclusive time interno) ou mantido só pra login, sem acesso a projeto
+  por padrão. Escolhida a segunda opção — menos risco de lockout no dia
+  do deploy, mesmo nível de segurança de projeto (quem só passa pelo
+  domínio ainda precisa de liberação explícita de um admin pra ver
+  qualquer `project_id`).
+
+**Decisão 3 — Wildcard `"*"` em vez de lista exaustiva pra acesso total**
+- Perguntado e confirmado com o usuário — admins/líderes que precisam
+  ver todos os projetos-cliente usam `"*"` em vez de listar cada um.
+  Menos auditável que lista exaustiva, mas muito mais fácil de manter;
+  aceito conscientemente.
+
+**Decisão 4 — `is_admin` só populado em `GET /auth/me`, nunca em
+`get_current_user`**
+- `get_current_user` roda em todo request autenticado — não ganha I/O
+  novo (uma leitura Firestore a mais em toda chamada de
+  catalog/freshness/etc. seria desperdício). Consequência: `is_admin`
+  só é confiável quando `UserInfo` vem de `/auth/me`; `require_admin`
+  nunca confia nesse campo, sempre faz checagem fresca própria.
+
+**Decisão 5 — Bloqueio de remover o último admin**
+- `upsert_user`/`delete_user` recusam (`LastAdminLockoutError`, 400)
+  remover `is_admin` do último administrador restante — sem isso, um
+  erro de operação zeraria os admins e ninguém mais conseguiria abrir
+  `/admin` pra reverter.
+
+### Investigação técnica relevante
+
+Antes de trocar a dependency de 9 routers, confirmado lendo o código
+instalado do FastAPI (`0.141.1`) que uma dependency declarada a nível
+de `APIRouter(dependencies=[Depends(fn)])` resolve path params (ex:
+`project_id`) da mesma forma que uma dependency de endpoint — o `path`
+usado na resolução é o da rota real (prefixo + path), não um path
+genérico do router. Isso permitiu trocar `get_current_user` por
+`require_project_access` com uma linha por router, sem tocar em nenhum
+endpoint individual.
+
+### Status até o momento
+- Backend: 492 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Validação end-to-end (login real, `/admin` funcionando, 403 num
+  projeto sem ACL) depende do bootstrap do primeiro admin em dev —
+  fica a cargo do usuário depois do deploy (sem ferramenta de browser
+  neste ambiente)
+
+---
+
 ## Reorganização de navegação: hierarquia por serviço observável
 
 Branch `feat/finops-budget`. Não é uma fase nova — mudança estrutural na
