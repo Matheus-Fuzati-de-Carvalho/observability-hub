@@ -85,6 +85,8 @@ Nunca compartilhar recursos entre `dev` e `prod`. Cada ambiente tem seu próprio
 │       ├── dev/                  # Root module do ambiente dev, consome modules/
 │       └── prod/                 # Root module do ambiente prod, consome modules/
 ├── docs/adr/                     # Architecture Decision Records
+├── docs/playbooks/                # Roteiros operacionais de execução rápida (ex: liberar
+│                                   # um projeto GCP pro Hub, hospedar o Hub em projetos novos)
 ├── scripts/                      # Scripts de apoio (setup local, seed, etc.)
 ├── CLAUDE.md
 └── .gitignore
