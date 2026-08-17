@@ -115,6 +115,7 @@ export function ProjectSelector() {
         <div className="absolute top-full left-0 z-50 mt-2 w-96">
           <ApiErrorNotice
             error={validateQuery.error}
+            showFix={false}
             action={
               isNotAuthorized
                 ? { label: 'Solicitar acesso', onClick: () => setRequestAccessOpen(true) }
