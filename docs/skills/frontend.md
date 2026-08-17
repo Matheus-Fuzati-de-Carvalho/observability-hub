@@ -15,7 +15,7 @@ Filosofia: minimalismo com personalidade. Menos decoração, mais clareza.
 --color-bg-surface:    #2A2A28;   /* superfícies elevadas (cards, sidebar) */
 --color-bg-muted:      #3A3A38;   /* hover states, bordas sutis */
 --color-text-primary:  #FFFFFF;   /* texto principal no dark */
---color-text-muted:    #5B626C;   /* texto secundário, labels */
+--color-text-muted:    #8F96A1;   /* texto secundário, labels — >=4.5:1 (WCAG AA) contra --color-bg-dark/-surface; #5B626C original tinha ~2.74:1, quase ilegível */
 --color-text-inverse:  #1D1D1B;   /* texto sobre fundo amarelo */
 
 /* Cores de apoio para gráficos e status */
@@ -239,7 +239,7 @@ module.exports = {
         'bg-dark':    '#1D1D1B',
         'bg-surface': '#2A2A28',
         'bg-muted':   '#3A3A38',
-        'text-muted': '#5B626C',
+        'text-muted': '#8F96A1',
         'status-ok':    '#34D399',
         'status-warn':  '#FFB302',
         'status-error': '#E53E3E',

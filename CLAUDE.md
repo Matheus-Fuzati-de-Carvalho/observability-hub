@@ -62,7 +62,9 @@ Nunca compartilhar recursos entre `dev` e `prod`. Cada ambiente tem seu próprio
 │   │   │   │   ├── access/
 │   │   │   │   ├── quality/
 │   │   │   │   ├── freshness/
-│   │   │   │   └── finops/
+│   │   │   │   ├── finops/
+│   │   │   │   ├── auth/        # Domínio de plataforma (não é dos 7 de observabilidade) — login OAuth, sessão
+│   │   │   │   └── admin/       # Domínio de plataforma — ACL de usuário×projeto, ver docs/specs/admin.md
 │   │   │   └── core/            # Config, clients GCP compartilhados, logging, exceptions, auth
 │   │   └── tests/
 │   │       ├── unit/            # Espelha domains/, sem chamadas reais ao GCP

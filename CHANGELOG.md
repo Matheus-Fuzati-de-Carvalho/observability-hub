@@ -5,7 +5,488 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
-## Fase 4 — FinOps: scanner de desperdício (em andamento, 1ª de 3 frentes)
+## 4 ajustes de UX: busca no menu, contraste, voltar no admin, favoritos por dataset/apelido
+
+Branch `feat/sprint-3.2`. Usuário validou a reorganização da sidebar por
+serviço e o admin em uso real e voltou com 4 pedidos, em ordem de
+prioridade declarada.
+
+### O que foi feito
+
+1. **"Buscar tabelas" dentro de "Datasets disponíveis"** — era um link
+   solto acima das seções da sidebar; movido pra dentro da seção, como
+   primeiro item.
+2. **Contraste de `--muted-foreground` corrigido** — `#5b626c` sobre
+   `#1d1d1b` media ~2.74:1 (WCAG AA exige ≥4.5:1 pra texto normal),
+   calculado via fórmula de luminância relativa (sRGB → linear →
+   contraste), não só "parecia ruim". Trocado por `#8f96a1` (mesma
+   família azul-acinzentada, 5.66:1 contra `--background`, 4.82:1
+   contra `--card`, fundo real da sidebar). Atualizado em `index.css`
+   **e** em `docs/skills/frontend.md` juntos — a skill é a fonte de
+   verdade documentada da paleta dp6 e precisa ficar sincronizada.
+3. **Botão de voltar no `/admin`** — primeira tela do app com esse
+   padrão; link discreto (`ArrowLeft` + "Voltar") pra `/`.
+4. **Favoritos com dois níveis (tabela/dataset) + apelido** — reescrita
+   do domínio `favorites`: `FavoriteTable` virou `Favorite`
+   (`table_id: str | None`, `None` = favorito do dataset inteiro) e
+   ganhou `nickname: str | None`. Nova rota
+   `DELETE /favorites/{project_id}/{dataset_id}` (nível dataset,
+   coexiste com a de nível tabela por diferença de segmentos de path).
+   Estrela de favoritar dataset adicionada em duas navegações novas: a
+   lista "Datasets disponíveis" da sidebar e o cabeçalho de
+   `CatalogDatasetPage.tsx`. Seção "Favoritos" da sidebar dividida em
+   "Tabelas favoritas" / "Datasets favoritos". Apelido editável inline
+   (lápis no hover → input, sem dialog) via `FavoriteNickname.tsx`.
+
+### Decisões desta sessão
+
+**Decisão 1 — `added_at` e `nickname` preservados em upsert repetido**
+- Mesmo racional já usado em `domains/admin/repository.py::upsert_user`
+  pra `created_at`: sem preservar `added_at`, editar só o apelido de um
+  favorito existente reordenaria a lista (ordenada por `added_at`
+  desc) — efeito colateral indesejado de uma ação que devia ser só
+  renomear. `nickname` ganhou semântica de três estados na chamada de
+  `add_favorite`, não dois: `None` = não mexe no apelido já salvo
+  (o toggle de favoritar/desfavoritar nunca passa `nickname`, e não
+  pode apagar um apelido existente sem querer); `""` = remove o
+  apelido de propósito; qualquer outra string = define o apelido.
+
+**Decisão 2 — Contraste corrigido com medição, não só percepção**
+- Perguntado e confirmado com o usuário: atualizar `index.css` e
+  `docs/skills/frontend.md` juntos. O valor novo foi calculado (não
+  escolhido a olho) pra garantir ≥4.5:1 contra os fundos reais onde o
+  token aparece.
+
+**Decisão 3 — Apelido editado inline, sem dialog**
+- Perguntado e confirmado com o usuário: lápis aparece no hover do
+  item (`group-hover`), clique troca o texto por um `Input` autofocado
+  ali mesmo — consistente com a preferência por menos fricção nessa
+  interação específica (diferente do padrão de dialog já usado em
+  `AdminUsersTab.tsx`, mantido lá por ser uma edição com mais campos).
+
+### Status até o momento
+- Backend: 534 testes unitários, 100% passando, `ruff check`/`ruff
+  format --check` sem erros.
+- Frontend: `tsc --noEmit` limpo, `pnpm lint` (biome) sem erros,
+  `pnpm build` concluído.
+- Validação visual (legibilidade do contraste, favoritos de dataset,
+  apelido inline, botão voltar) fica a cargo do usuário após o deploy
+  — sem ferramenta de browser neste ambiente.
+
+---
+
+## Admin v1.1: projetos públicos, visão por projeto, solicitação de acesso, mensagens de erro
+
+Branch `feat/finops-budget`. Extensão do ACL v1.0 (ADR-009) — usuário
+testou em produção e voltou com três pedidos.
+
+### O que foi feito
+
+1. **Mensagens de erro visíveis** — `ProjectSelector.tsx` mostrava "sem
+   acesso" só como um ícone com tooltip no hover. Trocado por um painel
+   flutuante (`ApiErrorNotice`, mesmo componente usado no resto do app,
+   que ganhou uma prop `action` opcional) com o texto completo e, quando
+   o erro é `project_not_authorized`, um botão "Solicitar acesso".
+2. **Visão por projeto + projeto público** — nova coleção Firestore
+   `hub_projects/{project_id}` (`is_public`), eixo independente do
+   `allowed_projects` de cada usuário — libera geral, inclusive quem
+   ainda não tem cadastro no Hub. Nova aba "Por projeto" em `/admin`
+   (visão inversa da aba "Por usuário": escolhe um projeto, vê/gerencia
+   quem tem acesso), via `array_contains_any` no Firestore.
+3. **Solicitação de acesso self-service** — `POST /api/v1/access-requests`
+   (fora de `/admin`, qualquer usuário autenticado pede pra si mesmo),
+   nova aba "Solicitações" em `/admin` com aprovar/negar, badge de
+   contagem no ícone de admin do Topbar (`refetchInterval` de 60s, sem
+   WebSocket).
+
+### Decisões desta sessão
+
+**Decisão 1 — Badge discreto no Topbar, não banner intrusivo**
+- Perguntado e confirmado com o usuário: aviso de pendências como
+  contador no ícone de admin já existente, não uma faixa que aparece
+  toda vez que um admin abre qualquer página.
+
+**Decisão 2 — `hub_projects` como conceito novo, não widening do wildcard**
+- Perguntado e confirmado: "liberado a todos" é uma coleção própria por
+  projeto, checada antes do usuário em `has_project_access` — cobre
+  "usuários futuros" de verdade (a checagem roda no momento do acesso,
+  não fica gravada na lista de cada usuário no momento da liberação).
+
+**Decisão 3 — Filtro de índice composto do Firestore evitado por design**
+- `list_access_requests`/`has_pending_request` foram desenhadas pra usar
+  no máximo um campo de igualdade no `.where()` — Firestore exige índice
+  composto manual pra combinar múltiplos filtros/order_by em campos
+  diferentes, e isso falharia silenciosamente em produção sem esse
+  índice existir. Ordenação e filtros extras rodam em Python sobre o
+  resultado (coleções pequenas o bastante pra isso não pesar).
+
+**Decisão 4 — Revogar acesso explícito não desliga `is_public`**
+- Eixos deliberadamente independentes: `DELETE .../projects/{id}/users/{email}`
+  só mexe na lista do usuário. Se o projeto está público, ele continua
+  acessível por esse caminho — documentado explicitamente pra não virar
+  confusão futura ("removi o acesso mas a pessoa ainda entra").
+
+### Status até o momento
+- Backend: 522 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Validação end-to-end (badge de pendentes, aprovar/negar, projeto
+  público liberando usuário sem cadastro) fica a cargo do usuário depois
+  do deploy — sem ferramenta de browser neste ambiente
+
+---
+
+## Controle de acesso por usuário × projeto + tela de admin (novo, ADR-009)
+
+Branch `feat/finops-budget`. Fora do roadmap de observabilidade
+(`docs/prd.md`) — mudança de plataforma/segurança, motivada pelo usuário
+ao perceber que o Hub, ao ser vinculado a múltiplos projetos-cliente,
+não tinha nenhuma barreira impedindo um usuário autenticado de digitar
+o `project_id` de um cliente que não é o dele e ver os dados.
+
+### O que foi feito
+
+Segunda camada de autorização em cima do login (Google OAuth) existente:
+- Novo domínio `domains/admin/` (Firestore, coleção `hub_users/{email}`)
+  com `is_admin`/`allowed_projects` (aceita wildcard `"*"`).
+- `core/auth.py::require_project_access` substitui `get_current_user`
+  como gate de router em todo endpoint com `project_id` no path
+  (catalog, freshness, profiling, quality, lineage, pii, access,
+  finops, projects — 9 routers, uma linha cada) — nega antes de
+  qualquer chamada real ao BigQuery/Cloud Logging, mesmo que a SA de
+  runtime tenha IAM no projeto.
+- `core/auth.py::require_admin` gateia a tela `/admin` nova
+  (`features/admin/AdminPage.tsx`) — CRUD de usuários administrados,
+  sem senha nova, sem Cloud Run novo, reaproveitando 100% da sessão
+  OAuth já existente. Link condicional no Topbar (`ShieldCheck`), só
+  visível pra quem `is_admin`.
+- `scripts/seed_admin.py` novo — bootstrap do primeiro admin (problema
+  de ovo-e-galinha: `hub_users` vazio bloqueia `/admin` pra todo mundo,
+  ninguém consegue criar o primeiro registro pela UI).
+- Spec completa em `docs/specs/admin.md`, decisão arquitetural em
+  `docs/adr/ADR-009-acl-usuario-projeto.md` (complementa ADR-006, não
+  substitui).
+
+### Decisões desta sessão
+
+**Decisão 1 — Firestore, não Secret Manager, pro ACL**
+- A SA de runtime já lê/escreve Firestore hoje (favoritos, histórico) —
+  zero IAM novo. Secret Manager é versionado/imutável por natureza,
+  inadequado pra CRUD via UI; e o `@lru_cache` sem TTL de
+  `get_oauth_allowlist` (Secret Manager) já causou staleness real nesta
+  mesma sessão. Leitura de ACL é sempre fresca, sem cache, de propósito.
+
+**Decisão 2 — Login (OAUTH_ALLOWLIST) continua como está, mas sem dar
+acesso implícito a projeto**
+- Perguntado explicitamente ao usuário se o allow-por-domínio do login
+  deveria ser removido (exigindo cadastro individual de todo mundo,
+  inclusive time interno) ou mantido só pra login, sem acesso a projeto
+  por padrão. Escolhida a segunda opção — menos risco de lockout no dia
+  do deploy, mesmo nível de segurança de projeto (quem só passa pelo
+  domínio ainda precisa de liberação explícita de um admin pra ver
+  qualquer `project_id`).
+
+**Decisão 3 — Wildcard `"*"` em vez de lista exaustiva pra acesso total**
+- Perguntado e confirmado com o usuário — admins/líderes que precisam
+  ver todos os projetos-cliente usam `"*"` em vez de listar cada um.
+  Menos auditável que lista exaustiva, mas muito mais fácil de manter;
+  aceito conscientemente.
+
+**Decisão 4 — `is_admin` só populado em `GET /auth/me`, nunca em
+`get_current_user`**
+- `get_current_user` roda em todo request autenticado — não ganha I/O
+  novo (uma leitura Firestore a mais em toda chamada de
+  catalog/freshness/etc. seria desperdício). Consequência: `is_admin`
+  só é confiável quando `UserInfo` vem de `/auth/me`; `require_admin`
+  nunca confia nesse campo, sempre faz checagem fresca própria.
+
+**Decisão 5 — Bloqueio de remover o último admin**
+- `upsert_user`/`delete_user` recusam (`LastAdminLockoutError`, 400)
+  remover `is_admin` do último administrador restante — sem isso, um
+  erro de operação zeraria os admins e ninguém mais conseguiria abrir
+  `/admin` pra reverter.
+
+### Investigação técnica relevante
+
+Antes de trocar a dependency de 9 routers, confirmado lendo o código
+instalado do FastAPI (`0.141.1`) que uma dependency declarada a nível
+de `APIRouter(dependencies=[Depends(fn)])` resolve path params (ex:
+`project_id`) da mesma forma que uma dependency de endpoint — o `path`
+usado na resolução é o da rota real (prefixo + path), não um path
+genérico do router. Isso permitiu trocar `get_current_user` por
+`require_project_access` com uma linha por router, sem tocar em nenhum
+endpoint individual.
+
+### Status até o momento
+- Backend: 492 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Validação end-to-end (login real, `/admin` funcionando, 403 num
+  projeto sem ACL) depende do bootstrap do primeiro admin em dev —
+  fica a cargo do usuário depois do deploy (sem ferramenta de browser
+  neste ambiente)
+
+---
+
+## Reorganização de navegação: hierarquia por serviço observável
+
+Branch `feat/finops-budget`. Não é uma fase nova — mudança estrutural na
+sidebar pedida pelo usuário, preparando o Hub pra observar outros
+serviços GCP além de BigQuery no futuro (hoje é o único).
+
+### O que foi feito
+
+`DatasetSidebar.tsx` reestruturada em dois níveis: um nó de topo por
+serviço observável (`SidebarServiceGroup` — ícone + label + chevron,
+visualmente mais forte que as subseções) contendo tudo que já existia
+(Buscar tabelas, Governança, FinOps, Datasets disponíveis, Favoritos,
+Recentes) como `SidebarSection`s dentro dele. "Governança" e "FinOps"
+eram headers estáticos (`<p>`), viraram seções recolhíveis de verdade —
+única mudança de comportamento em cima do que já existia, além do
+aninhamento.
+
+**Estado inicial:** o grupo "BigQuery" abre por padrão (é o único
+serviço hoje — começar fechado deixaria a sidebar vazia no primeiro
+acesso); todas as subseções de dentro começam **recolhidas**, sem
+exceção (inclusive Datasets disponíveis, que antes abria por padrão) —
+decisão explícita do usuário, confirmada via pergunta direta sobre o
+estado do nó de topo antes de implementar.
+
+Próximo serviço observável (quando existir) vira um `SidebarServiceGroup`
+irmão do de BigQuery, mesmo componente reaproveitado.
+
+### Status
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Sem mudança de backend/API — só reorganização de UI
+- Validação visual em browser não feita nesta sessão (sem ferramenta de
+  browser disponível no ambiente) — pendente de validação do usuário
+
+---
+
+## Fase 4 — FinOps: sugestão de tipo de coluna (concluída, 1ª parte da 3ª frente)
+
+Branch `feat/finops-budget` (mesma branch da 2ª frente, budget — ainda sem
+PR pra `main`). Primeira metade de "otimizações sugeridas"
+(`docs/prd.md`, 4.3) — a segunda metade (clustering) foi deliberadamente
+deferida, ver "Decisão 1" abaixo.
+
+### O que foi feito
+
+Terceira aba em `/finops` ("Tipos de coluna"): detecta colunas `STRING`
+cujos valores amostrados são compatíveis com um tipo mais estreito
+(`INT64`, `FLOAT64`, `BOOL`, `DATE`, `DATETIME`, `TIMESTAMP`), com
+estimativa de economia de storage mensal. Novo par de endpoints —
+`POST /finops/{project}/column-type-suggestions/estimate` (dry-run
+gratuito) e `.../run` (execução real) — projeto inteiro, não por tabela.
+
+### Decisões desta sessão
+
+**Decisão 1 — Onde a feature mora: nova aba no scanner de desperdício
+(projeto inteiro), não no modal de profiling**
+- Diferente do scanner de desperdício e do budget (100% metadado/audit
+  log, custo $0), esta feature precisa amostrar dado real via
+  `TABLESAMPLE` — mesmo custo real que `pii`/`quality` já têm. Perguntado
+  explicitamente ao usuário se a feature deveria viver como aba nova no
+  scanner de desperdício (visão de projeto inteiro) ou como aba nova no
+  modal de profiling (por tabela, mesmo lugar de PII) — escolhido o
+  scanner de desperdício. Consequência: fluxo em duas etapas (dry-run
+  "Estimar custo" antes de "Escanear", nunca automático ao abrir a tela)
+  pra nunca cobrar do usuário sem ele decidir antes olhando pro número.
+
+**Decisão 2 — Nunca sugerir sem economia real, nem com confiança parcial**
+- Só vira sugestão se (a) 100% dos valores não-nulos **amostrados**
+  batem no tipo candidato (não um limiar configurável tipo "a maioria" —
+  aplicar um tipo mais estreito numa coluna que não converte 100%
+  quebraria dado real) e (b) a troca de fato economiza bytes
+  (`avg_current_bytes > bytes fixos do tipo sugerido` — uma `STRING`
+  curta como `"1"` já ocupa menos espaço que um `INT64` de 8 bytes fixos,
+  então sugerir a troca nesse caso pioraria o storage). Mesma disciplina
+  de "nunca superestimar economia" já aplicada ao scanner de
+  particionamento (Fase 4, 1ª frente).
+
+**Decisão 3 — Clustering deferido, não faz parte desta v1**
+- Diferente de tipo de coluna (comparação de bytes é objetiva e
+  determinística), sugerir clustering exigiria inferir quais colunas
+  aparecem com mais frequência em `WHERE`/`GROUP BY`/`JOIN` — só
+  disponível via texto livre de query nos audit logs, sem um parser de
+  SQL de verdade isso vira heurística de regex frágil. Documentado como
+  "fora do escopo" em `docs/specs/finops-column-types.md`, não
+  esquecido — merece spec e conversa própria sobre nível de confiança
+  aceitável antes de implementar.
+
+**Decisão 4 — Orçamento de tempo por lote, não por tabela**
+- `/run` escaneia todas as tabelas elegíveis do projeto em paralelo
+  (`ThreadPoolExecutor`, `max_workers=4` — mais conservador que os
+  `max_workers=8` de operações gratuitas do domínio, porque aqui cada
+  query tem custo real). Orçamento total de 120s pro lote inteiro; se
+  esgotar no meio, retorna as tabelas já escaneadas com um `warning` de
+  resultado parcial em vez de lançar erro — parcial ainda tem valor aqui
+  (lista de oportunidades), diferente de um scan de tabela única em
+  `pii`/`quality`, onde parcial não faz sentido.
+
+### Correções pós-validação em dev (mesma branch, v1.1 da spec)
+
+Usuário validou a v1.0 em dev e voltou com dois pedidos, ambos
+implementados na mesma sessão:
+
+**1 — Escopo de execução (obrigatório pra produção)**
+- Rodar em todas as tabelas de um projeto real é inviável — a v1.0
+  fazia isso por padrão. `ColumnTypeScanRequest` ganhou `tables:
+  list[str] | None` (`"dataset_id.table_id"`); com escopo explícito,
+  `_resolve_eligible_tables` **pula** `repository.list_all_table_refs`
+  inteiramente (não enumera o projeto todo só pra filtrar depois).
+  Frontend: novo `ColumnTypeScopePicker` (checkbox por dataset — marca
+  todas as tabelas dele — que expande em checkboxes por tabela pra
+  refinar), com `useDatasets`/`useTables` do catálogo reaproveitados
+  (nenhum endpoint novo pra listar datasets/tabelas). Botões
+  "Estimar custo"/"Escanear" desabilitados até haver seleção — decisão
+  deliberada de não default pra "projeto inteiro" nunca aparecer como
+  opção fácil na UI, mesmo a API aceitando `tables=None` por
+  flexibilidade/testes.
+- Novo componente `components/ui/checkbox.tsx`, adicionado via
+  `npx shadcn add checkbox` (primeira vez que esse primitive é usado no
+  Hub).
+
+**2 — Também disponível por tabela, dentro do modal de profiling**
+- Nova aba "Tipos de coluna" em `ProfilingDialog.tsx`, ao lado de
+  Schema/Análise/Histórico/Lineage/PII/Acesso — mesmo padrão de
+  `PiiTab.tsx`, mas chamando os mesmos endpoints de projeto com escopo
+  implícito de uma tabela só (`tables: ["{dataset}.{tabela}"]`). Sem
+  seletor aqui — não faz sentido escolher escopo quando o modal já é
+  sobre uma tabela específica.
+- Extraído `ColumnTypeSuggestionBadges` (badges de sugestão) como
+  componente compartilhado entre a aba de projeto e a aba do modal, pra
+  não duplicar a lógica de exibição.
+
+### Status até o momento
+- Backend: 468 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Ainda não validado em dev nesta rodada (v1.1) — v1.0 já tinha sido
+  validada
+- Falta: sugestão de clustering (deferida, ver Decisão 3) — depois disso
+  a Fase 4 fecha
+
+---
+
+## Fase 4 — FinOps: budget de custo (em andamento, 2ª de 3 frentes)
+
+Branch `feat/finops-budget`, criada a partir de `feat/finops-waste-scanner`
+(PR #19 do scanner de desperdício ainda não mergeado — mesma decisão de
+não bloquear a próxima frente esperando review, já usada entre
+sprint-3.2 e o scanner).
+
+### O que foi feito
+
+Quatro visões de custo do mês corrente em `GET /api/v1/finops/{project}/budget`,
+todas derivadas dos **mesmos audit logs** que o scanner de desperdício já
+lê — nenhuma integração nova, nenhuma role de IAM nova:
+- **Custo por dataset**: soma `totalBilledBytes` de todo job que
+  referenciou uma tabela daquele dataset no mês.
+- **Top N queries mais caras**: job_id, quem rodou, tabelas tocadas,
+  texto da query (truncado em 2000 caracteres), ordenadas por custo.
+- **Top N gastadores**: humano vs. service account, custo total,
+  contagem de jobs.
+- **Projeção do mês**: custo até agora ÷ dias corridos do mês × dias no
+  mês.
+
+Nova página `/finops/budget`, com stat cards de projeção + três tabelas
+(reaproveitando `useTableFilterSort`, mesmo hook do scanner de
+desperdício). Sidebar ganhou uma segunda entrada no grupo FinOps.
+
+### Erros e decisões desta sessão
+
+**Decisão 1 — Descartada a ideia de usar BigQuery Billing Export**
+- Cogitado inicialmente (e chegou a ser mencionado errado numa resposta
+  pro usuário) que essa frente precisaria de uma fonte de dados nova
+  (Cloud Billing Export ou API). Corrigido antes de implementar: Billing
+  Export só quebra custo por **projeto + SKU**, nunca por dataset —
+  não resolveria a pergunta que esta feature responde, mesmo se
+  configurado. A granularidade certa só existe nos audit logs de job
+  (mesma fonte já integrada), então nada precisou ser configurado a
+  mais no projeto do cliente.
+- Reforça a mesma premissa já embutida em `domains/quality` e no
+  scanner de desperdício: a estimativa é on-demand (bytes escaneados ×
+  preço/TiB) — não reflete gasto real em projetos com preço flat-rate/
+  Editions. Documentado explicitamente em `docs/specs/finops-budget.md`
+  por ser o lugar onde um número errado mais provavelmente vira decisão
+  financeira.
+
+**Decisão 2 — SA do próprio Hub CONTA aqui, diferente do mapa de acesso**
+- `domains/access` exclui a SA de runtime do Hub porque ali a pergunta é
+  "quem consome essa tabela de fora" (inspecionar pelo Hub não é
+  consumo externo real). Budget pergunta outra coisa — "quanto está
+  sendo gasto de verdade" — e profiling/PII rodados pela UI custam
+  dinheiro real, então devem contar. Nenhuma exclusão aplicada aqui,
+  documentado o contraste explicitamente pra não parecer inconsistência
+  acidental entre os dois domínios.
+
+**Decisão 3 — `ScanEvent` estendido em vez de mais um parser duplicado**
+- `job_id`/`principal_email`/`query_text` foram adicionados ao mesmo
+  `ScanEvent` que o scanner de desperdício já usa (com default vazio,
+  no fim da dataclass, pra não quebrar as chamadas existentes) em vez
+  de criar uma quarta cópia quase idêntica do parsing de audit log —
+  as duas funcionalidades do domínio finops compartilham o mesmo
+  repository.py.
+
+### Correções e melhorias pós-review (mesma branch, v1.1 da spec)
+
+Ticket do usuário reportando dois bugs e duas melhorias na tela de
+budget. Ver `docs/specs/finops-budget.md` (v1.1) para o detalhe completo.
+
+**Bug real encontrado durante a investigação — regiões fantasma**
+- O ticket original descrevia a causa como "busca custo em todas as
+  regiões do `BQ_REGIONS` via `INFORMATION_SCHEMA.JOBS`" — verificado
+  via grep que isso é **factualmente incorreto**: `get_budget()` nunca
+  iterou regiões nem leu `INFORMATION_SCHEMA.JOBS`, só Cloud Logging.
+  Perguntado ao usuário se o sintoma ($0.07 fantasma) era real ou
+  hipotético antes de implementar o fix descrito — confirmado real.
+- Causa raiz investigada com `gcloud logging read` (5000 eventos reais
+  de agosto/2026 em `observability-hub-dev`) + replay da lógica de
+  agregação: `discover_regions()`/`list_all_table_refs()`/
+  `get_date_like_columns()` (usadas por catalog/freshness/finops para
+  descoberta de metadados a custo ~zero) rodam
+  `` `project.region-X.INFORMATION_SCHEMA.*` `` — o audit log dessas
+  queries tem `datasetId="region-US"` e `tableId="INFORMATION_SCHEMA.*"`,
+  contado como se fosse um dataset real. **4989 de 5000 jobs amostrados
+  (99,8%) eram esse ruído.**
+- Fix: `repository._parse_table_ref()` descarta `table_id` que comece
+  com `INFORMATION_SCHEMA.` na origem (beneficia todas as funções do
+  domínio); `get_budget()` pula o evento inteiro quando não sobra
+  nenhuma tabela real do projeto após o filtro.
+
+**Bug 2 — sobreposição visual em "queries mais caras"**
+- Texto da query inline na célula colidia visualmente com a coluna de
+  tabelas. Fix: texto oculto por padrão, toggle "Ver query"/"Ocultar
+  query" por linha expande um bloco `SqlPreview` (componente já
+  compartilhado com o preview de SQL do profiling) abaixo da linha.
+
+**Melhoria 1 — agrupamento configurável**
+- `by_dataset`/`top_spenders` (visões fixas da v1.0) substituídos por
+  `groups: CostGroup[]` + `group_by: table|user|day|month|year`. O
+  ticket original descrevia isso via `GROUP BY` em SQL sobre
+  `INFORMATION_SCHEMA.JOBS` — reimplementado sobre a arquitetura real
+  do domínio (Cloud Logging, sem query BQ nova, sem custo/IAM
+  adicional): `service._group_keys()` deriva a chave a partir do
+  `ScanEvent` já em memória.
+
+**Melhoria 2 — layout em duas abas**
+- `BudgetPage.tsx` reescrita: seções empilhadas → `Tabs` do shadcn/ui
+  ("Custo por agrupamento" com pill buttons de `group_by` + total no
+  rodapé via `TableFooter`; "Queries mais caras" com o toggle do Bug 2).
+
+### Status até o momento
+- Backend: 431 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Commitado na branch `feat/finops-budget`, push e PR **não** feitos —
+  aguardando validação manual em dev e aprovação do usuário
+- Falta a 3ª frente de FinOps (otimizações sugeridas) e a lacuna da v1
+  do PII (adiada, não esquecida)
+
+---
+
+## Fase 4 — FinOps: scanner de desperdício (concluída, PR #19)
 
 Branch `feat/finops-waste-scanner`, criada a partir de `feat/sprint-3.2`
 (PR #18 da Sprint 3.2 ainda não mergeado em `main` no momento desta
@@ -74,13 +555,21 @@ vez de duplicar mais uma vez**
   precisa de `destination_table`/`principal_email`, só leitura.
 
 ### Status até o momento
-- Backend: 406 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 411 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
 - Frontend: `biome check`, `tsc -b`, `vite build` limpos
-- Ainda não validado em dev — branch não deployada nesta sessão até este
-  registro
-- Faltam as outras 2 frentes de FinOps (budget/custo, otimizações
-  sugeridas) e a lacuna da v1 do PII (adiada, não esquecida)
+- Validado em dev pelo usuário — incluindo dois bugs pegos e corrigidos
+  ao vivo depois do deploy: `min_days_unused` como `Literal[int,...]`
+  causando 422 (trocado por `IntEnum`) e retry do TanStack Query
+  insuficiente pra sobreviver ao cold start do Cloud Run em dev
+  (`minScale=0`, decisão consciente do usuário de não mudar).
+- Aproveitado o momento pra reorganizar o sidebar em grupos e adicionar
+  filtro/ordenação reutilizável (`hooks/useTableFilterSort`) nas tabelas
+  de "Tabelas sem consumidor" e do próprio scanner.
+- **PR #19 aberto** (`feat/finops-waste-scanner` → `main`, diff limpo
+  contra `main` já com a Sprint 3.2 mergeada).
+- Faltam a 3ª frente de FinOps (otimizações sugeridas) e a lacuna da v1
+  do PII (adiada, não esquecida)
 
 ---
 
@@ -585,4 +1074,4 @@ implementação**
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
 | Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
 | Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
-| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício concluído, faltam budget e otimizações) |
+| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício e budget concluídos, falta otimizações sugeridas) |

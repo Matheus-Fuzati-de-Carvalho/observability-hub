@@ -143,7 +143,7 @@ Por que é MVP: elimina o maior gargalo de qualidade — escrever queries de pro
 | Fase 2 | MVP: Catálogo + Volumetria + Freshness + Profiling (backend + frontend) | ✅ Concluída |
 | Sprint 2.2/2.3 | Metadados de partição, busca reversa tabela→datasets, refresh e melhorias de UX sobre o MVP do Catálogo | ✅ Concluída |
 | Fase 3 | Lineage, PII, Mapa de acesso | ✅ Concluída |
-| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício concluído, faltam budget e otimizações) |
+| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício, budget e sugestão de tipo de coluna concluídos; sugestão de clustering deferida — ver docs/specs/finops-column-types.md, "Fora do escopo") |
 
 Ver `CHANGELOG.md` para o detalhe fase a fase (o que foi feito, erros
 corrigidos e decisões de arquitetura) e `SESSIONLOG.md` para o estado

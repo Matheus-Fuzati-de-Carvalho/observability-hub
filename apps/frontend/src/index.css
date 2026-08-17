@@ -75,7 +75,12 @@
   --secondary: #3a3a38;
   --secondary-foreground: #ffffff;
   --muted: #3a3a38;
-  --muted-foreground: #5b626c;
+  /* #5b626c original (docs/skills/frontend.md) tinha contraste ~2.74:1
+     contra --background (#1d1d1b) — abaixo do mínimo WCAG AA de 4.5:1
+     pra texto normal, texto secundário praticamente ilegível. #8f96a1
+     é a mesma família azul-acinzentada, calculado pra >=4.5:1 contra
+     --background (5.66:1) e --card (4.82:1, fundo real da sidebar). */
+  --muted-foreground: #8f96a1;
   --accent: #3a3a38;
   --accent-foreground: #ffffff;
   --destructive: #e53e3e;

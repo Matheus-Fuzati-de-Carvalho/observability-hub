@@ -2,14 +2,14 @@ from fastapi import APIRouter, Depends, Query
 from google.cloud import bigquery
 from google.cloud import logging as cloud_logging
 
-from observability_hub.core.auth import get_current_user
+from observability_hub.core.auth import require_project_access
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.logging_client import get_logging_client
 from observability_hub.domains.lineage import service
 from observability_hub.domains.lineage.schemas import LineageGraphResponse, OrphansResponse
 
 router = APIRouter(
-    prefix="/api/v1/lineage", tags=["lineage"], dependencies=[Depends(get_current_user)]
+    prefix="/api/v1/lineage", tags=["lineage"], dependencies=[Depends(require_project_access)]
 )
 
 

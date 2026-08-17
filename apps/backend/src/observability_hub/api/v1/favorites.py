@@ -7,8 +7,8 @@ from observability_hub.domains.auth.schemas import UserInfo
 from observability_hub.domains.favorites import service
 from observability_hub.domains.favorites.schemas import (
     AddFavoriteRequest,
+    Favorite,
     FavoritesListResponse,
-    FavoriteTable,
 )
 
 router = APIRouter(prefix="/api/v1/favorites", tags=["favorites"])
@@ -22,19 +22,24 @@ def list_favorites(
     return service.list_favorites(client, user.email)
 
 
-@router.post("", response_model=FavoriteTable)
+@router.post("", response_model=Favorite)
 def add_favorite(
     request: AddFavoriteRequest,
     user: UserInfo = Depends(get_current_user),
     client: firestore.Client = Depends(get_firestore_client),
-) -> FavoriteTable:
+) -> Favorite:
     return service.add_favorite(
-        client, user.email, request.project_id, request.dataset_id, request.table_id
+        client,
+        user.email,
+        request.project_id,
+        request.dataset_id,
+        request.table_id,
+        request.nickname,
     )
 
 
 @router.delete("/{project_id}/{dataset_id}/{table_id}", status_code=204)
-def remove_favorite(
+def remove_table_favorite(
     project_id: str,
     dataset_id: str,
     table_id: str,
@@ -42,3 +47,13 @@ def remove_favorite(
     client: firestore.Client = Depends(get_firestore_client),
 ) -> None:
     service.remove_favorite(client, user.email, project_id, dataset_id, table_id)
+
+
+@router.delete("/{project_id}/{dataset_id}", status_code=204)
+def remove_dataset_favorite(
+    project_id: str,
+    dataset_id: str,
+    user: UserInfo = Depends(get_current_user),
+    client: firestore.Client = Depends(get_firestore_client),
+) -> None:
+    service.remove_favorite(client, user.email, project_id, dataset_id, table_id=None)

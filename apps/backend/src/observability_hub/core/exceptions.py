@@ -120,3 +120,48 @@ class InvalidSessionError(Exception):
 
     def __init__(self) -> None:
         super().__init__("Sessão inválida ou expirada — faça login novamente.")
+
+
+class ProjectNotAuthorizedError(Exception):
+    """Distinta de ProjectAccessDeniedError: ali o problema é a service
+    account de runtime não ter IAM no GCP (orienta gcloud); aqui o
+    problema é o ACL do próprio Hub (domains/admin) — o usuário logado
+    não está liberado pra este project_id, independente da SA ter ou não
+    acesso real. Levantada por core/auth.py::require_project_access."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Você não está autorizado a acessar o projeto '{project_id}' no Hub. "
+            "Peça a um administrador do Hub para liberar seu acesso."
+        )
+
+
+class AdminAccessRequiredError(Exception):
+    """Levantada por core/auth.py::require_admin — usuário autenticado
+    mas sem is_admin=True em hub_users."""
+
+    def __init__(self) -> None:
+        super().__init__("Esta ação requer permissão de administrador do Hub.")
+
+
+class AccessRequestNotFoundError(Exception):
+    """Levantada por domains/admin/service.py::approve_access_request /
+    deny_access_request quando request_id não existe em access_requests."""
+
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        super().__init__(f"Solicitação de acesso '{request_id}' não encontrada.")
+
+
+class LastAdminLockoutError(Exception):
+    """domains/admin/service.py bloqueia remover is_admin (ou deletar) do
+    último administrador restante — sem isso, ninguém mais conseguiria
+    abrir /admin pra reverter."""
+
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__(
+            f"Não é possível remover o acesso de administrador de '{email}' — "
+            "é o último administrador do Hub. Promova outro usuário antes."
+        )

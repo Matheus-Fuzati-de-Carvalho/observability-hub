@@ -2,18 +2,23 @@ from fastapi import APIRouter, Depends, Query
 from google.cloud import bigquery
 from google.cloud import logging as cloud_logging
 
-from observability_hub.core.auth import get_current_user
+from observability_hub.core.auth import require_project_access
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.logging_client import get_logging_client
 from observability_hub.domains.finops import service
 from observability_hub.domains.finops.schemas import (
+    BudgetGroupBy,
+    BudgetResponse,
+    ColumnTypeEstimateResponse,
+    ColumnTypeScanRequest,
+    ColumnTypeSuggestionsResponse,
     MinDaysUnused,
     PartitionCandidatesResponse,
     UnusedTablesResponse,
 )
 
 router = APIRouter(
-    prefix="/api/v1/finops", tags=["finops"], dependencies=[Depends(get_current_user)]
+    prefix="/api/v1/finops", tags=["finops"], dependencies=[Depends(require_project_access)]
 )
 
 
@@ -36,3 +41,35 @@ def get_partition_candidates(
     logging_client: cloud_logging.Client = Depends(get_logging_client),
 ) -> PartitionCandidatesResponse:
     return service.scan_partition_candidates(client, logging_client, project_id)
+
+
+@router.get("/{project_id}/budget", response_model=BudgetResponse)
+def get_budget(
+    project_id: str,
+    group_by: BudgetGroupBy = Query(default=BudgetGroupBy.TABLE),
+    limit: int = Query(default=10, ge=1, le=50),
+    logging_client: cloud_logging.Client = Depends(get_logging_client),
+) -> BudgetResponse:
+    return service.get_budget(logging_client, project_id, group_by=group_by, limit=limit)
+
+
+@router.post(
+    "/{project_id}/column-type-suggestions/estimate", response_model=ColumnTypeEstimateResponse
+)
+def estimate_column_type_suggestions(
+    project_id: str,
+    request: ColumnTypeScanRequest,
+    client: bigquery.Client = Depends(get_client),
+) -> ColumnTypeEstimateResponse:
+    return service.estimate_column_type_suggestions(client, project_id, request)
+
+
+@router.post(
+    "/{project_id}/column-type-suggestions/run", response_model=ColumnTypeSuggestionsResponse
+)
+def run_column_type_suggestions(
+    project_id: str,
+    request: ColumnTypeScanRequest,
+    client: bigquery.Client = Depends(get_client),
+) -> ColumnTypeSuggestionsResponse:
+    return service.run_column_type_suggestions(client, project_id, request)

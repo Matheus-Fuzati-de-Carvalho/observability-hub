@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from google.cloud import bigquery, firestore
 
-from observability_hub.core.auth import get_current_user
+from observability_hub.core.auth import get_current_user, require_project_access
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.firestore import get_firestore_client
 from observability_hub.domains.auth.schemas import UserInfo
@@ -15,7 +15,7 @@ from observability_hub.domains.quality.schemas import (
 )
 
 router = APIRouter(
-    prefix="/api/v1/profiling", tags=["profiling"], dependencies=[Depends(get_current_user)]
+    prefix="/api/v1/profiling", tags=["profiling"], dependencies=[Depends(require_project_access)]
 )
 
 

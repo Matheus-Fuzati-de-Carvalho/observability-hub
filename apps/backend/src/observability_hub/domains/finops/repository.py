@@ -8,10 +8,12 @@ freshness — reaproveitado direto, é core/, não outro domínio).
 Duplica o parsing de audit log de domains/lineage/repository.py (não
 importa — nenhum domínio deste projeto importa de outro, ver CLAUDE.md).
 Diferença: aqui só interessa leitura (referenced_tables), não destino, e
-o campo novo é jobStatistics.totalBilledBytes — custo real já pago
-escaneando a tabela, usado pra ancorar a estimativa de economia de
-particionamento em dado observado, não em suposição (ver
-docs/specs/finops-waste-scanner.md).
+os campos novos são jobStatistics.totalBilledBytes (custo real já pago
+escaneando a tabela — ancora a estimativa de economia de particionamento
+em dado observado, ver docs/specs/finops-waste-scanner.md) e, pra
+budget (docs/specs/finops-budget.md), job_id/principal_email/query_text
+— quem rodou o quê e o texto da query, truncado em
+_QUERY_TEXT_MAX_CHARS pra não inflar a resposta de "top queries".
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -22,10 +24,17 @@ from google.api_core.exceptions import Forbidden
 from google.cloud import bigquery
 from google.cloud import logging as cloud_logging
 
-from observability_hub.core.exceptions import LoggingAccessDeniedError
+from observability_hub.core.exceptions import LoggingAccessDeniedError, ProjectAccessDeniedError
 
 _PAGE_SIZE = 1000
 _DATE_LIKE_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
+_QUERY_TEXT_MAX_CHARS = 2000
+
+# INFORMATION_SCHEMA.TABLES.table_type usa "VIEW" e "MATERIALIZED VIEW"
+# (com espaço) — nenhum dos dois suporta TABLESAMPLE no BigQuery. Mesma
+# constante de domains/pii/repository.py (duplicada, não importada —
+# domínios isolados, ver CLAUDE.md).
+_VIEW_TABLE_TYPES = {"VIEW", "MATERIALIZED VIEW"}
 
 TableRefTuple = tuple[str, str, str]  # (project_id, dataset_id, table_id)
 
@@ -35,6 +44,9 @@ class ScanEvent:
     timestamp: datetime | None
     referenced_tables: list[TableRefTuple]
     total_billed_bytes: int
+    job_id: str = ""
+    principal_email: str = ""
+    query_text: str | None = None
 
 
 def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
@@ -44,6 +56,16 @@ def _parse_table_ref(ref: dict | None) -> TableRefTuple | None:
     dataset_id = ref.get("datasetId")
     table_id = ref.get("tableId")
     if not project_id or not dataset_id or not table_id:
+        return None
+    if table_id.startswith("INFORMATION_SCHEMA."):
+        # Query de metadado do próprio Hub (discover_regions,
+        # list_all_table_refs, get_date_like_columns — todas rodam
+        # `project.region-X.INFORMATION_SCHEMA.*`) — não é uma tabela
+        # real de cliente. Sem esse filtro, "region-US"/"region-EU"/etc.
+        # aparecem como se fossem datasets reais no budget, com custo
+        # real (pequeno, mas não-zero) de cada probe de região — bug
+        # real encontrado em dev, não hipotético (ver
+        # docs/specs/finops-budget.md, "Casos de borda").
         return None
     return project_id, dataset_id, table_id
 
@@ -66,6 +88,15 @@ def _parse_billed_bytes(raw: str | None) -> int:
         return 0
 
 
+def _parse_query_text(job: dict) -> str | None:
+    raw = job.get("jobConfiguration", {}).get("query", {}).get("query")
+    if not raw:
+        return None
+    if len(raw) > _QUERY_TEXT_MAX_CHARS:
+        return raw[:_QUERY_TEXT_MAX_CHARS] + "…"
+    return raw
+
+
 def _parse_entry(entry: cloud_logging.LogEntry) -> ScanEvent | None:
     payload = entry.payload if isinstance(entry.payload, dict) else None
     if payload is None:
@@ -81,10 +112,17 @@ def _parse_entry(entry: cloud_logging.LogEntry) -> ScanEvent | None:
     timestamp = _parse_timestamp(job_stats.get("endTime"))
     total_billed_bytes = _parse_billed_bytes(job_stats.get("totalBilledBytes"))
 
+    job_name = job.get("jobName", {})
+    job_id = job_name.get("jobId", "") if isinstance(job_name, dict) else ""
+    principal_email = payload.get("authenticationInfo", {}).get("principalEmail", "")
+
     return ScanEvent(
+        job_id=job_id,
+        principal_email=principal_email,
         timestamp=timestamp,
         referenced_tables=referenced,
         total_billed_bytes=total_billed_bytes,
+        query_text=_parse_query_text(job),
     )
 
 
@@ -161,3 +199,71 @@ def get_date_like_columns(
     )
     rows = client.query(query, job_config=job_config).result()
     return [row.column_name for row in rows]
+
+
+def get_string_columns(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> list[str]:
+    """Nomes das colunas STRING da tabela — únicas elegíveis pra
+    sugestão de tipo nesta v1 (ver docs/specs/finops-column-types.md,
+    "Fora do escopo"). Custo $0 (INFORMATION_SCHEMA)."""
+    query = f"""
+        SELECT column_name
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.COLUMNS`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+          AND data_type = 'STRING'
+        ORDER BY ordinal_position
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+        ]
+    )
+    rows = client.query(query, job_config=job_config).result()
+    return [row.column_name for row in rows]
+
+
+def is_view(
+    client: bigquery.Client, project_id: str, dataset_id: str, table_id: str, location: str
+) -> bool:
+    """VIEW e MATERIALIZED VIEW não suportam TABLESAMPLE no BigQuery — o
+    sql_builder precisa saber disso antes de montar a query de scan.
+    Duplica domains/pii/repository.py::is_view (não importa — domínios
+    isolados)."""
+    query = f"""
+        SELECT table_type
+        FROM `{project_id}.region-{location}.INFORMATION_SCHEMA.TABLES`
+        WHERE table_schema = @dataset_id AND table_name = @table_id
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("dataset_id", "STRING", dataset_id),
+            bigquery.ScalarQueryParameter("table_id", "STRING", table_id),
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+    return bool(rows) and rows[0].table_type in _VIEW_TABLE_TYPES
+
+
+def dry_run(client: bigquery.Client, project_id: str, sql: str) -> int:
+    """Bytes que a query processaria, sem executar de fato — usado pelo
+    endpoint /column-type-suggestions/estimate, gratuito por definição
+    (dry run não cobra)."""
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    try:
+        job = client.query(sql, job_config=job_config)
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
+    return job.total_bytes_processed
+
+
+def execute_scan_query(client: bigquery.Client, project_id: str, sql: str, timeout: float) -> dict:
+    """Query de scan é sempre uma única linha agregada — mesmo tabela
+    com 0 linhas amostradas retorna 1 linha com contagens zeradas."""
+    try:
+        rows = list(client.query(sql).result(timeout=timeout))
+    except Forbidden as exc:
+        raise ProjectAccessDeniedError(project_id) from exc
+    row = rows[0]
+    return dict(row.items())
