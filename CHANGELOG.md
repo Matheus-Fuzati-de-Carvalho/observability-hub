@@ -5,6 +5,41 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Reorganização de navegação: hierarquia por serviço observável
+
+Branch `feat/finops-budget`. Não é uma fase nova — mudança estrutural na
+sidebar pedida pelo usuário, preparando o Hub pra observar outros
+serviços GCP além de BigQuery no futuro (hoje é o único).
+
+### O que foi feito
+
+`DatasetSidebar.tsx` reestruturada em dois níveis: um nó de topo por
+serviço observável (`SidebarServiceGroup` — ícone + label + chevron,
+visualmente mais forte que as subseções) contendo tudo que já existia
+(Buscar tabelas, Governança, FinOps, Datasets disponíveis, Favoritos,
+Recentes) como `SidebarSection`s dentro dele. "Governança" e "FinOps"
+eram headers estáticos (`<p>`), viraram seções recolhíveis de verdade —
+única mudança de comportamento em cima do que já existia, além do
+aninhamento.
+
+**Estado inicial:** o grupo "BigQuery" abre por padrão (é o único
+serviço hoje — começar fechado deixaria a sidebar vazia no primeiro
+acesso); todas as subseções de dentro começam **recolhidas**, sem
+exceção (inclusive Datasets disponíveis, que antes abria por padrão) —
+decisão explícita do usuário, confirmada via pergunta direta sobre o
+estado do nó de topo antes de implementar.
+
+Próximo serviço observável (quando existir) vira um `SidebarServiceGroup`
+irmão do de BigQuery, mesmo componente reaproveitado.
+
+### Status
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Sem mudança de backend/API — só reorganização de UI
+- Validação visual em browser não feita nesta sessão (sem ferramenta de
+  browser disponível no ambiente) — pendente de validação do usuário
+
+---
+
 ## Fase 4 — FinOps: sugestão de tipo de coluna (concluída, 1ª parte da 3ª frente)
 
 Branch `feat/finops-budget` (mesma branch da 2ª frente, budget — ainda sem
