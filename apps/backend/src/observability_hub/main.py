@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from observability_hub.api.v1 import (
     access,
+    access_requests,
     admin,
     auth,
     catalog,
@@ -20,6 +21,7 @@ from observability_hub.api.v1 import (
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
 from observability_hub.core.exceptions import (
+    AccessRequestNotFoundError,
     AdminAccessRequiredError,
     DatasetNotFoundError,
     InvalidDateColumnError,
@@ -64,6 +66,7 @@ app.include_router(pii.router)
 app.include_router(access.router)
 app.include_router(finops.router)
 app.include_router(admin.router)
+app.include_router(access_requests.router)
 
 
 @app.get("/health")
@@ -253,4 +256,14 @@ def handle_last_admin_lockout(request: Request, exc: LastAdminLockoutError) -> J
     return JSONResponse(
         status_code=400,
         content={"error": "last_admin_lockout", "message": str(exc)},
+    )
+
+
+@app.exception_handler(AccessRequestNotFoundError)
+def handle_access_request_not_found(
+    request: Request, exc: AccessRequestNotFoundError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"error": "access_request_not_found", "message": str(exc)},
     )

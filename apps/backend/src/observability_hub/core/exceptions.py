@@ -145,6 +145,15 @@ class AdminAccessRequiredError(Exception):
         super().__init__("Esta ação requer permissão de administrador do Hub.")
 
 
+class AccessRequestNotFoundError(Exception):
+    """Levantada por domains/admin/service.py::approve_access_request /
+    deny_access_request quando request_id não existe em access_requests."""
+
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        super().__init__(f"Solicitação de acesso '{request_id}' não encontrada.")
+
+
 class LastAdminLockoutError(Exception):
     """domains/admin/service.py bloqueia remover is_admin (ou deletar) do
     último administrador restante — sem isso, ninguém mais conseguiria

@@ -3,6 +3,17 @@
 **Status:** Aceito
 **Data:** 2026-08-18
 
+> **Nota de extensão (2026-08-20):** feedback de uso em produção da v1.0
+> motivou três adições — coleção `hub_projects` (projeto liberado a
+> todos, inclusive usuários futuros, eixo independente do
+> `allowed_projects` de cada usuário), fluxo self-service de solicitação
+> de acesso (`access_requests`) e mensagens de erro mais visíveis no
+> frontend. Não é uma mudança de arquitetura — o modelo continua
+> Firestore, leitura sempre fresca, gate via `require_project_access`/
+> `require_admin`. Detalhe completo em
+> [`docs/specs/admin.md`](../specs/admin.md) v1.1; esta decisão original
+> não é revisada.
+
 ---
 
 ## Contexto

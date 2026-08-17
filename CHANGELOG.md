@@ -5,6 +5,67 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Admin v1.1: projetos públicos, visão por projeto, solicitação de acesso, mensagens de erro
+
+Branch `feat/finops-budget`. Extensão do ACL v1.0 (ADR-009) — usuário
+testou em produção e voltou com três pedidos.
+
+### O que foi feito
+
+1. **Mensagens de erro visíveis** — `ProjectSelector.tsx` mostrava "sem
+   acesso" só como um ícone com tooltip no hover. Trocado por um painel
+   flutuante (`ApiErrorNotice`, mesmo componente usado no resto do app,
+   que ganhou uma prop `action` opcional) com o texto completo e, quando
+   o erro é `project_not_authorized`, um botão "Solicitar acesso".
+2. **Visão por projeto + projeto público** — nova coleção Firestore
+   `hub_projects/{project_id}` (`is_public`), eixo independente do
+   `allowed_projects` de cada usuário — libera geral, inclusive quem
+   ainda não tem cadastro no Hub. Nova aba "Por projeto" em `/admin`
+   (visão inversa da aba "Por usuário": escolhe um projeto, vê/gerencia
+   quem tem acesso), via `array_contains_any` no Firestore.
+3. **Solicitação de acesso self-service** — `POST /api/v1/access-requests`
+   (fora de `/admin`, qualquer usuário autenticado pede pra si mesmo),
+   nova aba "Solicitações" em `/admin` com aprovar/negar, badge de
+   contagem no ícone de admin do Topbar (`refetchInterval` de 60s, sem
+   WebSocket).
+
+### Decisões desta sessão
+
+**Decisão 1 — Badge discreto no Topbar, não banner intrusivo**
+- Perguntado e confirmado com o usuário: aviso de pendências como
+  contador no ícone de admin já existente, não uma faixa que aparece
+  toda vez que um admin abre qualquer página.
+
+**Decisão 2 — `hub_projects` como conceito novo, não widening do wildcard**
+- Perguntado e confirmado: "liberado a todos" é uma coleção própria por
+  projeto, checada antes do usuário em `has_project_access` — cobre
+  "usuários futuros" de verdade (a checagem roda no momento do acesso,
+  não fica gravada na lista de cada usuário no momento da liberação).
+
+**Decisão 3 — Filtro de índice composto do Firestore evitado por design**
+- `list_access_requests`/`has_pending_request` foram desenhadas pra usar
+  no máximo um campo de igualdade no `.where()` — Firestore exige índice
+  composto manual pra combinar múltiplos filtros/order_by em campos
+  diferentes, e isso falharia silenciosamente em produção sem esse
+  índice existir. Ordenação e filtros extras rodam em Python sobre o
+  resultado (coleções pequenas o bastante pra isso não pesar).
+
+**Decisão 4 — Revogar acesso explícito não desliga `is_public`**
+- Eixos deliberadamente independentes: `DELETE .../projects/{id}/users/{email}`
+  só mexe na lista do usuário. Se o projeto está público, ele continua
+  acessível por esse caminho — documentado explicitamente pra não virar
+  confusão futura ("removi o acesso mas a pessoa ainda entra").
+
+### Status até o momento
+- Backend: 522 testes unitários, 100% passando, `ruff check`/`ruff
+  format` limpos
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
+- Validação end-to-end (badge de pendentes, aprovar/negar, projeto
+  público liberando usuário sem cadastro) fica a cargo do usuário depois
+  do deploy — sem ferramenta de browser neste ambiente
+
+---
+
 ## Controle de acesso por usuário × projeto + tela de admin (novo, ADR-009)
 
 Branch `feat/finops-budget`. Fora do roadmap de observabilidade
