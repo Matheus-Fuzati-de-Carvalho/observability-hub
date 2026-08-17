@@ -184,8 +184,8 @@ checklist, e servem de precedente real de que o processo funciona.
 | Antes de 2026-08-14 (sessão não documentada no SESSIONLOG) | `observability-hub-dev` e `observability-hub-prod` | — | Data Access audit logs do BigQuery (`DATA_READ`, `DATA_WRITE`, `ADMIN_READ`) habilitados | `gcloud projects get-iam-policy` (campo `auditConfigs`) |
 | 2026-08-14 | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.viewer` (cross) | `gcloud projects get-iam-policy` |
 | 2026-08-14 | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.viewer` (cross) | `gcloud projects get-iam-policy` |
-| 2026-08-14 | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.privateLogViewer` (cross) — **pendente**, comando fornecido nesta sessão | aguardando confirmação |
-| 2026-08-14 | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.privateLogViewer` (cross) — **pendente**, comando fornecido nesta sessão | aguardando confirmação |
+| 2026-08-17 (comando fornecido em 2026-08-14) | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.privateLogViewer` (cross) | `gcloud projects get-iam-policy` |
+| 2026-08-17 (comando fornecido em 2026-08-14) | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.privateLogViewer` (cross) | `gcloud projects get-iam-policy` |
 
 **Nota:** os dois itens "antes de 2026-08-14" foram descobertos ao vivo
 nesta sessão via `gcloud projects get-iam-policy` — o SESSIONLOG.md
