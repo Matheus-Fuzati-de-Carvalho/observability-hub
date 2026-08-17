@@ -8,6 +8,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PaginationBar } from '@/components/PaginationBar'
 import {
   Table,
   TableBody,
@@ -18,9 +20,14 @@ import {
 } from '@/components/ui/table'
 import { useAccessRequestAnalytics } from '@/features/admin/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
+import { usePagination } from '@/hooks/usePagination'
 
 export function AccessRequestAnalyticsSection() {
   const analyticsQuery = useAccessRequestAnalytics()
+
+  const topProjects = analyticsQuery.data?.top_projects ?? []
+  const pagination = usePagination({ rowCount: topProjects.length })
+  const pageProjects = topProjects.slice(pagination.start, pagination.end)
 
   if (analyticsQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando solicitações de acesso…</p>
@@ -34,9 +41,7 @@ export function AccessRequestAnalyticsSection() {
   const totalRequests = monthly.reduce((sum, m) => sum + m.total, 0)
 
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-lg">Solicitações de acesso</h2>
-
+    <CollapsibleSection title="Solicitações de acesso">
       <KpiCards
         items={[
           { label: 'Total de pedidos', value: String(totalRequests) },
@@ -77,32 +82,44 @@ export function AccessRequestAnalyticsSection() {
         </ResponsiveContainer>
       </div>
 
-      <div>
-        <p className="mb-2 text-sm text-muted-foreground">Projetos mais pedidos</p>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Projeto</TableHead>
-              <TableHead className="text-right">Pedidos</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {top_projects.map((project) => (
-              <TableRow key={project.project_id}>
-                <TableCell>{project.project_id}</TableCell>
-                <TableCell className="text-right">{project.request_count}</TableCell>
-              </TableRow>
-            ))}
-            {top_projects.length === 0 && (
+      <CollapsibleSection title="Projetos mais pedidos" variant="subsection">
+        <div className="max-h-[420px] overflow-y-auto rounded-lg border border-border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={2} className="text-muted-foreground">
-                  Nenhuma solicitação registrada ainda.
-                </TableCell>
+                <TableHead>Projeto</TableHead>
+                <TableHead className="text-right">Pedidos</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+            </TableHeader>
+            <TableBody>
+              {pageProjects.map((project) => (
+                <TableRow key={project.project_id}>
+                  <TableCell>{project.project_id}</TableCell>
+                  <TableCell className="text-right">{project.request_count}</TableCell>
+                </TableRow>
+              ))}
+              {top_projects.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={2} className="text-muted-foreground">
+                    Nenhuma solicitação registrada ainda.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <PaginationBar
+          page={pagination.page}
+          pageCount={pagination.pageCount}
+          pageSize={pagination.pageSize}
+          setPageSize={pagination.setPageSize}
+          start={pagination.start}
+          end={pagination.end}
+          totalCount={top_projects.length}
+          onPrevious={pagination.goToPreviousPage}
+          onNext={pagination.goToNextPage}
+        />
+      </CollapsibleSection>
+    </CollapsibleSection>
   )
 }

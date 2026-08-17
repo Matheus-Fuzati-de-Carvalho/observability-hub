@@ -1,8 +1,11 @@
 import { Search } from 'lucide-react'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PaginationBar } from '@/components/PaginationBar'
 import { SortableTableHead } from '@/components/SortableTableHead'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHeader, TableRow } from '@/components/ui/table'
 import { usePiiScanActivity } from '@/features/admin/hooks'
+import { usePagination } from '@/hooks/usePagination'
 import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import { formatDate } from '@/lib/format'
 import type { PiiScanEntry } from '@/types/admin'
@@ -53,6 +56,9 @@ export function PiiScanActivitySection() {
     },
   })
 
+  const pagination = usePagination({ rowCount: visibleScans.length })
+  const pageScans = visibleScans.slice(pagination.start, pagination.end)
+
   if (activityQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando scans de PII…</p>
   }
@@ -62,9 +68,7 @@ export function PiiScanActivitySection() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-lg">Scans de PII</h2>
-
+    <CollapsibleSection title="Scans de PII">
       <div className="relative max-w-sm">
         <Search
           size={14}
@@ -78,70 +82,83 @@ export function PiiScanActivitySection() {
         />
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <SortableTableHead
-              label="Projeto"
-              active={sortKey === 'project'}
-              direction={sortDir}
-              onClick={() => toggleSort('project')}
-            />
-            <SortableTableHead
-              label="Dataset"
-              active={sortKey === 'dataset'}
-              direction={sortDir}
-              onClick={() => toggleSort('dataset')}
-            />
-            <SortableTableHead
-              label="Tabela"
-              active={sortKey === 'table'}
-              direction={sortDir}
-              onClick={() => toggleSort('table')}
-            />
-            <SortableTableHead
-              label="Executado por"
-              active={sortKey === 'executed_by'}
-              direction={sortDir}
-              onClick={() => toggleSort('executed_by')}
-            />
-            <SortableTableHead
-              label="Quando"
-              active={sortKey === 'executed_at'}
-              direction={sortDir}
-              onClick={() => toggleSort('executed_at')}
-            />
-            <SortableTableHead
-              label="Colunas sinalizadas"
-              active={sortKey === 'flagged_columns_count'}
-              direction={sortDir}
-              onClick={() => toggleSort('flagged_columns_count')}
-              align="right"
-            />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {visibleScans.map((scan) => (
-            <TableRow key={`${fullTableName(scan)}-${scan.executed_at}`}>
-              <TableCell className="font-medium">{scan.project_id}</TableCell>
-              <TableCell className="font-medium">{scan.dataset_id}</TableCell>
-              <TableCell className="font-medium">{scan.table_id}</TableCell>
-              <TableCell className="text-muted-foreground">{scan.executed_by}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatDate(scan.executed_at)}
-              </TableCell>
-              <TableCell className="text-right">{scan.flagged_columns_count}</TableCell>
-            </TableRow>
-          ))}
-          {visibleScans.length === 0 && (
+      <div className="max-h-[420px] overflow-y-auto rounded-lg border border-border">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={6} className="text-muted-foreground">
-                Nenhum scan de PII executado ainda.
-              </TableCell>
+              <SortableTableHead
+                label="Projeto"
+                active={sortKey === 'project'}
+                direction={sortDir}
+                onClick={() => toggleSort('project')}
+              />
+              <SortableTableHead
+                label="Dataset"
+                active={sortKey === 'dataset'}
+                direction={sortDir}
+                onClick={() => toggleSort('dataset')}
+              />
+              <SortableTableHead
+                label="Tabela"
+                active={sortKey === 'table'}
+                direction={sortDir}
+                onClick={() => toggleSort('table')}
+              />
+              <SortableTableHead
+                label="Executado por"
+                active={sortKey === 'executed_by'}
+                direction={sortDir}
+                onClick={() => toggleSort('executed_by')}
+              />
+              <SortableTableHead
+                label="Quando"
+                active={sortKey === 'executed_at'}
+                direction={sortDir}
+                onClick={() => toggleSort('executed_at')}
+              />
+              <SortableTableHead
+                label="Colunas sinalizadas"
+                active={sortKey === 'flagged_columns_count'}
+                direction={sortDir}
+                onClick={() => toggleSort('flagged_columns_count')}
+                align="right"
+              />
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {pageScans.map((scan) => (
+              <TableRow key={`${fullTableName(scan)}-${scan.executed_at}`}>
+                <TableCell className="font-medium">{scan.project_id}</TableCell>
+                <TableCell className="font-medium">{scan.dataset_id}</TableCell>
+                <TableCell className="font-medium">{scan.table_id}</TableCell>
+                <TableCell className="text-muted-foreground">{scan.executed_by}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDate(scan.executed_at)}
+                </TableCell>
+                <TableCell className="text-right">{scan.flagged_columns_count}</TableCell>
+              </TableRow>
+            ))}
+            {visibleScans.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-muted-foreground">
+                  Nenhum scan de PII executado ainda.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <PaginationBar
+        page={pagination.page}
+        pageCount={pagination.pageCount}
+        pageSize={pagination.pageSize}
+        setPageSize={pagination.setPageSize}
+        start={pagination.start}
+        end={pagination.end}
+        totalCount={visibleScans.length}
+        onPrevious={pagination.goToPreviousPage}
+        onNext={pagination.goToNextPage}
+      />
+    </CollapsibleSection>
   )
 }

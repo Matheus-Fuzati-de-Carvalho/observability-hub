@@ -9,6 +9,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PaginationBar } from '@/components/PaginationBar'
 import { SortableTableHead } from '@/components/SortableTableHead'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHeader, TableRow } from '@/components/ui/table'
 import { useNavigationAnalytics } from '@/features/admin/hooks'
+import { usePagination } from '@/hooks/usePagination'
 import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import type { SearchEntry, TableViewEntry } from '@/types/admin'
 
@@ -145,6 +148,9 @@ export function NavigationAnalyticsSection() {
     },
   })
 
+  const searchesPagination = usePagination({ rowCount: visibleSearches.length })
+  const pageSearches = visibleSearches.slice(searchesPagination.start, searchesPagination.end)
+
   if (navigationQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando navegação…</p>
   }
@@ -159,18 +165,16 @@ export function NavigationAnalyticsSection() {
   const tables = topTableViews(filteredViews, groupBy)
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="font-semibold text-lg">Navegação</h2>
-        <p className="text-sm text-muted-foreground">
-          Baseado nos últimos 20 itens de histórico por usuário — reflete uso recente, não o total
-          histórico.
-        </p>
-      </div>
+    <CollapsibleSection title="Navegação">
+      <p className="text-sm text-muted-foreground">
+        Baseado nos últimos 20 itens de histórico por usuário — reflete uso recente, não o total
+        histórico.
+      </p>
 
-      <div>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-muted-foreground">Tabelas mais vistas</p>
+      <CollapsibleSection
+        title="Tabelas mais vistas"
+        variant="subsection"
+        actions={
           <div className="flex gap-1">
             {(Object.keys(GROUP_BY_LABELS) as GroupBy[]).map((option) => (
               <Button
@@ -183,9 +187,9 @@ export function NavigationAnalyticsSection() {
               </Button>
             ))}
           </div>
-        </div>
-
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2">
           <Select
             value={filterField}
             onValueChange={(value) => setFilterField(value as FilterField)}
@@ -250,12 +254,10 @@ export function NavigationAnalyticsSection() {
             </ResponsiveContainer>
           </div>
         )}
-      </div>
+      </CollapsibleSection>
 
-      <div>
-        <p className="mb-2 text-sm text-muted-foreground">Buscas mais frequentes</p>
-
-        <div className="relative mb-3 max-w-sm">
+      <CollapsibleSection title="Buscas mais frequentes" variant="subsection">
+        <div className="relative max-w-sm">
           <Search
             size={14}
             className="-translate-y-1/2 absolute top-1/2 left-2.5 text-muted-foreground"
@@ -268,48 +270,61 @@ export function NavigationAnalyticsSection() {
           />
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <SortableTableHead
-                label="Projeto"
-                active={sortKey === 'project'}
-                direction={sortDir}
-                onClick={() => toggleSort('project')}
-              />
-              <SortableTableHead
-                label="Busca"
-                active={sortKey === 'query'}
-                direction={sortDir}
-                onClick={() => toggleSort('query')}
-              />
-              <SortableTableHead
-                label="Ocorrências"
-                active={sortKey === 'count'}
-                direction={sortDir}
-                onClick={() => toggleSort('count')}
-                align="right"
-              />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleSearches.map((row) => (
-              <TableRow key={`${row.project_id}__${row.query}`}>
-                <TableCell>{row.project_id}</TableCell>
-                <TableCell>{row.query}</TableCell>
-                <TableCell className="text-right">{row.count}</TableCell>
-              </TableRow>
-            ))}
-            {visibleSearches.length === 0 && (
+        <div className="max-h-[420px] overflow-y-auto rounded-lg border border-border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={3} className="text-muted-foreground">
-                  Nenhuma busca registrada ainda.
-                </TableCell>
+                <SortableTableHead
+                  label="Projeto"
+                  active={sortKey === 'project'}
+                  direction={sortDir}
+                  onClick={() => toggleSort('project')}
+                />
+                <SortableTableHead
+                  label="Busca"
+                  active={sortKey === 'query'}
+                  direction={sortDir}
+                  onClick={() => toggleSort('query')}
+                />
+                <SortableTableHead
+                  label="Ocorrências"
+                  active={sortKey === 'count'}
+                  direction={sortDir}
+                  onClick={() => toggleSort('count')}
+                  align="right"
+                />
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+            </TableHeader>
+            <TableBody>
+              {pageSearches.map((row) => (
+                <TableRow key={`${row.project_id}__${row.query}`}>
+                  <TableCell>{row.project_id}</TableCell>
+                  <TableCell>{row.query}</TableCell>
+                  <TableCell className="text-right">{row.count}</TableCell>
+                </TableRow>
+              ))}
+              {visibleSearches.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-muted-foreground">
+                    Nenhuma busca registrada ainda.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <PaginationBar
+          page={searchesPagination.page}
+          pageCount={searchesPagination.pageCount}
+          pageSize={searchesPagination.pageSize}
+          setPageSize={searchesPagination.setPageSize}
+          start={searchesPagination.start}
+          end={searchesPagination.end}
+          totalCount={visibleSearches.length}
+          onPrevious={searchesPagination.goToPreviousPage}
+          onNext={searchesPagination.goToNextPage}
+        />
+      </CollapsibleSection>
+    </CollapsibleSection>
   )
 }

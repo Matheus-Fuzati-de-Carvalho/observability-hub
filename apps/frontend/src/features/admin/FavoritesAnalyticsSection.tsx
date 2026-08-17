@@ -1,5 +1,7 @@
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PaginationBar } from '@/components/PaginationBar'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
@@ -11,11 +13,10 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useFavoritesAnalytics } from '@/features/admin/hooks'
+import { usePagination } from '@/hooks/usePagination'
 import { formatDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { FavoriteEntry } from '@/types/admin'
-
-const TOP_BASES_LIMIT = 10
 
 type View = 'user' | 'project' | 'dataset' | 'table'
 
@@ -113,6 +114,22 @@ export function FavoritesAnalyticsSection() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const favoritesQuery = useFavoritesAnalytics()
 
+  const favorites = favoritesQuery.data?.favorites ?? []
+  const topBases = groupByTable(favorites)
+  const groups = groupByView(favorites, view)
+
+  const basesPagination = usePagination({ rowCount: topBases.length })
+  const pageBases = topBases.slice(basesPagination.start, basesPagination.end)
+
+  const groupsPagination = usePagination({ rowCount: groups.length })
+  const pageGroups = groups.slice(groupsPagination.start, groupsPagination.end)
+
+  function selectView(next: View) {
+    setView(next)
+    setExpandedKey(null)
+    groupsPagination.resetPage()
+  }
+
   if (favoritesQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando favoritos…</p>
   }
@@ -121,16 +138,9 @@ export function FavoritesAnalyticsSection() {
     return <p className="text-sm text-status-error">Erro ao carregar os favoritos.</p>
   }
 
-  const favorites = favoritesQuery.data.favorites
-  const topBases = groupByTable(favorites).slice(0, TOP_BASES_LIMIT)
-  const groups = groupByView(favorites, view)
-
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-lg">Favoritos</h2>
-
-      <div>
-        <p className="mb-2 text-sm text-muted-foreground">Bases mais favoritadas</p>
+    <CollapsibleSection title="Favoritos">
+      <CollapsibleSection title="Bases mais favoritadas" variant="subsection">
         <Table>
           <TableHeader>
             <TableRow>
@@ -139,7 +149,7 @@ export function FavoritesAnalyticsSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {topBases.map((group) => (
+            {pageBases.map((group) => (
               <TableRow key={group.key}>
                 <TableCell>{group.label}</TableCell>
                 <TableCell className="text-right">{group.items.length}</TableCell>
@@ -154,57 +164,57 @@ export function FavoritesAnalyticsSection() {
             )}
           </TableBody>
         </Table>
-      </div>
+        <PaginationBar
+          page={basesPagination.page}
+          pageCount={basesPagination.pageCount}
+          pageSize={basesPagination.pageSize}
+          setPageSize={basesPagination.setPageSize}
+          start={basesPagination.start}
+          end={basesPagination.end}
+          totalCount={topBases.length}
+          onPrevious={basesPagination.goToPreviousPage}
+          onNext={basesPagination.goToNextPage}
+        />
+      </CollapsibleSection>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">Drill-down</p>
+      <CollapsibleSection
+        title="Drill-down"
+        variant="subsection"
+        actions={
           <div className="flex gap-1">
             <Button
               size="sm"
               variant={view === 'user' ? 'default' : 'outline'}
-              onClick={() => {
-                setView('user')
-                setExpandedKey(null)
-              }}
+              onClick={() => selectView('user')}
             >
               Por usuário
             </Button>
             <Button
               size="sm"
               variant={view === 'project' ? 'default' : 'outline'}
-              onClick={() => {
-                setView('project')
-                setExpandedKey(null)
-              }}
+              onClick={() => selectView('project')}
             >
               Por projeto
             </Button>
             <Button
               size="sm"
               variant={view === 'dataset' ? 'default' : 'outline'}
-              onClick={() => {
-                setView('dataset')
-                setExpandedKey(null)
-              }}
+              onClick={() => selectView('dataset')}
             >
               Por dataset
             </Button>
             <Button
               size="sm"
               variant={view === 'table' ? 'default' : 'outline'}
-              onClick={() => {
-                setView('table')
-                setExpandedKey(null)
-              }}
+              onClick={() => selectView('table')}
             >
               Por tabela
             </Button>
           </div>
-        </div>
-
+        }
+      >
         <div className="flex flex-col gap-0.5 rounded-lg border border-border">
-          {groups.map((group) => {
+          {pageGroups.map((group) => {
             const isExpanded = expandedKey === group.key
             return (
               <Collapsible
@@ -225,7 +235,7 @@ export function FavoritesAnalyticsSection() {
                     {group.items.length} {group.items.length === 1 ? 'item' : 'itens'}
                   </span>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="border-border border-t bg-muted/30 px-3 py-2">
+                <CollapsibleContent className="max-h-64 overflow-y-auto border-border border-t bg-muted/30 px-3 py-2">
                   <ul className="flex flex-col gap-1 text-sm">
                     {group.items.map((item) => (
                       <li
@@ -252,7 +262,18 @@ export function FavoritesAnalyticsSection() {
             </p>
           )}
         </div>
-      </div>
-    </div>
+        <PaginationBar
+          page={groupsPagination.page}
+          pageCount={groupsPagination.pageCount}
+          pageSize={groupsPagination.pageSize}
+          setPageSize={groupsPagination.setPageSize}
+          start={groupsPagination.start}
+          end={groupsPagination.end}
+          totalCount={groups.length}
+          onPrevious={groupsPagination.goToPreviousPage}
+          onNext={groupsPagination.goToNextPage}
+        />
+      </CollapsibleSection>
+    </CollapsibleSection>
   )
 }

@@ -7,6 +7,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PaginationBar } from '@/components/PaginationBar'
 import {
   Table,
   TableBody,
@@ -17,6 +19,7 @@ import {
 } from '@/components/ui/table'
 import { useLoginAnalytics } from '@/features/admin/hooks'
 import { KpiCards } from '@/features/catalog/KpiCards'
+import { usePagination } from '@/hooks/usePagination'
 import { formatDate } from '@/lib/format'
 import type { LoginCountBucket } from '@/types/admin'
 
@@ -57,6 +60,10 @@ function findBucket(buckets: LoginCountBucket[], period: string): LoginCountBuck
 export function LoginAnalyticsSection() {
   const analyticsQuery = useLoginAnalytics(LOOKBACK_DAYS)
 
+  const recentEvents = analyticsQuery.data?.recent_events ?? []
+  const pagination = usePagination({ rowCount: recentEvents.length })
+  const pageEvents = recentEvents.slice(pagination.start, pagination.end)
+
   if (analyticsQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando acessos…</p>
   }
@@ -77,9 +84,7 @@ export function LoginAnalyticsSection() {
   }))
 
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-lg">Acessos ao Hub</h2>
-
+    <CollapsibleSection title="Acessos ao Hub">
       <KpiCards
         items={[
           { label: 'Acessos hoje', value: String(today?.login_count ?? 0) },
@@ -107,36 +112,49 @@ export function LoginAnalyticsSection() {
         </ResponsiveContainer>
       </div>
 
-      <div>
-        <p className="mb-2 text-sm text-muted-foreground">
-          Acessos recentes (últimos {recent_events.length})
-        </p>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>E-mail</TableHead>
-              <TableHead>Quando</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {recent_events.map((event) => (
-              <TableRow key={`${event.email}-${event.logged_in_at}`}>
-                <TableCell>{event.email}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDate(event.logged_in_at)}
-                </TableCell>
-              </TableRow>
-            ))}
-            {recent_events.length === 0 && (
+      <CollapsibleSection
+        title={`Acessos recentes (últimos ${recent_events.length})`}
+        variant="subsection"
+      >
+        <div className="max-h-[420px] overflow-y-auto rounded-lg border border-border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={2} className="text-muted-foreground">
-                  Nenhum acesso registrado ainda.
-                </TableCell>
+                <TableHead>E-mail</TableHead>
+                <TableHead>Quando</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+            </TableHeader>
+            <TableBody>
+              {pageEvents.map((event) => (
+                <TableRow key={`${event.email}-${event.logged_in_at}`}>
+                  <TableCell>{event.email}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(event.logged_in_at)}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {recent_events.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={2} className="text-muted-foreground">
+                    Nenhum acesso registrado ainda.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <PaginationBar
+          page={pagination.page}
+          pageCount={pagination.pageCount}
+          pageSize={pagination.pageSize}
+          setPageSize={pagination.setPageSize}
+          start={pagination.start}
+          end={pagination.end}
+          totalCount={recent_events.length}
+          onPrevious={pagination.goToPreviousPage}
+          onNext={pagination.goToNextPage}
+        />
+      </CollapsibleSection>
+    </CollapsibleSection>
   )
 }
