@@ -111,6 +111,13 @@ class SuggestedColumnType(str, Enum):
 
 class ColumnTypeScanRequest(BaseModel):
     sample_percent: float = 10
+    # "dataset_id.table_id" — None (ou lista vazia) roda no projeto inteiro.
+    # Em produção, listar toda tabela do projeto pra depois filtrar é
+    # inviável (ver docs/specs/finops-column-types.md, "Escopo de
+    # execução") — o frontend sempre manda um escopo explícito; None fica
+    # só como capacidade da API (usado por testes e por quem chamar via
+    # script).
+    tables: list[str] | None = None
 
 
 class ColumnTypeEstimateResponse(BaseModel):

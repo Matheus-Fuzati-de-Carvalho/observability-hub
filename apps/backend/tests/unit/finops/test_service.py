@@ -890,3 +890,74 @@ def test_run_column_type_suggestions_returns_partial_result_when_time_budget_exh
 
     assert result.warning is not None
     assert "parcial" in result.warning
+
+
+# --- escopo (tables) -------------------------------------------------------------
+
+
+def test_parse_scoped_tables_splits_dataset_and_table_on_first_dot():
+    assert service._parse_scoped_tables(["RAW.crm_leads", "TRUSTED.orders"]) == [
+        ("RAW", "crm_leads"),
+        ("TRUSTED", "orders"),
+    ]
+
+
+def test_parse_scoped_tables_skips_malformed_entries():
+    assert service._parse_scoped_tables(["no_dot_here", "RAW.", ".table", ""]) == []
+
+
+def test_estimate_column_type_suggestions_with_scope_skips_list_all_table_refs(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a"), ("RAW", "b"), ("TRUSTED", "c")],
+        metadata={
+            "proj.RAW.a": _bq_table(num_rows=1000),
+            "proj.RAW.b": _bq_table(num_rows=1000),
+            "proj.TRUSTED.c": _bq_table(num_rows=1000),
+        },
+        string_columns_by_table={
+            ("RAW", "a"): ["col"],
+            ("RAW", "b"): ["col"],
+            ("TRUSTED", "c"): ["col"],
+        },
+    )
+    list_all_mock = MagicMock(side_effect=AssertionError("não deveria enumerar o projeto todo"))
+    monkeypatch.setattr(service.repository, "list_all_table_refs", list_all_mock)
+    monkeypatch.setattr(service.repository, "dry_run", lambda client, project_id, sql: 1000)
+
+    result = service.estimate_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10, tables=["RAW.a"])
+    )
+
+    assert result.tables_scanned == 1
+    list_all_mock.assert_not_called()
+
+
+def test_run_column_type_suggestions_with_scope_only_scans_requested_tables(monkeypatch):
+    _stub_column_type_common(
+        monkeypatch,
+        all_tables=[("RAW", "a"), ("RAW", "b")],
+        metadata={
+            "proj.RAW.a": _bq_table(num_rows=1_000_000),
+            "proj.RAW.b": _bq_table(num_rows=1_000_000),
+        },
+        string_columns_by_table={("RAW", "a"): ["col"], ("RAW", "b"): ["col"]},
+    )
+
+    def fake_execute(client, project_id, sql, timeout):
+        row = {
+            "col__non_null": 100,
+            "col__avg_bytes": 10.0,
+            **{f"col__{t}": 0 for t in sql_builder.CANDIDATE_TYPES},
+        }
+        row["col__INT64"] = 100
+        return row
+
+    monkeypatch.setattr(service.repository, "execute_scan_query", fake_execute)
+
+    result = service.run_column_type_suggestions(
+        _fake_client(), "proj", ColumnTypeScanRequest(sample_percent=10, tables=["RAW.a"])
+    )
+
+    assert result.tables_scanned == 1
+    assert [c.table_id for c in result.candidates] == ["a"]

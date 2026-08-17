@@ -1,6 +1,6 @@
 # Spec — Domínio: FinOps — Sugestão de tipo de coluna
 
-**Versão:** 1.0
+**Versão:** 1.1
 **Status:** Aprovada
 **Fase:** 4 — FinOps (terceira frente: otimizações sugeridas)
 **Última atualização:** 2026-08-17
@@ -25,6 +25,40 @@ diferente dos outros dois scanners de FinOps: em vez de carregar sozinho
 ao abrir a tela, exige um clique explícito em "Estimar custo" e depois
 "Escanear" — mesma disciplina de nunca cobrar do usuário sem ele decidir
 antes, olhando pro número.
+
+---
+
+## Escopo de execução (v1.1)
+
+Rodar em **todas** as tabelas de um projeto produtivo é inviável — um
+projeto real pode ter centenas ou milhares de tabelas, e cada uma custa
+uma query `TABLESAMPLE` de verdade. A partir da v1.1, `estimate` e `run`
+aceitam um escopo explícito de tabelas (`ColumnTypeScanRequest.tables`,
+lista de `"dataset_id.table_id"`); `None`/lista vazia mantém o
+comportamento antigo (projeto inteiro) só como capacidade da API — o
+frontend **sempre** manda um escopo explícito nas duas telas onde a
+feature aparece (ver "Onde a feature aparece" abaixo).
+
+Com escopo explícito, `_resolve_eligible_tables` pula
+`repository.list_all_table_refs` inteiramente — não enumera o projeto
+todo pra depois filtrar, resolve region/`is_view`/colunas STRING só das
+tabelas pedidas. Reduz tanto o tempo de resposta quanto o número de
+chamadas `INFORMATION_SCHEMA` num projeto grande.
+
+### Onde a feature aparece
+
+1. **Aba "Tipos de coluna" em `/finops`** (projeto inteiro, com
+   seletor) — lista de datasets com checkbox; marcar um dataset expande
+   a lista de tabelas dele (via os mesmos endpoints do catálogo,
+   `GET /catalog/{project}/datasets` e
+   `GET /catalog/{project}/datasets/{dataset}/tables` — grátis,
+   reaproveitados, nenhum endpoint novo) com todas as tabelas
+   pré-marcadas; usuário pode desmarcar tabelas individuais pra refinar.
+   Botões "Estimar custo"/"Escanear" ficam desabilitados até pelo menos
+   uma tabela estar selecionada.
+2. **Aba nova no modal de profiling** (por tabela, mesmo lugar de PII)
+   — escopo implícito de uma tabela só (`tables: ["{dataset}.{tabela}"]`),
+   sem seletor, mesmo fluxo estimar→escanear da aba de projeto.
 
 ---
 
@@ -96,8 +130,10 @@ Dry-run **gratuito** (não executa nenhuma query paga) — soma o
 `total_bytes_processed` de todas as queries de scan que seriam
 executadas, uma por tabela elegível.
 
-**Body:** `{"sample_percent": 10}` (default `10`, mínimo `1` —
-`InvalidSamplePercentError` se menor).
+**Body:** `{"sample_percent": 10, "tables": ["RAW.crm_leads", "TRUSTED.orders"]}`
+(`sample_percent` default `10`, mínimo `1` — `InvalidSamplePercentError`
+se menor; `tables` default `null` — projeto inteiro, ver "Escopo de
+execução"; o frontend sempre manda a lista explícita).
 
 **Response 200:**
 ```json
@@ -124,7 +160,7 @@ escaneadas com `warning` avisando que o resultado é parcial (não lança
 erro — resultado parcial ainda tem valor, diferente do scan de uma
 tabela só em PII/quality, onde parcial não faz sentido).
 
-**Body:** `{"sample_percent": 10}` (mesma validação do `/estimate`).
+**Body:** mesmo formato do `/estimate`.
 
 **Response 200:**
 ```json
@@ -181,12 +217,30 @@ apps/backend/src/observability_hub/
     └── test_service.py           # + testes de estimate/run
 ```
 
-Frontend: terceira aba em `FinOpsPage.tsx` ("Tipos de coluna"), com
-fluxo em duas etapas (estimar → escanear), mesmo padrão de
-`features/pii/PiiTab.tsx` mas em escala de projeto: card de
-estimativa de custo antes do botão "Escanear", tabela de resultados
-agrupada por tabela (dataset.tabela → colunas sugeridas como sub-linhas
-ou badges), reaproveitando `useTableFilterSort`.
+Frontend:
+```
+apps/frontend/src/
+├── components/ui/checkbox.tsx           # novo, via shadcn CLI
+├── features/finops/
+│   ├── FinOpsPage.tsx                    # + aba "Tipos de coluna" (ColumnTypesTab)
+│   ├── ColumnTypeScopePicker.tsx          # novo — datasets com checkbox, expande em tabelas
+│   ├── ColumnTypeSuggestionBadges.tsx     # novo — badges de sugestão, compartilhado entre as duas telas
+│   ├── ColumnTypeSuggestionsTab.tsx       # novo — aba do modal de profiling (por tabela)
+│   └── hooks.ts                           # + useEstimateColumnTypeSuggestions/useRunColumnTypeSuggestions
+├── features/quality/ProfilingDialog.tsx  # + aba "Tipos de coluna" (ColumnTypeSuggestionsTab)
+├── lib/api/finops.ts                     # + tables no body de estimate/run
+└── types/finops.ts                        # + Column Type*
+```
+
+Aba de projeto (`FinOpsPage.tsx`): fluxo em duas etapas
+(estimar → escanear) com `ColumnTypeScopePicker` antes dos botões — sem
+seleção, botões ficam desabilitados. Tabela de resultado agrupada por
+tabela (dataset.tabela → sugestões como badges via
+`ColumnTypeSuggestionBadges`), reaproveitando `useTableFilterSort`.
+
+Aba do modal (`ColumnTypeSuggestionsTab.tsx`): mesmo fluxo, mesmo padrão
+de `features/pii/PiiTab.tsx`, mas sem seletor — escopo é sempre a tabela
+aberta no modal.
 
 ---
 
@@ -202,6 +256,8 @@ ou badges), reaproveitando `useTableFilterSort`.
 | Orçamento de tempo do `/run` esgota no meio do lote | Retorna candidatos das tabelas já escaneadas, `warning` avisa resultado parcial |
 | `sample_percent` menor que 1 | HTTP 422 (`InvalidSamplePercentError`) |
 | Projeto sem nenhuma tabela | `tables_scanned = 0`, `candidates = []`, sem erro |
+| `tables` com entrada mal formada (sem ponto, dataset ou tabela vazios) | Entrada ignorada silenciosamente (`_parse_scoped_tables`) — não derruba o resto do escopo pedido |
+| `tables=[]` (usuário não selecionou nada) | `tables_scanned = 0`, `candidates = []` — mesmo resultado de "projeto sem tabela", sem erro; frontend evita chegar aqui desabilitando os botões |
 
 ---
 

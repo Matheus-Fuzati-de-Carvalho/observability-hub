@@ -22,6 +22,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AccessTab } from '@/features/access/AccessTab'
 import { useTableDetail } from '@/features/catalog/hooks'
+import { ColumnTypeSuggestionsTab } from '@/features/finops/ColumnTypeSuggestionsTab'
 import { LineageTab } from '@/features/lineage/LineageTab'
 import { PiiTab } from '@/features/pii/PiiTab'
 import { ColumnResultsTable } from '@/features/quality/ColumnResultsTable'
@@ -41,6 +42,7 @@ const HISTORY_TAB = 'history'
 const LINEAGE_TAB = 'lineage'
 const PII_TAB = 'pii'
 const ACCESS_TAB = 'access'
+const COLUMN_TYPES_TAB = 'column-types'
 
 // SelectValue não deriva o rótulo a partir dos SelectItem filhos nesta
 // versão do base-ui — precisa de um render-prop mapeando valor -> rótulo.
@@ -177,6 +179,7 @@ export function ProfilingDialog({
             <TabsTrigger value={LINEAGE_TAB}>Lineage</TabsTrigger>
             <TabsTrigger value={PII_TAB}>PII</TabsTrigger>
             <TabsTrigger value={ACCESS_TAB}>Acesso</TabsTrigger>
+            <TabsTrigger value={COLUMN_TYPES_TAB}>Tipos de coluna</TabsTrigger>
           </TabsList>
 
           <TabsContent value={SCHEMA_TAB} className="flex min-h-0 flex-1 flex-col gap-3">
@@ -391,6 +394,18 @@ export function ProfilingDialog({
 
           <TabsContent value={ACCESS_TAB} className="min-h-0 flex-1 overflow-y-auto">
             <AccessTab projectId={projectId} datasetId={datasetId} tableId={tableId} />
+          </TabsContent>
+
+          <TabsContent
+            value={COLUMN_TYPES_TAB}
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
+            <ColumnTypeSuggestionsTab
+              projectId={projectId}
+              datasetId={datasetId}
+              tableId={tableId}
+              isView={isView}
+            />
           </TabsContent>
         </Tabs>
       </DialogContent>

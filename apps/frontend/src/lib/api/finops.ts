@@ -23,15 +23,15 @@ export const finopsApi = {
       `/api/v1/finops/${projectId}/budget?group_by=${groupBy}&limit=${limit}`,
     ),
 
-  estimateColumnTypeSuggestions: (projectId: string, samplePercent: number) =>
+  estimateColumnTypeSuggestions: (projectId: string, samplePercent: number, tables: string[]) =>
     httpClient.post<ColumnTypeEstimateResponse>(
       `/api/v1/finops/${projectId}/column-type-suggestions/estimate`,
-      { sample_percent: samplePercent },
+      { sample_percent: samplePercent, tables },
     ),
 
-  runColumnTypeSuggestions: (projectId: string, samplePercent: number) =>
+  runColumnTypeSuggestions: (projectId: string, samplePercent: number, tables: string[]) =>
     httpClient.post<ColumnTypeSuggestionsResponse>(
       `/api/v1/finops/${projectId}/column-type-suggestions/run`,
-      { sample_percent: samplePercent },
+      { sample_percent: samplePercent, tables },
     ),
 }

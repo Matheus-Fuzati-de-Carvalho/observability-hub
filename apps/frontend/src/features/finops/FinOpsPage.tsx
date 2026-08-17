@@ -24,6 +24,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ColumnTypeScopePicker } from '@/features/finops/ColumnTypeScopePicker'
+import { ColumnTypeSuggestionBadges } from '@/features/finops/ColumnTypeSuggestionBadges'
 import {
   useEstimateColumnTypeSuggestions,
   usePartitionCandidates,
@@ -544,8 +546,11 @@ function compareColumnType(
 
 function ColumnTypesTab({ projectId }: { projectId: string | undefined }) {
   const [samplePercent, setSamplePercent] = useState(10)
+  const [selectedScope, setSelectedScope] = useState<Set<string>>(new Set())
   const estimateMutation = useEstimateColumnTypeSuggestions()
   const runMutation = useRunColumnTypeSuggestions()
+  const scopeTables = Array.from(selectedScope)
+  const canRun = Boolean(projectId) && scopeTables.length > 0
 
   const activeError = estimateMutation.error ?? runMutation.error
   const errorMessage =
@@ -575,8 +580,22 @@ function ColumnTypesTab({ projectId }: { projectId: string | undefined }) {
     <div className="mt-4 flex flex-col gap-4">
       <p className="text-xs text-muted-foreground">
         Diferente das outras abas, este scan amostra dado real via <code>TABLESAMPLE</code> e tem
-        custo real de BigQuery — estime antes de escanear.
+        custo real de BigQuery — escolha o escopo, estime antes de escanear.
       </p>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Escopo (datasets/tabelas)</Label>
+        <ColumnTypeScopePicker
+          projectId={projectId}
+          selected={selectedScope}
+          onChange={setSelectedScope}
+        />
+        <span className="text-xs text-muted-foreground">
+          {scopeTables.length === 0
+            ? 'Selecione ao menos uma tabela para habilitar o scan.'
+            : `${scopeTables.length} tabela${scopeTables.length === 1 ? '' : 's'} selecionada${scopeTables.length === 1 ? '' : 's'}.`}
+        </span>
+      </div>
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
@@ -594,14 +613,19 @@ function ColumnTypesTab({ projectId }: { projectId: string | undefined }) {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            disabled={estimateMutation.isPending || !projectId}
-            onClick={() => projectId && estimateMutation.mutate({ projectId, samplePercent })}
+            disabled={estimateMutation.isPending || !canRun}
+            onClick={() =>
+              projectId &&
+              estimateMutation.mutate({ projectId, samplePercent, tables: scopeTables })
+            }
           >
             {estimateMutation.isPending ? 'Estimando…' : 'Estimar custo'}
           </Button>
           <Button
-            disabled={runMutation.isPending || !projectId}
-            onClick={() => projectId && runMutation.mutate({ projectId, samplePercent })}
+            disabled={runMutation.isPending || !canRun}
+            onClick={() =>
+              projectId && runMutation.mutate({ projectId, samplePercent, tables: scopeTables })
+            }
           >
             {runMutation.isPending ? 'Escaneando…' : 'Escanear'}
           </Button>
@@ -705,17 +729,7 @@ function ColumnTypesTab({ projectId }: { projectId: string | undefined }) {
                     {formatBytes(candidate.size_bytes)}
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {candidate.suggestions.map((s) => (
-                        <Badge
-                          key={s.column_name}
-                          variant="outline"
-                          title={`${s.sample_non_null_count} valores amostrados — ${s.avg_current_bytes.toFixed(1)}B → ${s.suggested_type_bytes}B`}
-                        >
-                          {s.column_name} → {s.suggested_type}
-                        </Badge>
-                      ))}
-                    </div>
+                    <ColumnTypeSuggestionBadges suggestions={candidate.suggestions} />
                   </TableCell>
                   <TableCell className="text-right font-medium text-status-ok">
                     {formatUsd(totalSavings(candidate))}

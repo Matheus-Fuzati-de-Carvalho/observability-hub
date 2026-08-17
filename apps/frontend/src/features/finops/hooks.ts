@@ -30,16 +30,22 @@ export function useBudget(
   })
 }
 
+interface ColumnTypeScanVariables {
+  projectId: string
+  samplePercent: number
+  tables: string[]
+}
+
 export function useEstimateColumnTypeSuggestions() {
   return useMutation({
-    mutationFn: ({ projectId, samplePercent }: { projectId: string; samplePercent: number }) =>
-      finopsApi.estimateColumnTypeSuggestions(projectId, samplePercent),
+    mutationFn: ({ projectId, samplePercent, tables }: ColumnTypeScanVariables) =>
+      finopsApi.estimateColumnTypeSuggestions(projectId, samplePercent, tables),
   })
 }
 
 export function useRunColumnTypeSuggestions() {
   return useMutation({
-    mutationFn: ({ projectId, samplePercent }: { projectId: string; samplePercent: number }) =>
-      finopsApi.runColumnTypeSuggestions(projectId, samplePercent),
+    mutationFn: ({ projectId, samplePercent, tables }: ColumnTypeScanVariables) =>
+      finopsApi.runColumnTypeSuggestions(projectId, samplePercent, tables),
   })
 }

@@ -411,17 +411,40 @@ def _validate_sample_percent(sample_percent: float) -> None:
         raise InvalidSamplePercentError(sample_percent)
 
 
+def _parse_scoped_tables(tables: list[str]) -> list[tuple[str, str]]:
+    """ "dataset_id.table_id" -> (dataset_id, table_id). partition() no
+    primeiro ponto — nome de dataset/tabela do BigQuery não aceita ponto
+    (só letra, número, underscore), então é seguro."""
+    parsed: list[tuple[str, str]] = []
+    for entry in tables:
+        dataset_id, _sep, table_id = entry.partition(".")
+        if dataset_id and table_id:
+            parsed.append((dataset_id, table_id))
+    return parsed
+
+
 def _resolve_eligible_tables(
-    client: bigquery.Client, project_id: str
+    client: bigquery.Client, project_id: str, scope: list[str] | None = None
 ) -> tuple[list[_EligibleTable], int]:
     """Descobre, em paralelo por tabela (INFORMATION_SCHEMA, custo $0 —
-    mesmo racional de repository.list_all_table_refs), quais tabelas do
-    projeto têm pelo menos uma coluna STRING e não são VIEW/MATERIALIZED
-    VIEW. Retorna (elegíveis, tables_skipped_view) — usado tanto por
-    estimate quanto por run, pra garantir que os dois concordam em quais
-    tabelas entram na conta."""
+    mesmo racional de repository.list_all_table_refs), quais tabelas têm
+    pelo menos uma coluna STRING e não são VIEW/MATERIALIZED VIEW.
+    Retorna (elegíveis, tables_skipped_view) — usado tanto por estimate
+    quanto por run, pra garantir que os dois concordam em quais tabelas
+    entram na conta.
+
+    scope=None (ou lista vazia) enumera TODAS as tabelas do projeto via
+    repository.list_all_table_refs — inviável em produção (ver
+    docs/specs/finops-column-types.md, "Escopo de execução"), mas
+    suportado pra flexibilidade da API/testes. Com scope, pula
+    list_all_table_refs inteiramente (não enumera o projeto todo só pra
+    filtrar depois) e resolve region/is_view/colunas só pras tabelas
+    pedidas."""
     regions = discover_regions(project_id, client=client)
-    all_tables = repository.list_all_table_refs(client, project_id, regions)
+    if scope:
+        all_tables = _parse_scoped_tables(scope)
+    else:
+        all_tables = repository.list_all_table_refs(client, project_id, regions)
     table_refs = [f"{project_id}.{d}.{t}" for d, t in all_tables]
     metadata = get_tables_metadata(client, table_refs)
 
@@ -510,7 +533,7 @@ def estimate_column_type_suggestions(
     """Dry-run gratuito (nenhuma query paga) — soma os bytes que seriam
     processados por cada query de scan elegível."""
     _validate_sample_percent(request.sample_percent)
-    eligible, tables_skipped_view = _resolve_eligible_tables(client, project_id)
+    eligible, tables_skipped_view = _resolve_eligible_tables(client, project_id, request.tables)
 
     total_bytes = 0
     columns_scanned = 0
@@ -546,7 +569,7 @@ def run_column_type_suggestions(
     um scan de tabela única em pii/quality."""
     _validate_sample_percent(request.sample_percent)
     started = time.monotonic()
-    eligible, tables_skipped_view = _resolve_eligible_tables(client, project_id)
+    eligible, tables_skipped_view = _resolve_eligible_tables(client, project_id, request.tables)
 
     def _scan_one(item: _EligibleTable) -> ColumnTypeCandidate | None:
         dataset_id, table_id, _location, string_columns, bq_table = item

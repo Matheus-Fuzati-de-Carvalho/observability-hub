@@ -66,11 +66,46 @@ gratuito) e `.../run` (execução real) — projeto inteiro, não por tabela.
   (lista de oportunidades), diferente de um scan de tabela única em
   `pii`/`quality`, onde parcial não faz sentido.
 
+### Correções pós-validação em dev (mesma branch, v1.1 da spec)
+
+Usuário validou a v1.0 em dev e voltou com dois pedidos, ambos
+implementados na mesma sessão:
+
+**1 — Escopo de execução (obrigatório pra produção)**
+- Rodar em todas as tabelas de um projeto real é inviável — a v1.0
+  fazia isso por padrão. `ColumnTypeScanRequest` ganhou `tables:
+  list[str] | None` (`"dataset_id.table_id"`); com escopo explícito,
+  `_resolve_eligible_tables` **pula** `repository.list_all_table_refs`
+  inteiramente (não enumera o projeto todo só pra filtrar depois).
+  Frontend: novo `ColumnTypeScopePicker` (checkbox por dataset — marca
+  todas as tabelas dele — que expande em checkboxes por tabela pra
+  refinar), com `useDatasets`/`useTables` do catálogo reaproveitados
+  (nenhum endpoint novo pra listar datasets/tabelas). Botões
+  "Estimar custo"/"Escanear" desabilitados até haver seleção — decisão
+  deliberada de não default pra "projeto inteiro" nunca aparecer como
+  opção fácil na UI, mesmo a API aceitando `tables=None` por
+  flexibilidade/testes.
+- Novo componente `components/ui/checkbox.tsx`, adicionado via
+  `npx shadcn add checkbox` (primeira vez que esse primitive é usado no
+  Hub).
+
+**2 — Também disponível por tabela, dentro do modal de profiling**
+- Nova aba "Tipos de coluna" em `ProfilingDialog.tsx`, ao lado de
+  Schema/Análise/Histórico/Lineage/PII/Acesso — mesmo padrão de
+  `PiiTab.tsx`, mas chamando os mesmos endpoints de projeto com escopo
+  implícito de uma tabela só (`tables: ["{dataset}.{tabela}"]`). Sem
+  seletor aqui — não faz sentido escolher escopo quando o modal já é
+  sobre uma tabela específica.
+- Extraído `ColumnTypeSuggestionBadges` (badges de sugestão) como
+  componente compartilhado entre a aba de projeto e a aba do modal, pra
+  não duplicar a lógica de exibição.
+
 ### Status até o momento
-- Backend: 464 testes unitários, 100% passando, `ruff check`/`ruff
+- Backend: 468 testes unitários, 100% passando, `ruff check`/`ruff
   format` limpos
 - Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos
-- Ainda não validado em dev nesta sessão
+- Ainda não validado em dev nesta rodada (v1.1) — v1.0 já tinha sido
+  validada
 - Falta: sugestão de clustering (deferida, ver Decisão 3) — depois disso
   a Fase 4 fecha
 
