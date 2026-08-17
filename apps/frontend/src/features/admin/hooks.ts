@@ -163,3 +163,24 @@ export function useProfilingActivity(limit?: number) {
     queryFn: () => adminApi.getProfilingActivity(limit),
   })
 }
+
+export function useAccessRequestAnalytics() {
+  return useQuery({
+    queryKey: ['admin-access-request-analytics'],
+    queryFn: adminApi.getAccessRequestAnalytics,
+  })
+}
+
+export function useNavigationAnalytics() {
+  return useQuery({
+    queryKey: ['admin-navigation-analytics'],
+    queryFn: adminApi.getNavigationAnalytics,
+  })
+}
+
+export function usePiiScanActivity(limit?: number) {
+  return useQuery({
+    queryKey: ['admin-pii-scan-activity', limit],
+    queryFn: () => adminApi.getPiiScanActivity(limit),
+  })
+}

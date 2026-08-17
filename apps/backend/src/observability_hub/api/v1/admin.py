@@ -5,8 +5,11 @@ from observability_hub.core.auth import require_admin
 from observability_hub.core.firestore import get_firestore_client
 from observability_hub.domains.admin import analytics_service, service
 from observability_hub.domains.admin.analytics_schemas import (
+    AccessRequestAnalyticsResponse,
     FavoritesAnalyticsResponse,
     LoginAnalyticsResponse,
+    NavigationAnalyticsResponse,
+    PiiScanActivityResponse,
     ProfilingActivityResponse,
 )
 from observability_hub.domains.admin.schemas import (
@@ -141,3 +144,25 @@ def profiling_activity(
     client: firestore.Client = Depends(get_firestore_client),
 ) -> ProfilingActivityResponse:
     return analytics_service.get_profiling_activity(client, limit)
+
+
+@router.get("/analytics/access-requests", response_model=AccessRequestAnalyticsResponse)
+def access_request_analytics(
+    client: firestore.Client = Depends(get_firestore_client),
+) -> AccessRequestAnalyticsResponse:
+    return analytics_service.get_access_request_analytics(client)
+
+
+@router.get("/analytics/navigation", response_model=NavigationAnalyticsResponse)
+def navigation_analytics(
+    client: firestore.Client = Depends(get_firestore_client),
+) -> NavigationAnalyticsResponse:
+    return analytics_service.get_navigation_analytics(client)
+
+
+@router.get("/analytics/pii-scans", response_model=PiiScanActivityResponse)
+def pii_scan_activity(
+    limit: int = Query(default=200, ge=1, le=1000),
+    client: firestore.Client = Depends(get_firestore_client),
+) -> PiiScanActivityResponse:
+    return analytics_service.get_pii_scan_activity(client, limit)

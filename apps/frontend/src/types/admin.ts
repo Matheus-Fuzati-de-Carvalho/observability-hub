@@ -116,3 +116,56 @@ export interface ProfilingRunEntry {
 export interface ProfilingActivityResponse {
   runs: ProfilingRunEntry[]
 }
+
+export interface AccessRequestMonthBucket {
+  period: string
+  total: number
+  approved: number
+  denied: number
+  pending: number
+}
+
+export interface ProjectRequestCount {
+  project_id: string
+  request_count: number
+}
+
+export interface AccessRequestAnalyticsResponse {
+  monthly: AccessRequestMonthBucket[]
+  top_projects: ProjectRequestCount[]
+  approval_rate: number | null
+}
+
+export interface TableViewEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  owner_email: string
+  viewed_at: string
+}
+
+export interface SearchEntry {
+  query: string
+  mode: string
+  project_id: string
+  owner_email: string
+  searched_at: string
+}
+
+export interface NavigationAnalyticsResponse {
+  table_views: TableViewEntry[]
+  searches: SearchEntry[]
+}
+
+export interface PiiScanEntry {
+  project_id: string
+  dataset_id: string
+  table_id: string
+  executed_by: string
+  executed_at: string
+  flagged_columns_count: number
+}
+
+export interface PiiScanActivityResponse {
+  scans: PiiScanEntry[]
+}

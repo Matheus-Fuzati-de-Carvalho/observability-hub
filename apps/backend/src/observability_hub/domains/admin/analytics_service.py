@@ -1,6 +1,7 @@
 """Orquestra as analytics de uso/gestão do Hub (login, favoritos entre
-usuários, atividade de profiling) — api/v1/admin.py e api/v1/auth.py só
-chamam estas funções. CLAUDE.md proíbe lógica de negócio em api/.
+usuários, atividade de profiling, navegação agregada, scans de PII,
+solicitações de acesso) — api/v1/admin.py e api/v1/auth.py só chamam
+estas funções. CLAUDE.md proíbe lógica de negócio em api/.
 """
 
 import logging
@@ -10,14 +11,23 @@ from datetime import UTC, datetime, timedelta
 from google.cloud import firestore
 
 from observability_hub.domains.admin import analytics_repository as repository
+from observability_hub.domains.admin import repository as acl_repository
 from observability_hub.domains.admin.analytics_schemas import (
+    AccessRequestAnalyticsResponse,
+    AccessRequestMonthBucket,
     FavoriteEntry,
     FavoritesAnalyticsResponse,
     LoginAnalyticsResponse,
     LoginCountBucket,
     LoginEvent,
+    NavigationAnalyticsResponse,
+    PiiScanActivityResponse,
+    PiiScanEntry,
     ProfilingActivityResponse,
     ProfilingRunEntry,
+    ProjectRequestCount,
+    SearchEntry,
+    TableViewEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,3 +100,58 @@ def get_profiling_activity(client: firestore.Client, limit: int = 200) -> Profil
     valid = [r for r in raw if "project_id" in r]
     valid.sort(key=lambda r: r["executed_at"], reverse=True)
     return ProfilingActivityResponse(runs=[ProfilingRunEntry(**r) for r in valid[:limit]])
+
+
+_MONTH_BUCKET_DEFAULT = {"total": 0, "approved": 0, "denied": 0, "pending": 0}
+
+
+def get_access_request_analytics(client: firestore.Client) -> AccessRequestAnalyticsResponse:
+    raw = acl_repository.list_access_requests(client)
+
+    monthly: dict[str, dict[str, int]] = defaultdict(lambda: dict(_MONTH_BUCKET_DEFAULT))
+    project_counts: dict[str, int] = defaultdict(int)
+    approved = denied = 0
+    for r in raw:
+        period = r["requested_at"].strftime("%Y-%m")
+        monthly[period]["total"] += 1
+        monthly[period][r["status"]] += 1
+        project_counts[r["project_id"]] += 1
+        if r["status"] == "approved":
+            approved += 1
+        elif r["status"] == "denied":
+            denied += 1
+
+    resolved = approved + denied
+    approval_rate = round(approved / resolved * 100, 1) if resolved else None
+
+    monthly_buckets = [
+        AccessRequestMonthBucket(period=period, **counts)
+        for period, counts in sorted(monthly.items())
+    ]
+    top_projects = sorted(
+        (
+            ProjectRequestCount(project_id=project_id, request_count=count)
+            for project_id, count in project_counts.items()
+        ),
+        key=lambda p: p.request_count,
+        reverse=True,
+    )[:10]
+
+    return AccessRequestAnalyticsResponse(
+        monthly=monthly_buckets, top_projects=top_projects, approval_rate=approval_rate
+    )
+
+
+def get_navigation_analytics(client: firestore.Client) -> NavigationAnalyticsResponse:
+    table_views = repository.list_all_table_views(client)
+    searches = repository.list_all_searches(client)
+    return NavigationAnalyticsResponse(
+        table_views=[TableViewEntry(**v) for v in table_views],
+        searches=[SearchEntry(**s) for s in searches],
+    )
+
+
+def get_pii_scan_activity(client: firestore.Client, limit: int = 200) -> PiiScanActivityResponse:
+    raw = repository.list_all_pii_scans(client)
+    raw.sort(key=lambda r: r["executed_at"], reverse=True)
+    return PiiScanActivityResponse(scans=[PiiScanEntry(**r) for r in raw[:limit]])

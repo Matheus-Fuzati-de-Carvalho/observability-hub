@@ -1,6 +1,6 @@
 # Spec — Domínio: Admin (controle de acesso por usuário × projeto)
 
-**Versão:** 1.2
+**Versão:** 1.3
 **Status:** Aprovada
 **Fase:** Transversal (não faz parte do roadmap de observabilidade de `docs/prd.md`) — plataforma
 **Última atualização:** 2026-08-17
@@ -33,6 +33,14 @@ acesso self-service (`access_requests`) — ver seções abaixo.
 quando), bases mais favoritadas e favoritos com drill-down bidirecional
 (usuário → itens, base → usuários) e histórico global de execuções de
 profiling (tabela, quem, quando) — ver "Analytics de uso (v1.2)" abaixo.
+
+**Novo na v1.3**: mais 3 mapeamentos na mesma aba — solicitações de
+acesso (pedidos por mês por status, taxa de aprovação, projetos mais
+pedidos, zero gravação nova), navegação agregada (tabelas mais vistas,
+buscas mais frequentes, agregando o histórico por-usuário que já
+existia) e atividade de scans de PII (mesmo padrão do profiling,
+gravação nova em `pii_scan_history`) — ver "Analytics de uso (v1.3)"
+abaixo.
 
 Ver [ADR-009](../adr/ADR-009-acl-usuario-projeto.md) para o contexto da
 decisão arquitetural (não revisado nesta versão — a v1.1 é uma extensão
@@ -217,6 +225,54 @@ desc em Python.
 
 ---
 
+## Analytics de uso (v1.3)
+
+Mais 3 leituras na mesma aba "Uso do Hub", dois casos sem gravação nova
+e um com:
+
+### Solicitações de acesso (zero gravação nova)
+
+`access_requests` (já existe desde a v1.1) já tem tudo que precisa —
+`status`, `project_id`, `requested_at`, `resolved_at`, `resolved_by`.
+`GET /api/v1/admin/analytics/access-requests` agrupa em Python por mês
+(`{period, total, approved, denied, pending}`), lista os 10 projetos
+mais pedidos e calcula `approval_rate` (`approved / (approved + denied)
+* 100`) — `null` quando ainda não houve nenhum pedido resolvido (evita
+mostrar "0%" quando não há dado nenhum).
+
+### Navegação agregada (zero gravação nova)
+
+`domains/history` já persiste, por usuário, `history_table_views` e
+`history_searches` (capados em **20 itens por usuário** — bem menos que
+os 30/tabela do profiling ou o favorites sem cap). `GET /api/v1/admin/
+analytics/navigation` lê os dois via `collection_group` (mesmo padrão
+de `list_all_favorites`, `owner_email` derivado do path) e devolve as
+listas achatadas — o front agrega "tabelas mais vistas"/"buscas mais
+frequentes" a partir do payload bruto. **Por causa do cap de 20/usuário,
+isso é uma métrica de uso recente, não histórico completo** — texto
+explícito na UI, não escondido.
+
+### Atividade de scans de PII (gravação nova)
+
+Até a v1.3, scan de PII (`domains/pii`) não persistia nada — só um cache
+em memória com TTL de 5min, sem `executed_by`. Ganhou o mesmo tratamento
+que profiling já tinha: `domains/pii/history_repository.py` (novo)
+grava em `pii_scan_history/{project}_{dataset}_{table}/scans/{auto-id}`
+a cada execução real (**não** em cache hit — ver `docs/specs/pii.md`,
+"Histórico de scans"). Cap de 30/tabela, mesmo trim-to-max de sempre.
+
+**Nome da subcoleção é `scans`, não `runs`** — de propósito: a
+agregação lê via `collection_group`, que ignora o caminho do
+documento-pai e enxerga só o nome da subcoleção; se PII usasse `runs`
+também, a leitura global de profiling passaria a devolver scans de PII
+junto (e vice-versa). Confirmado por grep antes de implementar que
+nenhum domínio usava esse nome.
+
+`GET /api/v1/admin/analytics/pii-scans?limit=200` — mesmo formato de
+`/analytics/profiling` (tabela, executado por, quando + `flagged_columns_count`).
+
+---
+
 ## Duas dependencies novas em `core/auth.py`
 
 ```python
@@ -317,6 +373,11 @@ duplicado — ver "Solicitação de acesso" acima.
 ### GET /api/v1/admin/analytics/profiling?limit=200
 Ver "Analytics de uso (v1.2)" acima.
 
+### GET /api/v1/admin/analytics/access-requests
+### GET /api/v1/admin/analytics/navigation
+### GET /api/v1/admin/analytics/pii-scans?limit=200
+Ver "Analytics de uso (v1.3)" acima.
+
 ---
 
 ## `is_admin` exposto só em `GET /auth/me`
@@ -367,11 +428,13 @@ apps/backend/src/observability_hub/
 ├── domains/
 │   ├── admin/                  # schemas, repository, service — hub_users + hub_projects (v1.1)
 │   │                           # + access_requests (v1.1)
-│   │                           # + analytics_{schemas,repository,service}.py (v1.2)
+│   │                           # + analytics_{schemas,repository,service}.py (v1.2, +3 funções v1.3)
 │   ├── quality/history_repository.py  # + project_id/dataset_id/table_id no run (v1.2)
+│   ├── pii/history_repository.py      # novo (v1.3) — pii_scan_history/{doc}/scans
 │   └── auth/schemas.py         # UserInfo + is_admin
 └── tests/unit/
-    ├── admin/                  # + test_analytics_repository.py, test_analytics_service.py (v1.2)
+    ├── admin/                  # + test_analytics_repository.py, test_analytics_service.py (v1.2, estendidos v1.3)
+    ├── pii/test_history_repository.py  # novo (v1.3)
     └── core/test_auth.py       # require_admin/require_project_access
 
 scripts/seed_admin.py           # bootstrap do primeiro admin
@@ -389,10 +452,13 @@ apps/frontend/src/
 │   │   ├── ProjectChipEditor.tsx       # novo (v1.1) — compartilhado
 │   │   ├── RequestAccessDialog.tsx     # novo (v1.1)
 │   │   ├── RequireAdmin.tsx
-│   │   ├── AdminUsageTab.tsx           # novo (v1.2) — orquestra as 3 seções abaixo
+│   │   ├── AdminUsageTab.tsx           # v1.2 (3 seções) + 3 novas (v1.3)
 │   │   ├── LoginAnalyticsSection.tsx   # novo (v1.2)
 │   │   ├── FavoritesAnalyticsSection.tsx  # novo (v1.2)
 │   │   ├── ProfilingActivitySection.tsx   # novo (v1.2)
+│   │   ├── AccessRequestAnalyticsSection.tsx  # novo (v1.3)
+│   │   ├── NavigationAnalyticsSection.tsx     # novo (v1.3)
+│   │   ├── PiiScanActivitySection.tsx         # novo (v1.3)
 │   │   └── hooks.ts
 │   └── projects/ProjectSelector.tsx    # erro visível + CTA "Solicitar acesso" (v1.1)
 ├── app/
@@ -407,6 +473,8 @@ apps/frontend/src/
     └── admin.ts                  # + HubProject, AccessRequest, etc. (v1.1)
                                    # + LoginAnalyticsResponse, FavoritesAnalyticsResponse,
                                    #   ProfilingActivityResponse (v1.2)
+                                   # + AccessRequestAnalyticsResponse, NavigationAnalyticsResponse,
+                                   #   PiiScanActivityResponse (v1.3)
 ```
 
 ---
@@ -431,6 +499,10 @@ apps/frontend/src/
 | Firestore indisponível no momento do login | Login continua funcionando; gravação de `login_events` falha silenciosamente (logada), sem expor erro ao usuário |
 | Run de profiling gravado antes da v1.2 (sem `project_id`) | Filtrado da visão global de atividade; sai da janela sozinho quando o cap de 30/tabela rotacionar |
 | Favorito de dataset inteiro (`table_id: null`) na visão "por base" | Agrupado como linha própria, separado de favoritos de tabelas específicas do mesmo dataset |
+| Nenhuma solicitação de acesso resolvida ainda | `approval_rate: null` (não `0%`) |
+| Usuário com mais de 20 tabelas vistas/buscas | Só as 20 mais recentes entram na agregação de navegação — janela recente, não histórico completo |
+| Cache hit num scan de PII repetido | Não grava novo doc em `pii_scan_history` — não houve execução real |
+| `collection_group("runs")` (profiling) vs PII | Nomes de subcoleção diferentes (`runs` vs `scans`) — sem risco de mistura na agregação |
 
 ---
 

@@ -80,3 +80,48 @@ def test_list_all_profiling_runs_scans_collection_group():
 
     client.collection_group.assert_called_once_with("runs")
     assert result == [{"project_id": "proj", "dataset_id": "RAW", "table_id": "events"}]
+
+
+def test_list_all_table_views_derives_owner_email_from_parent_doc():
+    client = MagicMock()
+    collection_group = MagicMock()
+    client.collection_group.return_value = collection_group
+    collection_group.stream.return_value = [
+        _doc(
+            {"project_id": "proj", "dataset_id": "RAW", "table_id": "events"},
+            owner_email="a@dp6.com.br",
+        ),
+    ]
+
+    result = repository.list_all_table_views(client)
+
+    client.collection_group.assert_called_once_with("history_table_views")
+    assert result[0]["owner_email"] == "a@dp6.com.br"
+
+
+def test_list_all_searches_derives_owner_email_from_parent_doc():
+    client = MagicMock()
+    collection_group = MagicMock()
+    client.collection_group.return_value = collection_group
+    collection_group.stream.return_value = [
+        _doc({"query": "crm_leads", "mode": "table"}, owner_email="a@dp6.com.br"),
+    ]
+
+    result = repository.list_all_searches(client)
+
+    client.collection_group.assert_called_once_with("history_searches")
+    assert result[0]["owner_email"] == "a@dp6.com.br"
+
+
+def test_list_all_pii_scans_scans_collection_group_named_scans():
+    client = MagicMock()
+    collection_group = MagicMock()
+    client.collection_group.return_value = collection_group
+    collection_group.stream.return_value = [
+        _doc({"project_id": "proj", "dataset_id": "RAW", "table_id": "clientes"}),
+    ]
+
+    result = repository.list_all_pii_scans(client)
+
+    client.collection_group.assert_called_once_with("scans")
+    assert result == [{"project_id": "proj", "dataset_id": "RAW", "table_id": "clientes"}]

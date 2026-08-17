@@ -51,3 +51,62 @@ class ProfilingRunEntry(BaseModel):
 
 class ProfilingActivityResponse(BaseModel):
     runs: list[ProfilingRunEntry]
+
+
+class AccessRequestMonthBucket(BaseModel):
+    period: str  # "2026-08"
+    total: int
+    approved: int
+    denied: int
+    pending: int
+
+
+class ProjectRequestCount(BaseModel):
+    project_id: str
+    request_count: int
+
+
+class AccessRequestAnalyticsResponse(BaseModel):
+    monthly: list[AccessRequestMonthBucket]
+    top_projects: list[ProjectRequestCount]
+    # None = nenhum pedido resolvido ainda (evita mostrar "0%" quando na
+    # verdade não há dado nenhum).
+    approval_rate: float | None
+
+
+class TableViewEntry(BaseModel):
+    project_id: str
+    dataset_id: str
+    table_id: str
+    owner_email: str
+    viewed_at: datetime
+
+
+class SearchEntry(BaseModel):
+    query: str
+    mode: str
+    project_id: str
+    owner_email: str
+    searched_at: datetime
+
+
+class NavigationAnalyticsResponse(BaseModel):
+    # Listas achatadas — mesmo racional de FavoritesAnalyticsResponse, o
+    # front agrega "top tabelas"/"top buscas" a partir do payload bruto.
+    # Cada usuário só guarda os 20 itens mais recentes (domains/history),
+    # então isso é uma janela recente, não histórico completo.
+    table_views: list[TableViewEntry]
+    searches: list[SearchEntry]
+
+
+class PiiScanEntry(BaseModel):
+    project_id: str
+    dataset_id: str
+    table_id: str
+    executed_by: str
+    executed_at: datetime
+    flagged_columns_count: int
+
+
+class PiiScanActivityResponse(BaseModel):
+    scans: list[PiiScanEntry]

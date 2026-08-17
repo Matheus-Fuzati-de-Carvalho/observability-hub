@@ -1,7 +1,7 @@
 """Única camada que fala com o Firestore pros dados de uso/gestão do
-Hub (login, favoritos entre usuários, atividade de profiling) —
-service.py orquestra, nunca monta paths/queries diretamente (mesmo
-racional de domains/admin/repository.py).
+Hub (login, favoritos entre usuários, atividade de profiling, navegação
+agregada, scans de PII) — service.py orquestra, nunca monta paths/
+queries diretamente (mesmo racional de domains/admin/repository.py).
 
 Coleção nova: login_events/{auto_id} — top-level, não por usuário (é
 dado gerencial do Hub, mesmo raciocínio de hub_users/hub_projects, não
@@ -52,4 +52,36 @@ def list_all_favorites(client: firestore.Client) -> list[dict]:
 
 def list_all_profiling_runs(client: firestore.Client) -> list[dict]:
     docs = client.collection_group("runs").stream()
+    return [doc.to_dict() for doc in docs]
+
+
+def list_all_table_views(client: firestore.Client) -> list[dict]:
+    """collection_group sem filtro — cada doc ganha owner_email, derivado
+    do path (users/{email}/history_table_views/{doc_id}). Cada usuário só
+    guarda os 20 mais recentes (domains/history/repository.py) — isso é
+    uma janela recente, não histórico completo."""
+    docs = client.collection_group("history_table_views").stream()
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data["owner_email"] = doc.reference.parent.parent.id
+        results.append(data)
+    return results
+
+
+def list_all_searches(client: firestore.Client) -> list[dict]:
+    docs = client.collection_group("history_searches").stream()
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        data["owner_email"] = doc.reference.parent.parent.id
+        results.append(data)
+    return results
+
+
+def list_all_pii_scans(client: firestore.Client) -> list[dict]:
+    """Nome da subcoleção é "scans", não "runs" — ver docstring de
+    domains/pii/history_repository.py sobre a colisão de
+    collection_group que isso evita."""
+    docs = client.collection_group("scans").stream()
     return [doc.to_dict() for doc in docs]

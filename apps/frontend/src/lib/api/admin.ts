@@ -1,6 +1,7 @@
 import { httpClient } from '@/lib/http-client'
 import type {
   AccessRequest,
+  AccessRequestAnalyticsResponse,
   AccessRequestStatus,
   AccessRequestsListResponse,
   FavoritesAnalyticsResponse,
@@ -9,6 +10,8 @@ import type {
   HubUser,
   HubUsersListResponse,
   LoginAnalyticsResponse,
+  NavigationAnalyticsResponse,
+  PiiScanActivityResponse,
   ProfilingActivityResponse,
   ProjectUsersResponse,
   UpsertHubProjectRequest,
@@ -70,5 +73,16 @@ export const adminApi = {
   getProfilingActivity: (limit?: number) =>
     httpClient.get<ProfilingActivityResponse>(
       `/api/v1/admin/analytics/profiling${limit ? `?limit=${limit}` : ''}`,
+    ),
+
+  getAccessRequestAnalytics: () =>
+    httpClient.get<AccessRequestAnalyticsResponse>('/api/v1/admin/analytics/access-requests'),
+
+  getNavigationAnalytics: () =>
+    httpClient.get<NavigationAnalyticsResponse>('/api/v1/admin/analytics/navigation'),
+
+  getPiiScanActivity: (limit?: number) =>
+    httpClient.get<PiiScanActivityResponse>(
+      `/api/v1/admin/analytics/pii-scans${limit ? `?limit=${limit}` : ''}`,
     ),
 }
