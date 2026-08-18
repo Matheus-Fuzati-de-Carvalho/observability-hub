@@ -137,17 +137,23 @@ def handle_logging_access_denied(request: Request, exc: LoggingAccessDeniedError
 def handle_storage_access_denied(request: Request, exc: StorageAccessDeniedError) -> JSONResponse:
     runtime_project = get_client().project
     sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    # roles/storage.objectViewer sozinha NÃO cobre storage.buckets.list/get
+    # (só storage.objects.*) — confirmado em dev 2026-08-17 (403 mesmo com
+    # a role concedida). list_buckets() precisa de storage.bucketViewer
+    # também; a exceção não distingue qual das duas faltou, então sugerimos
+    # as duas de uma vez, mesmo padrão de ProjectAccessDeniedError/
+    # LoggingAccessDeniedError. Ver docs/specs/storage.md seção 8.
+    roles = ["storage.bucketViewer", "storage.objectViewer"]
     return JSONResponse(
         status_code=403,
         content={
             "error": "storage_access_denied",
             "message": "A service account do Hub não tem acesso ao Cloud Storage deste projeto.",
             "fix": [
-                (
-                    f"gcloud projects add-iam-policy-binding {exc.project_id} "
-                    f"--member='serviceAccount:{sa_email}' "
-                    "--role='roles/storage.objectViewer'"
-                )
+                f"gcloud projects add-iam-policy-binding {exc.project_id} "
+                f"--member='serviceAccount:{sa_email}' "
+                f"--role='roles/{role}'"
+                for role in roles
             ],
         },
     )

@@ -179,16 +179,37 @@ ambiguidade.
 
 ## 8. IAM necessária
 
-Novo grupo de roles pro checklist de `docs/onboarding-cliente.md`:
-- `roles/storage.objectViewer` (metadado + leitura de objeto, catálogo/
-  freshness/waste)
+Novo grupo de roles pro checklist de `docs/onboarding-cliente.md`. **Duas**
+roles, não uma — descoberto durante a implementação do item 1 (catálogo),
+validando em dev: `roles/storage.objectViewer` sozinha não é suficiente,
+ver nota abaixo.
+- `roles/storage.bucketViewer` (`storage.buckets.get`/`storage.buckets.list`
+  — metadado de bucket: nome, storage class, região, lifecycle rule).
+  Necessária pro catálogo listar os buckets do projeto antes de olhar
+  qualquer objeto dentro deles.
+- `roles/storage.objectViewer` (`storage.objects.get`/`storage.objects.list`
+  — metadado + leitura de objeto). Necessária pra freshness/waste (tamanho
+  agregado, `updated`/`customTime`).
 - Nenhuma role nova pra lineage — reaproveita `roles/logging.viewer` +
   `roles/logging.privateLogViewer` já cross-granted pra BigQuery, porque
   o audit log de load/extract já vive dentro do mesmo `bigquery_resource`/
   `data_access` já lido hoje.
 
+> **Nota (2026-08-17, confirmado em dev):** a spec original desta seção
+> previa só `roles/storage.objectViewer`. Validando o item 1 em dev, o
+> endpoint de catálogo retornou 403 mesmo com essa role concedida —
+> `gcloud iam roles describe roles/storage.objectViewer` confirma que ela
+> cobre só `storage.objects.*`/`storage.folders.*`/`storage.managedFolders.*`,
+> **sem** `storage.buckets.get`/`storage.buckets.list`. `list_buckets()` (a
+> primeira chamada do domínio, antes de qualquer coisa por objeto) precisa
+> especificamente dessas duas permissões de bucket, que só existem em roles
+> como `storage.admin` (controle total, não serve — grava/apaga) ou na role
+> dedicada `storage.bucketViewer` (só leitura de metadado de bucket, sem
+> acesso a objeto). As duas juntas (`bucketViewer` + `objectViewer`) cobrem
+> exatamente as quatro operações de leitura que o domínio usa, sem excesso.
+
 Cross-project: mesma lógica já aplicada a BigQuery/Logging — se o Hub
-observa múltiplos projetos, `storage.objectViewer` precisa ser concedido
+observa múltiplos projetos, as duas roles precisam ser concedidas
 cross-project nos dois sentidos, mesmo padrão de dev↔prod já em uso.
 
 ## 9. Dados mock usados na validação (dev)

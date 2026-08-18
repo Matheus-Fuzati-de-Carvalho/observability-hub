@@ -52,7 +52,8 @@ domínio hoje opera com IAM a nível de dataset ou tabela):
 | `roles/bigquery.dataViewer` | Ler dados reais de tabela (amostragem, contagem de nulos/duplicatas, valores distintos) | quality (profiling e histórico) |
 | `roles/logging.viewer` | Chamar a API de Cloud Logging sem 403 — sozinha **não é suficiente** pra ver Data Access audit logs, ver nota abaixo | lineage (tabelas órfãs, upstream/downstream); mapa de acesso quando implementado |
 | `roles/logging.privateLogViewer` | Ver especificamente os **Data Access audit logs** — é onde vive o `jobCompletedEvent` que lineage lê; sem essa role a chamada não falha, só retorna sempre vazio | idem |
-| `roles/storage.objectViewer` | Ler metadado de bucket/objeto (catálogo, freshness, waste scanner) — nenhuma role nova pra lineage, o audit log de load/extract já vive dentro do `bigquery_resource`/`data_access` já lido pelas duas roles de logging acima | storage |
+| `roles/storage.bucketViewer` | Listar/ler metadado de **bucket** (nome, storage class, região, lifecycle rule) — `storage.objectViewer` **não** cobre isso (só objeto), confirmado em dev 2026-08-17, ver `docs/specs/storage.md` seção 8 | storage (catálogo) |
+| `roles/storage.objectViewer` | Ler metadado + conteúdo de **objeto** dentro de um bucket já conhecido — nenhuma role nova pra lineage, o audit log de load/extract já vive dentro do `bigquery_resource`/`data_access` já lido pelas duas roles de logging acima | storage (freshness, waste scanner) |
 
 > **Pegadinha confirmada em produção (2026-08-14):** `roles/logging.viewer`
 > sozinha deixa a API responder 200 normalmente, mas Data Access audit logs
@@ -81,10 +82,13 @@ gcloud projects add-iam-policy-binding {PROJECT_ID} \
   --member="serviceAccount:${SA_EMAIL}" --role="roles/logging.privateLogViewer"
 
 gcloud projects add-iam-policy-binding {PROJECT_ID} \
+  --member="serviceAccount:${SA_EMAIL}" --role="roles/storage.bucketViewer"
+
+gcloud projects add-iam-policy-binding {PROJECT_ID} \
   --member="serviceAccount:${SA_EMAIL}" --role="roles/storage.objectViewer"
 ```
 
-Todos os seis comandos são idempotentes — seguro rodar de novo mesmo que
+Todos os sete comandos são idempotentes — seguro rodar de novo mesmo que
 algum já tenha sido aplicado. Se faltar qualquer uma das três primeiras, a
 API responde 403 com esses mesmos comandos prontos no corpo do erro
 (`ProjectAccessDeniedError`); se faltar `logging.viewer`, o mesmo acontece
@@ -94,9 +98,11 @@ duas roles de logging juntas); se faltar só `logging.privateLogViewer`
 "nenhum evento encontrado", indistinguível à primeira vista de "sem
 atividade real" ou "audit logs desabilitados" (checar as três
 possibilidades nessa ordem quando o aviso aparecer sem explicação óbvia);
-se faltar `storage.objectViewer`, os endpoints de `storage` respondem 403
-com o comando pronto (`StorageAccessDeniedError`), mesmo padrão das
-demais.
+se faltar `storage.bucketViewer` e/ou `storage.objectViewer`, os endpoints
+de `storage` respondem 403 com os comandos prontos (`StorageAccessDeniedError`,
+sempre sugere as duas juntas), mesmo padrão das demais — **as duas são
+necessárias juntas** (`objectViewer` sozinha não cobre `storage.buckets.*`,
+ver seção 8 de `docs/specs/storage.md`).
 
 ---
 
@@ -175,7 +181,11 @@ motivo.
     — só necessário se o cliente for usar lineage/tabelas órfãs/mapa de acesso
 [ ] storage.googleapis.com habilitada no projeto alvo — só necessário se o
     cliente for usar o domínio storage
-[ ] roles/storage.objectViewer concedida à SA do Hub — idem
+[ ] roles/storage.bucketViewer concedida à SA do Hub — idem, necessária
+    pro catálogo listar buckets (storage.objectViewer sozinha NÃO cobre
+    metadado de bucket, só de objeto)
+[ ] roles/storage.objectViewer concedida à SA do Hub — idem, necessária
+    pra freshness/waste (metadado e leitura de objeto)
 ```
 
 ---
@@ -199,6 +209,7 @@ checklist, e servem de precedente real de que o processo funciona.
 | 2026-08-17 (comando fornecido em 2026-08-14) | `observability-hub-prod` | `backend-run@...-dev` | `roles/logging.privateLogViewer` (cross) | `gcloud projects get-iam-policy` |
 | 2026-08-17 (comando fornecido em 2026-08-14) | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.privateLogViewer` (cross) | `gcloud projects get-iam-policy` |
 | 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.objectViewer` (domínio `storage`, ver `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
+| 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.bucketViewer` (faltava pra `objectViewer` sozinha ser suficiente, ver nota da seção 8 de `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
 
 **Nota:** os dois itens "antes de 2026-08-14" foram descobertos ao vivo
 nesta sessão via `gcloud projects get-iam-policy` — o SESSIONLOG.md
