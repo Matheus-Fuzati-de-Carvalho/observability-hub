@@ -8,7 +8,9 @@
 
 Este documento orienta a liberação de **acesso de leitura** ao seu
 projeto Google Cloud para que o Observability Hub possa analisá-lo —
-catálogo de dados, monitoramento de atualização e qualidade das tabelas.
+catálogo de dados, monitoramento de atualização e qualidade das tabelas,
+linhagem, mapa de acessos, custo e, opcionalmente, armazenamento de
+arquivos (Cloud Storage).
 
 **Quem deve executar:** um responsável técnico com permissão para
 gerenciar papéis de IAM no projeto (papel de *Owner* ou *IAM Admin*).
@@ -55,6 +57,13 @@ gcloud services enable bigquery.googleapis.com logging.googleapis.com \
   --project={SEU_PROJETO}
 ```
 
+Se for usar também a análise de **armazenamento de arquivos (Cloud
+Storage)**, habilite mais esta API:
+
+```bash
+gcloud services enable storage.googleapis.com --project={SEU_PROJETO}
+```
+
 ---
 
 ## Passo 3 — Conceder as permissões de leitura
@@ -78,6 +87,16 @@ gcloud projects add-iam-policy-binding {SEU_PROJETO} \
   --member="serviceAccount:${CONTA_DE_SERVICO}" --role="roles/logging.privateLogViewer"
 ```
 
+Só se for usar a análise de Cloud Storage (Passo 2):
+
+```bash
+gcloud projects add-iam-policy-binding {SEU_PROJETO} \
+  --member="serviceAccount:${CONTA_DE_SERVICO}" --role="roles/storage.bucketViewer"
+
+gcloud projects add-iam-policy-binding {SEU_PROJETO} \
+  --member="serviceAccount:${CONTA_DE_SERVICO}" --role="roles/storage.objectViewer"
+```
+
 | Permissão | Para que serve |
 |---|---|
 | `bigquery.metadataViewer` | Ler a estrutura dos dados — datasets, tabelas, colunas |
@@ -85,20 +104,24 @@ gcloud projects add-iam-policy-binding {SEU_PROJETO} \
 | `bigquery.dataViewer` | Analisar qualidade dos dados (amostragem, duplicidade, valores nulos) |
 | `logging.viewer` | Consultar o histórico de uso das tabelas |
 | `logging.privateLogViewer` | Complementa a anterior — sem ela, o histórico de uso vem sempre vazio (ver nota abaixo) |
+| `storage.bucketViewer` | Listar os buckets de armazenamento existentes (só se usar Cloud Storage) |
+| `storage.objectViewer` | Ler metadados dos arquivos dentro dos buckets (só se usar Cloud Storage) |
 
-> **Atenção:** as duas últimas permissões precisam ser concedidas
-> **juntas**. Só com `logging.viewer`, nada falha — mas o histórico de
-> uso das tabelas simplesmente nunca aparece, sem nenhum aviso de erro.
+> **Atenção:** as permissões vêm em **pares** que precisam ser concedidos
+> juntos. `logging.viewer` sem `logging.privateLogViewer` não dá erro,
+> mas o histórico de uso nunca aparece. `storage.bucketViewer` sem
+> `storage.objectViewer` (ou vice-versa) também não é suficiente — sem
+> as duas, a lista de buckets nem carrega.
 
 Todos os comandos são seguros para executar mais de uma vez.
 
 ---
 
-## Passo 4 — Habilitar o histórico de uso (opcional)
+## Passo 4 — Habilitar o histórico de uso
 
-Necessário apenas se for utilizado o rastreamento de linhagem de dados
-ou o mapa de acessos. Sem esta etapa, essas duas funcionalidades
-simplesmente não mostram dado nenhum — as demais funcionam normalmente.
+Necessário para o rastreamento de linhagem de dados, mapa de acessos e
+a análise de custo. Sem esta etapa, essas funcionalidades simplesmente
+não mostram dado nenhum — as demais funcionam normalmente.
 
 **Pelo Console do Google Cloud:** IAM e Administrador → Auditoria →
 localizar "BigQuery API" → marcar "Leitura de dados" e "Gravação de
@@ -130,6 +153,25 @@ gcloud projects get-iam-policy {SEU_PROJETO} --format=json > politica.json
 gcloud projects set-iam-policy {SEU_PROJETO} politica.json
 ```
 
+**Opcional — só se for usar a análise de Cloud Storage e quiser o nível
+mais completo de detalhe** (identificar arquivos sem leitura recente):
+mescle este bloco adicional no mesmo `auditConfigs` acima, junto do de
+BigQuery:
+
+```json
+{
+  "service": "storage.googleapis.com",
+  "auditLogConfigs": [
+    { "logType": "DATA_READ" }
+  ]
+}
+```
+
+> **Atenção:** isso gera um registro por leitura de arquivo — em um
+> ambiente com muito tráfego de leitura, o volume de registros pode ser
+> alto. Sem esta etapa opcional, a análise de armazenamento continua
+> funcionando normalmente, só com um nível de detalhe menor.
+
 ---
 
 ## Passo 5 — Confirmar
@@ -141,17 +183,22 @@ gcloud projects get-iam-policy {SEU_PROJETO} \
   --format="table(bindings.role)"
 ```
 
-O resultado deve listar as cinco permissões do Passo 3. A partir daqui,
-o acesso está liberado e pronto para uso.
+O resultado deve listar as cinco permissões do Passo 3 (ou as sete, se
+tiver liberado também a análise de Cloud Storage). A partir daqui, o
+acesso está liberado e pronto para uso.
 
 ---
 
 ## Checklist
 
 ```
-[ ] APIs habilitadas (BigQuery, Cloud Logging)
+[ ] APIs habilitadas (BigQuery, Cloud Logging, e Cloud Storage se for usar)
 [ ] 5 permissões de leitura concedidas à conta de serviço informada
-[ ] Histórico de uso habilitado — apenas se for usar linhagem/mapa de acessos
+[ ] 2 permissões extras de Cloud Storage concedidas — só se for usar essa análise
+[ ] Histórico de uso do BigQuery habilitado — necessário pra linhagem,
+    mapa de acessos e análise de custo
+[ ] Histórico de uso do Cloud Storage habilitado — opcional, só se quiser
+    o nível mais completo da análise de armazenamento
 [ ] Concessão confirmada por linha de comando
 ```
 
@@ -167,7 +214,8 @@ CONTA_DE_SERVICO="{conta-de-servico}@{projeto-do-hub}.iam.gserviceaccount.com"
 
 for PAPEL in roles/bigquery.metadataViewer roles/bigquery.jobUser \
              roles/bigquery.dataViewer roles/logging.viewer \
-             roles/logging.privateLogViewer; do
+             roles/logging.privateLogViewer roles/storage.bucketViewer \
+             roles/storage.objectViewer; do
   gcloud projects remove-iam-policy-binding {SEU_PROJETO} \
     --member="serviceAccount:${CONTA_DE_SERVICO}" --role="${PAPEL}"
 done

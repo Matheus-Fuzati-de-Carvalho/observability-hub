@@ -84,6 +84,14 @@ aprovada e publicada.
 
 ## Etapa 1 — Criar os dois projetos Google Cloud
 
+> ⚠️ **Antes de escolher os nomes**: o identificador do projeto de teste
+> precisa terminar em `-dev` e o de produção precisa terminar em
+> `-prod` (ex: `suaempresa-dev` / `suaempresa-prod`). Isso não é só uma
+> sugestão de organização — a aplicação usa essa terminação para saber
+> automaticamente qual conjunto de credenciais de login usar em cada
+> ambiente. Um nome fora desse padrão faz o login falhar de forma
+> silenciosa no ambiente de produção.
+
 ```bash
 gcloud projects create {PROJETO_TESTE} --name="Observability Hub (teste)"
 gcloud projects create {PROJETO_PRODUCAO} --name="Observability Hub (produção)"
@@ -182,6 +190,22 @@ gh secret set WIF_SA_PROD --body "<valor de service_account_email, produção>"
 
 Isso é o que permite que o pipeline de implantação autentique no Google
 Cloud sem nenhuma chave fixa, como descrito na seção de segurança acima.
+
+### Aprovação obrigatória antes de qualquer atualização em produção
+
+O ambiente de produção **não** publica uma atualização sozinho — mesmo
+depois de o código estar pronto, alguém precisa aprovar manualmente
+antes de ela realmente subir. Configure isso agora, também em
+Configurações → Environments:
+
+1. **New environment**, nome exatamente `production`
+2. Marque **"Required reviewers"** e adicione quem deve aprovar
+   atualizações de produção
+3. Salve
+
+Sem este passo, o ambiente de produção volta a publicar automaticamente
+a cada alteração — a aprovação manual só existe se este environment
+estiver configurado.
 
 ---
 
@@ -309,26 +333,34 @@ Com isso, o ambiente de teste está validado e pronto para uso.
 ## Etapa 13 — Repetir para produção
 
 1. Publique as alterações da Etapa 3 na branch principal do
-   repositório — isso cria a infraestrutura de produção.
-2. Repita as Etapas 7 a 11 apontando para o projeto de produção.
-3. Repita a validação da Etapa 12 no ambiente de produção.
+   repositório — isso cria a infraestrutura de produção automaticamente.
+2. **A publicação das duas aplicações fica parada esperando aprovação**
+   (se a Etapa 5 foi configurada) — acesse a aba de execuções do
+   repositório, localize a execução parada e aprove-a manualmente para
+   que a atualização siga adiante.
+3. Repita as Etapas 7 a 11 apontando para o projeto de produção.
+4. Repita a validação da Etapa 12 no ambiente de produção.
 
 ---
 
 ## Verificação final
 
 ```
+[ ] Nomes dos dois projetos escolhidos terminando em "-dev"/"-prod"
+    (obrigatório, ver aviso na Etapa 1)
 [ ] Dois projetos Google Cloud criados, com faturamento vinculado
 [ ] Banco de dados provisionado nos dois projetos
 [ ] Arquivos de configuração ajustados e publicados no repositório
 [ ] Base de implantação preparada (dois ambientes)
 [ ] Segredos do GitHub configurados
+[ ] Aprovação obrigatória de produção configurada (Etapa 5)
 [ ] Primeira implantação de teste confirmada com sucesso
 [ ] Permissões internas concedidas nos dois projetos
 [ ] Login configurado (teste e produção, credenciais separadas)
 [ ] Credenciais de login guardadas no cofre (dois ambientes)
 [ ] Primeiro administrador criado
 [ ] Ambiente de teste validado — login e área administrativa funcionando
+[ ] Atualização de produção aprovada manualmente (Etapa 13)
 [ ] Ambiente de produção validado — login e área administrativa funcionando
 ```
 

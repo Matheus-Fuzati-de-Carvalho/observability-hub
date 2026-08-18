@@ -70,6 +70,19 @@ agora — todo o restante deste playbook assume que você já decidiu os
 dois nomes (ex: `acme-hub-dev` / `acme-hub-prod`) e vai substituí-los
 consistentemente nos arquivos listados no passo 6.
 
+> ⚠️ **Requisito obrigatório, não só convenção**: os dois `project_id`
+> precisam terminar literalmente em `-dev` e `-prod` (ex:
+> `acme-hub-dev`/`acme-hub-prod`, `qualquercoisa-dev`/`qualquercoisa-prod`
+> — o prefixo é livre, o sufixo não). `apps/backend/src/observability_hub/
+> core/secrets.py::_is_prod()` decide qual par de secrets OAuth ler
+> (`GOOGLE_OAUTH_CLIENT_ID_DEV` vs. `_PROD`) checando literalmente se
+> `project_id.endswith("-prod")` — é o único lugar do código que depende
+> disso, mas se os nomes escolhidos não seguirem esse padrão (ex:
+> `acme-homologacao`/`acme-producao`), o backend de "prod" vai
+> silenciosamente ler os secrets de "_DEV" pra sempre, sem erro nenhum, e
+> o login vai falhar de um jeito confuso de debugar. Não é negociável —
+> escolha nomes terminados em `-dev`/`-prod`.
+
 ---
 
 ## 4. Criar os projetos GCP e vincular billing
@@ -178,7 +191,7 @@ terraform output service_account_email
 
 ---
 
-## 8. Configurar os secrets do GitHub Actions
+## 8. Configurar os secrets do GitHub Actions e o gate de aprovação de prod
 
 Quatro secrets no repositório (Settings → Secrets and variables →
 Actions), usando os outputs do passo 7:
@@ -191,6 +204,31 @@ gh secret set WIF_SA_PROD --body "<service_account_email de prod>"
 ```
 
 Sem isso, todo workflow falha no primeiro passo (`google-github-actions/auth`).
+
+### 8.1 Gate de aprovação manual em prod (não é opcional — os workflows já esperam por ele)
+
+Desde 2026-08-18, `backend-deploy-prod.yml` e `frontend-deploy-prod.yml`
+declaram `environment: production` no job de deploy (ver `CLAUDE.md`,
+"CI/CD e deploy") — deploy de app em prod não roda mais sozinho a cada
+push em `main`, ele fica **parado em "Waiting"** até alguém aprovar.
+Isso é só metade da configuração: o outro lado é um **GitHub Environment**
+chamado exatamente `production`, com "required reviewers", que precisa
+ser criado nas *Settings* deste novo repositório (não é algo que o
+Terraform ou o código gerencia):
+
+1. **Settings → Environments → New environment**
+2. Nome: **`production`** (exatamente esse nome — é o que os workflows
+   referenciam)
+3. Marque **"Required reviewers"** e adicione quem deve aprovar deploys
+   de prod
+4. Save protection rules
+
+Se você pular este passo, os workflows continuam funcionando — só que
+**sem gate nenhum**: `environment: production` sem uma regra de proteção
+configurada não bloqueia nada, o job roda direto. `terraform-apply-
+prod.yml` (aplica infra) continua automático de propósito, mesmo com
+esse gate configurado — só os dois deploys de app são afetados (decisão
+consciente, ver `CLAUDE.md`).
 
 ---
 
@@ -375,12 +413,17 @@ para `{PROJETO_PROD}`.
 Depois de validar dev:
 
 1. Merge/push da branch com os arquivos do passo 6 para `main` — dispara
-   `terraform-apply-prod.yml` (cria os serviços Cloud Run de prod) e, em
-   seguida, `backend-deploy-prod.yml`/`frontend-deploy-prod.yml`.
-2. Repita os passos 10 (roles manuais), 11 (OAuth client de prod — client
+   `terraform-apply-prod.yml` (cria os serviços Cloud Run de prod,
+   automático) e, em seguida, `backend-deploy-prod.yml`/
+   `frontend-deploy-prod.yml`.
+2. **Os dois deploys de app ficam em "Waiting"** se o passo 8.1 foi
+   configurado — abra a aba *Actions* do repositório, clique no run
+   parado, **Review deployments → Approve and deploy**. Sem isso os dois
+   jobs nunca terminam (não é erro, é o gate funcionando).
+3. Repita os passos 10 (roles manuais), 11 (OAuth client de prod — client
    **separado** do de dev), 12 (secrets `_PROD`) e 14 (seed do primeiro
    admin) apontando para `{PROJETO_PROD}`.
-3. Repita a validação do passo 15 na URL de prod.
+4. Repita a validação do passo 15 na URL de prod.
 
 ---
 
@@ -397,6 +440,8 @@ servindo de alvo um do outro, como o par original faz), siga
 ## Checklist final
 
 ```
+[ ] project_id de dev e prod escolhidos terminando literalmente em
+    "-dev"/"-prod" (obrigatório, ver passo 3 — não só convenção)
 [ ] Projetos GCP criados e billing vinculado (dev + prod)
 [ ] Firestore Native mode provisionado nos dois projetos
 [ ] Arquivos do passo 6 editados e commitados (project_id, bucket de
@@ -405,6 +450,9 @@ servindo de alvo um do outro, como o par original faz), siga
     capturados
 [ ] 4 secrets do GitHub Actions configurados (WIF_PROVIDER_DEV/PROD,
     WIF_SA_DEV/PROD)
+[ ] Environment "production" criado nas Settings do GitHub com
+    required reviewers (passo 8.1) — sem isso os deploys de app em prod
+    não têm gate nenhum
 [ ] Primeiro apply de environments/dev confirmado com sucesso
 [ ] roles/datastore.user + roles/secretmanager.secretAccessor concedidas
     à backend-run em cada projeto
@@ -416,6 +464,8 @@ servindo de alvo um do outro, como o par original faz), siga
 [ ] Primeiro admin criado via scripts/seed_admin.py (dev)
 [ ] Login + /admin validados ponta a ponta em dev
 [ ] Passos 9–14 repetidos para prod
+[ ] Deploys de app em prod aprovados manualmente (Review deployments),
+    se o gate do passo 8.1 estiver configurado
 [ ] Login + /admin validados ponta a ponta em prod
 ```
 
@@ -434,6 +484,9 @@ Baseado em incidentes reais já registrados em `CHANGELOG.md` (Fase 1):
 | Backend sobe mas todo endpoint autenticado falha (`/auth/me`, favoritos, admin) | Passo 10 (roles `datastore.user`/`secretmanager.secretAccessor`) não foi feito | Conceder as duas roles à `backend-run@{projeto}` |
 | Login falha na troca do código OAuth | Redirect URI cadastrado no Google Console não bate com a URL real do frontend, ou o secret errado (`_DEV` num projeto, `_PROD` no outro) | Conferir passo 11 (as 2 URLs por ambiente) e que cada projeto lê o par de secrets com o sufixo certo |
 | `/admin` não abre para ninguém | `scripts/seed_admin.py` (passo 14) não foi rodado nesse projeto | Rodar o script apontando pro `project_id` certo |
+| Login funciona em dev mas nunca em prod (ou vice-versa), sem erro claro | `project_id` de prod não termina em `-prod` (ou o de dev não termina em `-dev`) — `core/secrets.py::_is_prod()` sempre resolveu pro par de secrets errado | Ver o aviso obrigatório do passo 3 — não tem correção sem renomear o projeto ou (não recomendado) editar `_is_prod()` |
+| Deploy de app em prod nunca termina, fica "Waiting" indefinidamente no Actions | Gate de aprovação do passo 8.1 configurado, mas ninguém aprovou ainda | Abrir o run → Review deployments → Approve and deploy (é o comportamento esperado, não é erro) |
+| Deploy de app em prod roda sozinho, sem pedir aprovação, mesmo tendo criado o environment "production" | Nome do environment não é exatamente `production`, ou "Required reviewers" não foi marcado nas Settings | Revisar passo 8.1 — o nome precisa bater com `environment: production` do YAML |
 
 ---
 

@@ -3,7 +3,10 @@
 **Objetivo:** checklist completo de tudo que precisa ser configurado em um
 projeto GCP "alvo" (projeto de cliente, ou qualquer projeto que não seja
 `observability-hub-dev`/`observability-hub-prod`) para que o Hub consiga
-observá-lo — catálogo, freshness, profiling e lineage/tabelas órfãs.
+observá-lo — os oito domínios (catálogo, freshness, profiling/qualidade,
+lineage/tabelas órfãs, fingerprinting de PII, mapa de acesso, FinOps e
+Cloud Storage, ver `CLAUDE.md`) usam exatamente as roles e APIs listadas
+abaixo, sem exceção nem role extra por domínio.
 
 Modelo de acesso: **Modelo A — service account com acesso cross-project**
 (ver [ADR-006](adr/ADR-006-cross-project.md)). O Hub nunca instala nada no
@@ -47,11 +50,11 @@ domínio hoje opera com IAM a nível de dataset ou tabela):
 
 | Role | Por quê | Domínio(s) que usa |
 |---|---|---|
-| `roles/bigquery.metadataViewer` | Ler `INFORMATION_SCHEMA` (schemas, tabelas, colunas, particionamento) | catalog, freshness, lineage (`discover_regions`) |
-| `roles/bigquery.jobUser` | Executar queries — inclusive as de `INFORMATION_SCHEMA`, que rodam como job no BigQuery | catalog, freshness, quality, lineage |
-| `roles/bigquery.dataViewer` | Ler dados reais de tabela (amostragem, contagem de nulos/duplicatas, valores distintos) | quality (profiling e histórico) |
-| `roles/logging.viewer` | Chamar a API de Cloud Logging sem 403 — sozinha **não é suficiente** pra ver Data Access audit logs, ver nota abaixo | lineage (tabelas órfãs, upstream/downstream); mapa de acesso quando implementado |
-| `roles/logging.privateLogViewer` | Ver especificamente os **Data Access audit logs** — é onde vive o `jobCompletedEvent` que lineage lê; sem essa role a chamada não falha, só retorna sempre vazio | idem |
+| `roles/bigquery.metadataViewer` | Ler `INFORMATION_SCHEMA` (schemas, tabelas, colunas, particionamento) | catalog, freshness, quality, pii, lineage (`discover_regions`) |
+| `roles/bigquery.jobUser` | Executar queries — inclusive as de `INFORMATION_SCHEMA`, que rodam como job no BigQuery | catalog, freshness, quality, pii, lineage, finops |
+| `roles/bigquery.dataViewer` | Ler dados reais de tabela (amostragem, contagem de nulos/duplicatas, valores distintos, fingerprinting de PII via `TABLESAMPLE`, sugestão de tipo de coluna) | quality (profiling e histórico), pii, finops (column-type suggestions) |
+| `roles/logging.viewer` | Chamar a API de Cloud Logging sem 403 — sozinha **não é suficiente** pra ver Data Access audit logs, ver nota abaixo | lineage (tabelas órfãs, upstream/downstream), access (mapa de acesso), finops (budget, scanner de desperdício) |
+| `roles/logging.privateLogViewer` | Ver especificamente os **Data Access audit logs** — é onde vive o `jobCompletedEvent` que lineage/access/finops leem; sem essa role a chamada não falha, só retorna sempre vazio | idem |
 | `roles/storage.bucketViewer` | Listar/ler metadado de **bucket** (nome, storage class, região, lifecycle rule) — `storage.objectViewer` **não** cobre isso (só objeto), confirmado em dev 2026-08-17, ver `docs/specs/storage.md` seção 8 | storage (catálogo) |
 | `roles/storage.objectViewer` | Ler metadado + conteúdo de **objeto** dentro de um bucket já conhecido — nenhuma role nova pra lineage, o audit log de load/extract já vive dentro do `bigquery_resource`/`data_access` já lido pelas duas roles de logging acima | storage (freshness, waste scanner) |
 
@@ -157,8 +160,13 @@ motivo.
 
 - Nenhum agente, VM ou service account do lado do cliente rodando código —
   o Hub só lê, via API, a partir de fora do projeto.
-- `roles/billing.viewer` / Cloud Billing — não é necessário ainda; domínio
-  FinOps não implementado (ver CLAUDE.md, tabela de domínios).
+- `roles/billing.viewer` / Cloud Billing API — FinOps (budget, scanner de
+  desperdício) estima custo a partir de `totalBilledBytes` dos audit logs
+  de job (já cobertos pelas roles de `logging.*` acima) + preço público
+  on-demand do BigQuery, nunca do Cloud Billing Export real — decisão
+  documentada em `docs/specs/finops-budget.md` ("Billing Export só quebra
+  custo por projeto+SKU, nunca por dataset/tabela — não resolveria a
+  pergunta que a feature responde").
 - Secret Manager, Artifact Registry, Cloud Run, Firestore — recursos
   internos do Hub, vivem só em `observability-hub-{dev,prod}`, nunca no
   projeto alvo.

@@ -54,15 +54,18 @@ e-mail da SA muda de acordo — confirme com
 
 ```bash
 gcloud services enable bigquery.googleapis.com logging.googleapis.com \
-  --project={PROJECT_ID}
+  storage.googleapis.com --project={PROJECT_ID}
 ```
 
 `logging.googleapis.com` é necessário mesmo sem intenção de gerar logs —
-é o transporte que lineage (e o mapa de acesso) lê.
+é o transporte que lineage, mapa de acesso e FinOps leem.
+`storage.googleapis.com` só é necessário se o cliente for usar o domínio
+`storage` (catálogo/waste scanner de Cloud Storage e a extensão de
+lineage que usa bucket como nó) — pule se não for o caso.
 
 ---
 
-## 4. Conceder as 5 roles IAM à service account do Hub
+## 4. Conceder as 7 roles IAM à service account do Hub
 
 ```bash
 SA_EMAIL="backend-run@observability-hub-prod.iam.gserviceaccount.com"  # ou -dev
@@ -81,31 +84,47 @@ gcloud projects add-iam-policy-binding {PROJECT_ID} \
 
 gcloud projects add-iam-policy-binding {PROJECT_ID} \
   --member="serviceAccount:${SA_EMAIL}" --role="roles/logging.privateLogViewer"
+
+# As duas de baixo só se o cliente for usar o domínio storage (seção 3 acima)
+gcloud projects add-iam-policy-binding {PROJECT_ID} \
+  --member="serviceAccount:${SA_EMAIL}" --role="roles/storage.bucketViewer"
+
+gcloud projects add-iam-policy-binding {PROJECT_ID} \
+  --member="serviceAccount:${SA_EMAIL}" --role="roles/storage.objectViewer"
 ```
 
 Todos idempotentes — seguro rodar de novo. Resumo do que cada uma libera:
 
 | Role | Pra quê |
 |---|---|
-| `bigquery.metadataViewer` | Catálogo (schemas/tabelas/colunas), freshness, descoberta de região |
-| `bigquery.jobUser` | Rodar as queries acima (inclusive `INFORMATION_SCHEMA`, que roda como job) |
-| `bigquery.dataViewer` | Profiling (amostragem, nulos, duplicatas, valores distintos) |
+| `bigquery.metadataViewer` | Catálogo, freshness, PII (heurística de nome), descoberta de região |
+| `bigquery.jobUser` | Rodar as queries acima e as do FinOps (inclusive `INFORMATION_SCHEMA`, que roda como job) |
+| `bigquery.dataViewer` | Profiling, PII (amostragem via `TABLESAMPLE`), sugestão de tipo de coluna do FinOps |
 | `logging.viewer` | Chamar a API de Cloud Logging sem 403 — **sozinha não mostra Data Access audit logs**, ver linha abaixo |
-| `logging.privateLogViewer` | Ver especificamente os Data Access audit logs (lineage, tabelas órfãs, mapa de acesso) |
+| `logging.privateLogViewer` | Ver especificamente os Data Access audit logs (lineage, tabelas órfãs, mapa de acesso, FinOps) |
+| `storage.bucketViewer` | Listar/ler metadado de bucket (nome, storage class, região, lifecycle rule) — só domínio `storage` |
+| `storage.objectViewer` | Ler metadado + conteúdo de objeto dentro de um bucket já conhecido — só domínio `storage` |
 
-> ⚠️ **A pegadinha mais cara de repetir:** `logging.viewer` sozinha não
-> falha e não avisa nada — a API responde 200, só que a lista de eventos
-> Data Access vem sempre vazia. Sem `logging.privateLogViewer` junto,
-> lineage/tabelas órfãs parecem "sem atividade" mesmo com dados reais.
-> As duas roles são obrigatórias **juntas**.
+> ⚠️ **As duas pegadinhas mais caras de repetir:**
+> 1. `logging.viewer` sozinha não falha e não avisa nada — a API responde
+>    200, só que a lista de eventos Data Access vem sempre vazia. Sem
+>    `logging.privateLogViewer` junto, lineage/tabelas órfãs/mapa de
+>    acesso/FinOps parecem "sem atividade" mesmo com dados reais.
+> 2. `storage.objectViewer` sozinha **não lista buckets** — só cobre
+>    `storage.objects.*`. Sem `storage.bucketViewer` junto, o catálogo de
+>    buckets (a primeira chamada do domínio `storage`) responde 403.
+>
+> Em ambos os casos, as duas roles do par são obrigatórias **juntas**.
 
 ---
 
-## 5. Habilitar Data Access audit logs do BigQuery
+## 5. Habilitar Data Access audit logs
 
-Só necessário se o cliente for usar **lineage, tabelas órfãs ou mapa de
-acesso**. Sem isso, esses endpoints respondem `200 OK` com lista vazia —
-não erra, só fica sempre sem dado.
+### 5.1 BigQuery — sempre relevante
+
+Só necessário se o cliente for usar **lineage, tabelas órfãs, mapa de
+acesso ou FinOps**. Sem isso, esses endpoints respondem `200 OK` com
+lista vazia — não erra, só fica sempre sem dado.
 
 **Via console (mais simples):** IAM & Admin → Audit Logs → localizar
 "BigQuery API" → marcar "Data Read" e "Data Write" → Save.
@@ -134,6 +153,31 @@ gcloud projects get-iam-policy {PROJECT_ID} --format=json > policy.json
 ```bash
 gcloud projects set-iam-policy {PROJECT_ID} policy.json
 ```
+
+### 5.2 Cloud Storage — opcional, só domínio `storage`
+
+Só necessário pra checagem de "sem leitura confirmada" do scanner de
+desperdício de buckets (`confidence: "usage_confirmed"`, ver
+`docs/specs/storage.md` seção 6.2). Sem essa config, o scanner degrada
+graciosamente pra checagem só de configuração — não é bloqueante.
+
+Mesclar (não substituir) mais este bloco em `auditConfigs`, junto do de
+BigQuery acima:
+
+```json
+{
+  "service": "storage.googleapis.com",
+  "auditLogConfigs": [
+    { "logType": "DATA_READ" }
+  ]
+}
+```
+
+> ⚠️ **Atenção de volume**: diferente do audit log de job do BigQuery
+> (um evento por job, volume baixo), `DATA_READ` de Cloud Storage gera um
+> evento **por leitura de objeto** — pode ser volume alto num bucket de
+> tráfego real. Medir o volume esperado antes de habilitar num projeto
+> de produção de cliente.
 
 ---
 
@@ -174,8 +218,14 @@ gcloud projects set-iam-policy {PROJECT_ID} policy.json
 [ ] roles/logging.viewer concedida
 [ ] roles/logging.privateLogViewer concedida (sem ela, logging.viewer
     sozinha NÃO mostra Data Access audit logs — falha silenciosa)
-[ ] Data Access audit logs (DATA_READ + DATA_WRITE) habilitados —
-    só se for usar lineage/tabelas órfãs/mapa de acesso
+[ ] Data Access audit logs do BigQuery (DATA_READ + DATA_WRITE)
+    habilitados — só se for usar lineage/tabelas órfãs/mapa de acesso/FinOps
+[ ] storage.googleapis.com habilitada — só se for usar o domínio storage
+[ ] roles/storage.bucketViewer concedida — idem, sem ela o catálogo de
+    buckets responde 403 mesmo com objectViewer presente
+[ ] roles/storage.objectViewer concedida — idem
+[ ] Data Access audit log DATA_READ de storage.googleapis.com — opcional,
+    só pra confidence "usage_confirmed" do waste scanner; medir volume antes
 [ ] gcloud projects get-iam-policy confirmado (não só "rodei o comando")
 [ ] Linha registrada em docs/onboarding-cliente.md
 [ ] Testado na UI do Hub com um usuário já autorizado no ACL interno
@@ -205,6 +255,8 @@ gcloud projects set-iam-policy {PROJECT_ID} policy.json
 | Lineage/tabelas órfãs sempre "sem atividade", mesmo com dados reais | `logging.viewer` presente mas `logging.privateLogViewer` faltando — API responde 200, mas nunca mostra Data Access audit logs |
 | Lineage responde 403 em vez de vazio | Falta `logging.viewer` (erro `LoggingAccessDeniedError`, já sugere as duas roles de logging juntas) |
 | Tudo liberado mas ainda "sem atividade" | Confirmar se Data Access audit logs (seção 5) estão realmente habilitados — checar `auditConfigs` via `get-iam-policy`, não só assumir |
+| 403 `StorageAccessDeniedError` no catálogo de buckets (domínio `storage`) | Falta `roles/storage.bucketViewer` e/ou `roles/storage.objectViewer` — a própria resposta traz os dois comandos |
+| Waste scanner nunca mostra `confidence: "usage_confirmed"`, só `config_based`, com um aviso na resposta | Data Access audit log `DATA_READ` de `storage.googleapis.com` não habilitado (seção 5.2) — opcional, não bloqueia o resto do domínio |
 
 ---
 
