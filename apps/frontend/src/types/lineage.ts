@@ -4,11 +4,18 @@ export interface TableRef {
   table_id: string
 }
 
+export type LineageNodeType = 'table' | 'bucket'
+
 export interface LineageNode {
   id: string
-  project_id: string
-  dataset_id: string
-  table_id: string
+  type: LineageNodeType
+  // project_id/dataset_id/table_id só quando type="table"; bucket_name só
+  // quando type="bucket" — extensão de 2026-08-18 (bucket como nó, ver
+  // docs/specs/storage.md seção 7).
+  project_id: string | null
+  dataset_id: string | null
+  table_id: string | null
+  bucket_name: string | null
   hop_distance: number
   is_root: boolean
   access_denied: boolean

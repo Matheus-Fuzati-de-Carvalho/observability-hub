@@ -190,6 +190,129 @@ def test_parse_entry_treats_anonymous_dataset_destination_as_no_destination():
     assert event.referenced_tables == [("proj", "TRUSTED", "ga4_sessions")]
 
 
+# Payloads reais capturados ao vivo em observability-hub-dev
+# (2026-08-17/18, ver docs/specs/storage.md seção 7.1) — jobConfiguration
+# de LOAD (GCS -> BQ) e EXTRACT (BQ -> GCS), chaves irmãs de "query".
+REAL_LOAD_JOB_CONFIG = {
+    "load": {
+        "sourceUris": ["gs://observability-hub-dev-landing/crm_leads/2026-08-17/part-0001.csv"],
+        "destinationTable": {
+            "projectId": "observability-hub-dev",
+            "datasetId": "RAW",
+            "tableId": "crm_leads_staging",
+        },
+        "createDisposition": "CREATE_IF_NEEDED",
+        "writeDisposition": "WRITE_APPEND",
+    }
+}
+
+REAL_EXTRACT_JOB_CONFIG = {
+    "extract": {
+        "destinationUris": ["gs://observability-hub-dev-processed/exports/crm_leads_staging.csv"],
+        "sourceTable": {
+            "projectId": "observability-hub-dev",
+            "datasetId": "RAW",
+            "tableId": "crm_leads_staging",
+        },
+    }
+}
+
+
+def test_parse_bucket_name_extracts_first_segment():
+    assert repository._parse_bucket_name("gs://landing/crm_leads/part-0001.csv") == "landing"
+
+
+def test_parse_bucket_name_handles_wildcard_path():
+    """Seção 7.3 da spec: wildcard não testado ao vivo, mas a lógica não
+    depende do resto do path ser literal — só o primeiro segmento importa."""
+    assert repository._parse_bucket_name("gs://landing/crm_leads/*.csv") == "landing"
+
+
+@pytest.mark.parametrize("uri", [None, "", "https://not-gs-scheme/bucket/obj", "gs://"])
+def test_parse_bucket_name_returns_none_for_invalid_input(uri):
+    assert repository._parse_bucket_name(uri) is None
+
+
+def test_parse_bucket_names_dedupes_and_sorts():
+    uris = ["gs://b/x.csv", "gs://a/y.csv", "gs://b/z.csv"]
+    assert repository._parse_bucket_names(uris) == ["a", "b"]
+
+
+def test_parse_bucket_names_empty_for_none_or_empty_list():
+    assert repository._parse_bucket_names(None) == []
+    assert repository._parse_bucket_names([]) == []
+
+
+def test_parse_entry_extracts_source_bucket_from_real_load_payload():
+    payload = {
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobName": {"jobId": "load-job-1", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": REAL_LOAD_JOB_CONFIG,
+                    "jobStatistics": {},
+                }
+            }
+        }
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.destination_table == ("observability-hub-dev", "RAW", "crm_leads_staging")
+    assert event.source_buckets == ["observability-hub-dev-landing"]
+    assert event.destination_buckets == []
+
+
+def test_parse_entry_extracts_destination_bucket_and_source_table_from_real_extract_payload():
+    payload = {
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobName": {"jobId": "extract-job-1", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": REAL_EXTRACT_JOB_CONFIG,
+                    "jobStatistics": {},
+                }
+            }
+        }
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.destination_table is None
+    assert event.referenced_tables == [("observability-hub-dev", "RAW", "crm_leads_staging")]
+    assert event.destination_buckets == ["observability-hub-dev-processed"]
+    assert event.source_buckets == []
+
+
+def test_parse_entry_does_not_duplicate_extract_source_already_in_referenced_tables():
+    payload = {
+        "serviceData": {
+            "jobCompletedEvent": {
+                "job": {
+                    "jobName": {"jobId": "extract-job-2", "location": "US", "projectId": "proj"},
+                    "jobConfiguration": REAL_EXTRACT_JOB_CONFIG,
+                    "jobStatistics": {
+                        "referencedTables": [
+                            {
+                                "projectId": "observability-hub-dev",
+                                "datasetId": "RAW",
+                                "tableId": "crm_leads_staging",
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+
+    event = repository._parse_entry(_entry(payload))
+
+    assert event is not None
+    assert event.referenced_tables == [("observability-hub-dev", "RAW", "crm_leads_staging")]
+
+
 def test_parse_entry_returns_none_when_payload_is_not_a_dict():
     assert repository._parse_entry(_entry(None)) is None
     assert repository._parse_entry(_entry("not a dict")) is None

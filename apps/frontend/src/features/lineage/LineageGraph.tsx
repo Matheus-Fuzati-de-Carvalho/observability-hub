@@ -10,11 +10,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import dagre from 'dagre'
-import { Lock } from 'lucide-react'
+import { HardDrive, Lock } from 'lucide-react'
 import { useMemo } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import type { LineageGraphResponse } from '@/types/lineage'
+import type { LineageGraphResponse, LineageNode } from '@/types/lineage'
 
 interface LineageGraphProps {
   data: LineageGraphResponse
@@ -28,16 +28,31 @@ interface TableNodeData extends Record<string, unknown> {
   accessDenied: boolean
 }
 
+interface BucketNodeData extends Record<string, unknown> {
+  bucketName: string
+}
+
+type GraphNode = Node<TableNodeData> | Node<BucketNodeData>
+
 const NODE_WIDTH = 220
 const NODE_HEIGHT = 56
 
+function buildBucketNode(n: LineageNode): Node<BucketNodeData> {
+  return {
+    id: n.id,
+    type: 'bucketNode',
+    position: { x: 0, y: 0 },
+    data: { bucketName: n.bucket_name ?? '' },
+  }
+}
+
 function buildElements(data: LineageGraphResponse): {
-  nodes: Node<TableNodeData>[]
+  nodes: GraphNode[]
   edges: Edge[]
 } {
   const rootId = `${data.root.project_id}:${data.root.dataset_id}:${data.root.table_id}`
 
-  const nodes: Node<TableNodeData>[] = [
+  const nodes: GraphNode[] = [
     {
       id: rootId,
       type: 'tableNode',
@@ -50,18 +65,21 @@ function buildElements(data: LineageGraphResponse): {
         accessDenied: false,
       },
     },
-    ...data.nodes.map((n) => ({
-      id: n.id,
-      type: 'tableNode',
-      position: { x: 0, y: 0 },
-      data: {
-        projectId: n.project_id,
-        datasetId: n.dataset_id,
-        tableId: n.table_id,
-        isRoot: false,
-        accessDenied: n.access_denied,
-      },
-    })),
+    ...data.nodes.map((n): GraphNode => {
+      if (n.type === 'bucket') return buildBucketNode(n)
+      return {
+        id: n.id,
+        type: 'tableNode',
+        position: { x: 0, y: 0 },
+        data: {
+          projectId: n.project_id ?? '',
+          datasetId: n.dataset_id ?? '',
+          tableId: n.table_id ?? '',
+          isRoot: false,
+          accessDenied: n.access_denied,
+        },
+      }
+    }),
   ]
 
   const edges: Edge[] = data.edges.map((e) => ({
@@ -73,7 +91,7 @@ function buildElements(data: LineageGraphResponse): {
   return { nodes, edges }
 }
 
-function layout(nodes: Node<TableNodeData>[], edges: Edge[]): Node<TableNodeData>[] {
+function layout(nodes: GraphNode[], edges: Edge[]): GraphNode[] {
   const graph = new dagre.graphlib.Graph()
   graph.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 80 })
   graph.setDefaultEdgeLabel(() => ({}))
@@ -125,7 +143,24 @@ function LineageTableNode({ data }: NodeProps<Node<TableNodeData>>) {
   )
 }
 
-const nodeTypes = { tableNode: LineageTableNode }
+// Bucket é sempre folha no grafo (nunca é root, nunca access_denied — ver
+// docs/specs/storage.md seção 7.2) — estilo visualmente distinto (ícone +
+// cor) reaproveitando a identidade do grupo "Cloud Storage" da sidebar.
+function LineageBucketNode({ data }: NodeProps<Node<BucketNodeData>>) {
+  return (
+    <div
+      style={{ width: NODE_WIDTH }}
+      className="flex items-center gap-1.5 rounded-lg border border-status-ok/30 bg-status-ok/10 px-3 py-2 text-xs"
+    >
+      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+      <HardDrive size={12} className="shrink-0" />
+      <span className="truncate">{data.bucketName}</span>
+      <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
+    </div>
+  )
+}
+
+const nodeTypes = { tableNode: LineageTableNode, bucketNode: LineageBucketNode }
 
 export function LineageGraph({ data }: LineageGraphProps) {
   const { nodes, edges } = useMemo(() => {

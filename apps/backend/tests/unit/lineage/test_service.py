@@ -7,12 +7,20 @@ from observability_hub.domains.lineage import service
 from observability_hub.domains.lineage.repository import JobEvent
 
 
-def _event(referenced, destination, job_id="job1"):
+def _event(
+    referenced,
+    destination,
+    job_id="job1",
+    source_buckets=(),
+    destination_buckets=(),
+):
     return JobEvent(
         job_id=job_id,
         principal_email="a@dp6.com.br",
         referenced_tables=referenced,
         destination_table=destination,
+        source_buckets=list(source_buckets),
+        destination_buckets=list(destination_buckets),
     )
 
 
@@ -309,6 +317,125 @@ def test_get_table_lineage_dedupes_repeated_job_edges(monkeypatch):
     result = service.get_table_lineage(client, logging_client, "proj", "GOLD", "b")
 
     assert len(result.edges) == 1
+
+
+# --- get_table_lineage — bucket como nó (docs/specs/storage.md seção 7) -----
+
+
+def test_get_table_lineage_finds_bucket_upstream_via_load(monkeypatch):
+    client = MagicMock()
+    logging_client = MagicMock()
+    events = [
+        _event(
+            referenced=[],
+            destination=("proj", "RAW", "crm_leads_staging"),
+            source_buckets=["landing"],
+        )
+    ]
+    monkeypatch.setattr(service.repository, "list_job_events", _events_by_project({"proj": events}))
+
+    result = service.get_table_lineage(client, logging_client, "proj", "RAW", "crm_leads_staging")
+
+    assert len(result.nodes) == 1
+    node = result.nodes[0]
+    assert node.type == "bucket"
+    assert node.bucket_name == "landing"
+    assert node.hop_distance == -1
+    assert node.dataset_id is None
+    assert result.edges == [
+        service.LineageEdge(
+            source="bucket:landing", target="proj:RAW:crm_leads_staging", job_id="job1"
+        )
+    ]
+
+
+def test_get_table_lineage_finds_bucket_downstream_via_extract(monkeypatch):
+    client = MagicMock()
+    logging_client = MagicMock()
+    events = [
+        _event(
+            referenced=[("proj", "RAW", "crm_leads_staging")],
+            destination=None,
+            destination_buckets=["processed"],
+        )
+    ]
+    monkeypatch.setattr(service.repository, "list_job_events", _events_by_project({"proj": events}))
+
+    result = service.get_table_lineage(client, logging_client, "proj", "RAW", "crm_leads_staging")
+
+    assert len(result.nodes) == 1
+    node = result.nodes[0]
+    assert node.type == "bucket"
+    assert node.bucket_name == "processed"
+    assert node.hop_distance == 1
+    assert result.edges == [
+        service.LineageEdge(
+            source="proj:RAW:crm_leads_staging", target="bucket:processed", job_id="job1"
+        )
+    ]
+
+
+def test_get_table_lineage_bucket_node_never_expands_further(monkeypatch):
+    """Decisão tomada com o usuário (docs/specs/storage.md seção 7.2):
+    bucket é sempre folha — mesmo que outro job qualquer no MESMO projeto
+    leia do bucket alcançado, essa segunda aresta não deve aparecer no
+    grafo, porque a travessia nunca tenta expandir a partir de um nó
+    bucket."""
+    client = MagicMock()
+    logging_client = MagicMock()
+    events = [
+        # root -> extract -> bucket "processed"
+        _event(
+            referenced=[("proj", "RAW", "crm_leads_staging")],
+            destination=None,
+            destination_buckets=["processed"],
+            job_id="extract-job",
+        ),
+        # outro job, no mesmo projeto, carrega de "processed" pra outra
+        # tabela -- não deveria aparecer, porque bucket não expande.
+        _event(
+            referenced=[],
+            destination=("proj", "GOLD", "should_not_appear"),
+            source_buckets=["processed"],
+            job_id="load-job",
+        ),
+    ]
+    monkeypatch.setattr(service.repository, "list_job_events", _events_by_project({"proj": events}))
+
+    result = service.get_table_lineage(
+        client, logging_client, "proj", "RAW", "crm_leads_staging", max_hops=8
+    )
+
+    node_ids = {n.id for n in result.nodes}
+    assert node_ids == {"bucket:processed"}
+    assert "proj:GOLD:should_not_appear" not in node_ids
+
+
+def test_get_table_lineage_bucket_root_side_ignores_unrelated_bucket_events(monkeypatch):
+    """Só o bucket que participa do job de load/extract da tabela raiz
+    deve virar nó — outro bucket sem relação, mesmo no mesmo evento de
+    outro job, não deve vazar pro grafo."""
+    client = MagicMock()
+    logging_client = MagicMock()
+    events = [
+        _event(
+            referenced=[],
+            destination=("proj", "RAW", "crm_leads_staging"),
+            source_buckets=["landing"],
+            job_id="load-job",
+        ),
+        _event(
+            referenced=[],
+            destination=("proj", "OTHER", "unrelated"),
+            source_buckets=["some-other-bucket"],
+            job_id="unrelated-job",
+        ),
+    ]
+    monkeypatch.setattr(service.repository, "list_job_events", _events_by_project({"proj": events}))
+
+    result = service.get_table_lineage(client, logging_client, "proj", "RAW", "crm_leads_staging")
+
+    assert {n.id for n in result.nodes} == {"bucket:landing"}
 
 
 # --- get_orphans ------------------------------------------------------------

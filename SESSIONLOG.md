@@ -7,50 +7,256 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-13 — Sprint 3.2 em andamento (5 de 7 itens
-concluídos e commitados; itens 4 e 5 aguardando validação do usuário em
-dev). Sprint 3.1 (auth Google OAuth, favoritos, histórico, 4 fixes no
-modal de profiling) foi concluída e mergeada em `main` via PR #17 antes
-desta sessão — ver seção própria abaixo, reconstruída a partir do PR
-porque o SESSIONLOG não foi atualizado naquela sessão.
-**Fase atual:** Sprint 3.2 — Qualidade, Discovery e melhorias de UX em
-tabelas (Fase 3 do CLAUDE.md, "Discovery"), branch `feat/sprint-3.2`
-(a partir de `main` `44ad7c9`), commits `5516b36`..`28f1f7f`:
+**Última atualização:** 2026-08-18 — sessão de implementação do domínio
+`storage` (Cloud Storage), do zero até validado em dev, 4 itens
+completos. Sessão anterior (2026-08-17) tinha reconstruído este arquivo
+depois de 4 dias sem atualização (ver seção "Storage — domínio novo"
+abaixo, "Falha de processo" — os commits dessa reconstrução ficaram
+presos numa branch errada e quase se perderam de novo; corrigido nesta
+sessão com um merge explícito).
 
-1. ✅ Filtros/ordenação — catálogo (`AssetsTable`) e freshness por tabela
-   (`TableFreshnessTable`), depois estendido pra freshness por dataset
-   (`DatasetFreshnessTable`)
-2. ✅ Score de qualidade por tabela — implementado, validado em dev, e
-   **removido por completo a pedido do usuário** (revert `59d4ae8`)
-   antes de seguir pro item de histórico
-3. ✅ Histórico de qualidade — aba "Histórico" no modal de profiling
-   (`recharts`, alerta de degradação >10pp) — validado em dev
-4. ✅ Lineage e tabelas órfãs — aba "Lineage" no modal + página "Tabelas
-   órfãs" — **implementado e testado (302 testes, build limpo), ainda
-   não validado visualmente em dev pelo usuário**
-5. ⏳ Fingerprinting de PII — não iniciado
-6. ⏳ Mapa de acesso — não iniciado
+**Estado real agora:** domínio `storage` (Cloud Storage) implementado
+por completo — catálogo de buckets, scanner de desperdício (config +
+uso real via audit log), extensão do lineage (bucket como nó) — na
+branch `feat/storage-mvp` (a partir de `main` pós-PR #24), commits
+`02adc81`..`ec0ae14`. **Todos os 4 itens validados em dev pelo usuário**,
+incluindo o grafo de lineage real (`RAW.crm_leads_staging` com bucket
+`landing` upstream e `processed` downstream, jobs LOAD/EXTRACT reais).
 
-Ver seção "Sprint 3.2" abaixo para o detalhe de cada item (o número da
-lista acima segue a ordem de execução real desta sessão, não
-necessariamente a numeração original da spec).
-**Próximo passo:** usuário está revalidando lineage/órfãs em dev depois do
-fix de `c33f950` (bug de "Failed to fetch" ao olhar prod a partir de dev —
-ver seção "Bug: lineage cross-project" abaixo) e do IAM cross-project de
-`roles/logging.viewer` concedido nesta sessão. Depois da validação, seguir
-pro item de PII — versão resumida da spec antes de implementar (preferência
-já confirmada pelo usuário nesta sprint), sem spec formal em `docs/specs/`
-ainda (fica pra documentação de encerramento da sprint, junto com lineage e
-mapa de acesso). **Nenhum PR aberto** para `main` — aguardando os 7 itens
-completos e validados, como pedido explicitamente no início da sprint.
-`main`/prod seguem no PR #17 (`44ad7c9`), inalterados por esta sessão.
-`docs/onboarding-cliente.md` (novo) e a seção "Registro de acessos e
-configurações" do CLAUDE.md (nova) não fazem parte da spec da sprint —
-foram um pedido à parte do usuário nesta sessão, já commitados/aplicados.
+**Promoção pra prod concluída nesta mesma sessão** (checklist completo
+na seção "Storage — domínio novo" abaixo): IAM self+cross das duas roles
+de storage nos dois projetos, 3 buckets mock em prod espelhando dev
+(landing com lifecycle rule, processed, archive), objeto mock + jobs
+LOAD/EXTRACT reais (`RAW.crm_leads_staging` populada), e — decisão do
+usuário — Data Access audit log `DATA_READ` de `storage.googleapis.com`
+também habilitado em prod (não só dev). Tudo confirmado ao vivo via
+`gcloud`/`bq`, não assumido. **Só falta abrir o PR de `feat/storage-mvp`
+→ `main`** — não aberto ainda nesta sessão, sem pedido explícito do
+usuário pra abrir.
+
+**Item resolvido nesta sessão**: a mudança não commitada em
+`infra/terraform/modules/cloud-run/variables.tf` (`max_instance_count`
+2→5, registrada como pendente na atualização anterior) foi **descartada**
+por decisão do usuário (`git restore`) — sem justificativa encontrada
+nos logs do Cloud Run (nenhum sinal de estar batendo no teto de 2
+instâncias), não fazia parte de nenhum trabalho desta sessão.
+
+Ver a seção "Storage — domínio novo" abaixo pra todo o detalhe técnico
+(decisões de desenho, bugs reais encontrados em dev, payloads reais de
+audit log capturados). As seções anteriores (Sprint 3.2, FinOps, Admin
+ACL, Documentação para cliente) continuam válidas — nada mudou nelas
+nesta sessão, só ficaram mais antigas na lista.
+
+**Próximo passo:** abrir o PR de `feat/storage-mvp` → `main` — todo o
+resto do checklist (dev, prod, docs) está fechado. Depois do merge,
+confirmar deploy automático de prod verde (`gh run list`) e validar
+visualmente as 4 funcionalidades em prod (sem ferramenta de browser
+neste sandbox — validação visual sempre do usuário).
 
 ---
 
-## Sprint 3.2 — Qualidade, Discovery e melhorias de UX (em andamento)
+## Storage — domínio novo (Fase 5, branch `feat/storage-mvp`, concluída)
+
+Primeira expansão do Hub pra além do BigQuery — spec completa em
+`docs/specs/storage.md` (v1.0 → v1.1 ao longo desta sessão). Regras de
+execução (mesmas de sempre, confirmadas no início): plano resumido antes
+de cada item, `pytest` depois de cada domínio backend tocado, testar em
+dev antes do próximo item, commit por item, push só com aprovação
+explícita a cada vez, sem PR pra `main` até os 4 itens validados.
+
+### Decisões de abertura (seção 10 da spec)
+Três pontos abertos, confirmados com o usuário antes de qualquer código:
+nome do domínio `domains/storage` (sem colisão encontrada no repo),
+rótulo da sidebar "Cloud Storage" (não "GCS"), threshold default do
+waste scanner 60 dias. Branch `feat/storage-mvp` a partir de `main`
+atualizada (local estava desatualizada, `git fetch && git pull`
+necessário antes de criar a branch).
+
+### Item 1 — Catálogo de buckets (commits `02adc81`, `133736f`)
+`GET /api/v1/storage/{project}/buckets`. `core/storage_client.py` novo
+(client + cache TTL 5min de listagem de objetos, mesmo padrão de
+`core/bigquery.py`). `has_lifecycle_rule` via `bucket.lifecycle_rules`;
+tamanho total/contagem via listagem de objetos (não há campo agregado
+nativo no bucket). Novo `SidebarServiceGroup` "Cloud Storage".
+
+**Bug real em dev**: `roles/storage.objectViewer` (única role prevista
+na v1 da spec) devolveu 403 mesmo concedida — `gcloud iam roles describe`
+confirmou que ela cobre só `storage.objects.*`/`storage.folders.*`/
+`storage.managedFolders.*`, **sem** `storage.buckets.list`/`storage.
+buckets.get`. `list_buckets()` (a primeira chamada do domínio) precisa
+também de `roles/storage.bucketViewer` (role dedicada, só metadado de
+bucket). Corrigido no handler de 403 (`StorageAccessDeniedError` sugere
+as duas juntas) e no checklist de `docs/onboarding-cliente.md`. Grant
+self em dev confirmado ao vivo via `gcloud projects get-iam-policy`
+depois do usuário rodar o comando.
+
+### Item 2 — Freshness: implementada, validada, depois descartada (commits `98bee27`, `7dd64e0`)
+V1: endpoint dedicado (`GET .../buckets/{bucket}/freshness`), botão "Ver
+freshness" sob demanda (mesmo padrão de `PartitionsDialog` do catálogo),
+`last_modified` = `max(customTime ou updated)` entre os **objetos** do
+bucket. Implementada e validada em dev — e então o usuário pediu pra
+trocar por algo mais simples: `time_created`/`updated` do próprio
+`Bucket` (metadado nativo, já vem de graça no `list_buckets()` do item
+1) como duas colunas direto na tabela, sem endpoint/dialog separado.
+
+Diferença semântica registrada explicitamente na spec (seção 5):
+`Bucket.updated` é quando a **configuração** mudou (lifecycle, storage
+class...), não quando um objeto foi gravado — não é o mesmo sinal que a
+v1 media (atividade real de dado). Trade-off (mais barato, menos
+preciso) aceito conscientemente. Código da v1 removido por completo
+(endpoint, `get_bucket_last_modified`, `BucketFreshnessDialog.tsx`,
+`useBucketFreshness`) — não deixado como dead code.
+
+### Item 3 — Scanner de desperdício, duas rodadas (commits `381c30b`, `14c6b74`, `f3e352e`)
+
+**Rodada 1 (6.1, config-based)**: bucket sem lifecycle rule + objetos
+`STANDARD` mais antigos que o threshold (`IntEnum` 30/60/90, mesma
+correção de `Literal`→422 já feita no FinOps). Faixa de economia (nunca
+valor único) sobre bytes reais: migração pra `NEARLINE` (mínimo) ou
+`COLDLINE` (máximo) — `ARCHIVE` fica de fora de propósito (retrieval
+caro + duração mínima de 365 dias tornariam a recomendação automática
+arriscada). Preços GCS novos em `core/config.py`, mesmo padrão dos
+preços do BigQuery já lá.
+
+**Gap pré-existente corrigido junto** (não era novo deste item):
+`list_bucket_objects_cached` não capturava `Forbidden` — um projeto com
+`bucketViewer` mas sem `objectViewer` estourava 500 cru em vez do 403
+limpo do domínio. `repository.py` ganhou `project_id` nos parâmetros de
+listagem de objetos pra relançar `StorageAccessDeniedError`.
+
+**Rodada 2 (6.2, usage-based)** — depois do usuário habilitar Data
+Access audit log `DATA_READ` pra `storage.googleapis.com` em dev
+(2026-08-18, confirmado ao vivo): objeto elegível por 6.1 sem nenhuma
+leitura (`storage.objects.get`) em 90 dias ganha `confidence:
+"usage_confirmed"`. Payload do audit log de GCS confirmado ao vivo
+(gerei uma leitura real do objeto + `gcloud logging read`): é o proto
+padrão `google.cloud.audit.AuditLog` (`resource.type="gcs_bucket"`) —
+**diferente** do formato legado `AuditData`/`jobCompletedEvent` que
+lineage/access usam pra job do BigQuery, parser novo (`list_read_object_
+keys`), mesmo client de Cloud Logging (roles já cross-granted, nenhuma
+role nova).
+
+**Ponto de desenho confirmado com o usuário antes de codar**: `Waste
+Candidate` é agregado por bucket (validado em dev no item anterior), mas
+a spec fala de confidence por **objeto** — resolvido com dois campos
+novos (`usage_confirmed_object_count`/`usage_confirmed_size_bytes`,
+subconjunto do total elegível) e `confidence` só vira `"usage_confirmed"`
+quando **todos** os objetos elegíveis do bucket estão sem leitura
+confirmada. Degradação graciosa obrigatória (pedida explicitamente):
+`Forbidden` ou resultado vazio pro projeto inteiro (audit log pode estar
+desabilitado, ambíguo) nunca falha a requisição — cai pra
+`config_based` em todos os candidatos, com `usage_check_warning`
+explicando por quê.
+
+### Item 4 — Extensão do lineage: bucket como nó (commit `9bafbee`, maior risco da sprint)
+`load` (GCS→BQ) → aresta bucket→tabela; `extract` (BQ→GCS) → aresta
+tabela→bucket. Os dois payloads reais (seção 7.1 da spec) foram usados
+como fixture de teste, não inventados — confirmados ao vivo em dev antes
+de escrever qualquer parser.
+
+**Ponto de desenho que exigiu pausa** (conforme pedido explícito do
+usuário no início do item): diferente de tabela, um bucket não tem
+"projeto dono" confiável via API pra saber em qual audit log procurar
+quem mais o referencia. Resolvido com o usuário: **bucket é sempre nó
+folha** — entra no grafo (nó + aresta) quando descoberto pelos eventos
+já buscados do lado tabela (sem chamada nova), mas a travessia BFS nunca
+expande a partir dele. `NodeRef` (service.py) generaliza `TableRefTuple`
+(3-tupla) + `BucketRef` (1-tupla), discriminável só pelo tamanho da
+tupla. `LineageNode` ganhou `type`/`bucket_name`;
+`project_id`/`dataset_id`/`table_id` viraram opcionais. Frontend:
+`bucketNode` novo em `LineageGraph.tsx` (ícone `HardDrive`, cor
+`status-ok`, mesma identidade do grupo "Cloud Storage" da sidebar).
+
+**Gap encontrado, deliberadamente não corrigido** (fora do escopo —
+é do domínio `lineage` inteiro, não específico de bucket): nenhum parser
+de audit log do projeto (lineage/access/finops) filtra `jobStatus.state
+!= "DONE"` — um job que falhou mas tem `destinationTable`/`sourceUris`
+no config já criaria uma aresta hoje. Registrado como backlog do domínio
+lineage, não do domínio storage.
+
+**Validado em dev pelo usuário**: lineage de `RAW.crm_leads_staging`
+mostrou bucket `observability-hub-dev-landing` upstream (via LOAD real)
+e `observability-hub-dev-processed` downstream (via EXTRACT real), com o
+estilo visual diferenciado e sem seta de expansão nos nós de bucket.
+
+### Falha de processo encontrada e corrigida nesta sessão
+Os 4 commits de fechamento do SESSIONLOG/CHANGELOG de uma sessão
+anterior (reconstrução completa depois de 4 dias sem atualização — ver
+"Documentação para cliente" mais abaixo pro contexto) tinham sido
+pusheados só pro remoto de `feature/admin-usage-analytics`, **nunca
+mergeados em `main` via PR**. Quando `feat/storage-mvp` foi criada a
+partir de `main` atualizada (que não inclui esses 4 commits), herdou a
+versão **velha** do SESSIONLOG (2026-08-14) — quase repetindo a mesma
+falha que aquela reconstrução tinha corrigido. Descoberto no meio desta
+sessão (ao notar que o CHANGELOG.md não tinha as seções que eu mesmo
+tinha escrito antes), corrigido com `git merge feature/admin-usage-
+analytics` explícito em `feat/storage-mvp` antes de qualquer atualização
+final de documentação (commit `96c4db4`) — só um conflito real, na
+tabela de registro de acessos do `docs/onboarding-cliente.md` (as duas
+branches adicionaram linhas diferentes na mesma tabela), resolvido
+mantendo as duas.
+
+**Lição registrada aqui de propósito**: commits de documentação
+"soltos" numa branch de feature, sem PR, são tão frágeis quanto nenhuma
+documentação — o processo só é confiável quando o merge pra `main`
+acontece de verdade. Considerar, numa sessão futura, abrir PRs só de
+docs quando uma branch de feature demorar muito pra fechar (em vez de
+esperar o PR final que empacota tudo junto).
+
+### Promoção pra prod — concluída nesta sessão (antes do PR pra `main`)
+Checklist passado ao usuário fora deste arquivo, ele confirmou ter
+rodado (parte em paralelo comigo, parte eu mesmo rodei quando pedido
+diretamente) — tudo confirmado ao vivo depois, não assumido:
+1. ✅ IAM self: `backend-run@...-prod` ganhou `roles/storage.
+   bucketViewer` + `roles/storage.objectViewer` em `observability-hub-
+   prod`.
+2. ✅ IAM cross (mesmo padrão simétrico já usado pra BigQuery/Logging):
+   `backend-run@...-dev` ganhou as mesmas duas roles em
+   `observability-hub-prod`; `backend-run@...-prod` ganhou as mesmas
+   duas roles em `observability-hub-dev`. Confirmado via `gcloud
+   projects get-iam-policy` nos dois projetos — matriz 2×2 completa
+   (2 roles × 2 SAs × 2 projetos).
+3. `storage.googleapis.com` já estava habilitada em prod antes desta
+   sessão (confirmado via `gcloud services list` — provavelmente
+   habilitada como dependência de outra coisa, não documentado quando).
+4. ✅ 3 buckets mock em prod, espelhando dev exatamente: `observability-
+   hub-prod-landing` (STANDARD, mesma lifecycle rule de dev —
+   `SetStorageClass NEARLINE` aos 30 dias por `customTime`),
+   `observability-hub-prod-processed` (NEARLINE, sem regra),
+   `observability-hub-prod-archive` (COLDLINE, sem regra, vazio).
+5. ✅ 1 objeto mock em `landing` (mesmo conteúdo do de dev), 1 job LOAD
+   real (`landing` → `RAW.crm_leads_staging`, tabela nova — prod já
+   tinha `RAW.crm_leads`, sem `_staging`) e 1 job EXTRACT real
+   (`crm_leads_staging` → `processed`) — confirmados via `bq show`/
+   `gcloud storage ls` ao vivo.
+6. ✅ **Decisão do usuário**: habilitar Data Access audit log
+   `DATA_READ` de `storage.googleapis.com` **também em prod** (não só
+   dev) — diferente do planejado inicialmente (a spec, seção 6.2,
+   registra a nota de volume/custo — evento por leitura de objeto — como
+   motivo pra adiar; o usuário decidiu prosseguir mesmo assim,
+   consciente do trade-off). Aplicado via merge de `auditConfigs`
+   (mesmo padrão de `docs/onboarding-cliente.md` seção 3), sem
+   sobrescrever a config existente de `bigquery.googleapis.com`.
+   Confirmado via `gcloud projects get-iam-policy` — as duas entradas
+   coexistem.
+7. ✅ Tudo registrado em `docs/onboarding-cliente.md` (6 linhas novas na
+   tabela "Registro de acessos concedidos").
+
+**Falta só**: abrir o PR de `feat/storage-mvp` → `main` — não feito
+nesta sessão, sem pedido explícito do usuário pra abrir.
+
+### Status final
+- Backend: 597 testes unitários (0 quando o domínio começou), 100%
+  passando, `ruff check`/`ruff format` limpos em cada commit.
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos em cada commit.
+- Validado em dev pelo usuário — os 4 itens, incluindo o grafo de
+  lineage com bucket real.
+- Prod promovida por completo (IAM, buckets, dados mock, audit config)
+  — ver seção acima. **Sem PR pra `main` ainda.**
+
+---
+
+## Sprint 3.2 — Qualidade, Discovery e melhorias de UX (concluída, 7/7 — PR #18)
 
 Branch `feat/sprint-3.2`, a partir de `main` (`44ad7c9`, pós-merge do PR
 #17). Regras definidas pelo usuário no início da sprint: pytest depois de
@@ -211,15 +417,429 @@ qualquer projeto incluindo dev/prod um observando o outro) seja registrada
 naquele documento no momento em que acontece — mitigação direta da falha
 de processo que causou os itens 8/9/10 ficarem desatualizados.
 
-### Status no fim desta sessão (commit `28f1f7f`)
-- Backend: 302 testes unitários, 100% passando, `ruff check`/`ruff
-  format` limpos
-- Frontend: `biome check`, `tsc -b`, `vite build` limpos (bundle
-  929.60 kB / gzip 281 kB — cresceu bastante com `recharts`, ver
-  "Backlog")
-- Deploy automático em dev confirmado verde a cada push (`gh run list`)
-  — branch `feat/sprint-3.2` no ar em `observability-hub-dev`
-- `main`/prod inalterados desde o PR #17 (`44ad7c9`)
+### Ajustes de UX e correção de bug no catálogo (commits `355b4f7`, `2af5a14`)
+`355b4f7`: contextos de query (TanStack Query) do domínio lineage
+passaram a ser prefixados com `project_id` — sem isso, trocar de projeto
+no seletor sem sair da página podia mostrar lineage cacheado do projeto
+anterior (mesmo bug de classe já visto em outros domínios, corrigido
+aqui especificamente pra lineage). `2af5a14`: botões "Analisar"/"Ver
+partições" no catálogo ficaram sempre visíveis nas linhas da tabela (não
+só no hover) — usuários em touch/trackpad reportaram dificuldade de
+descobrir a ação.
+
+### Lineage v2 — cadeia transitiva multi-hop, cross-project, diagrama (commit `6d7b742`)
+Reescrita de `domains/lineage/service.py`: a v1 (1-hop, já documentada
+acima) virou uma travessia **BFS bidirecional** a partir da tabela raiz,
+com `max_hops` configurável via query param (default 8, máx 15,
+independente por direção upstream/downstream — alcance total até
+`2 × max_hops`). Diferenças de fundo em relação à v1:
+
+- Toda comparação de tabela passou a usar a tripla completa
+  `(project_id, dataset_id, table_id)`, nunca só `(dataset_id,
+  table_id)` — a v1 tinha um bug latente de colisão entre projetos
+  diferentes com dataset/tabela de mesmo nome, nunca disparado em dev/
+  prod (só 2 projetos, nomes não colidiam) mas real.
+- A travessia pode atravessar **mais de um projeto GCP** durante a
+  expansão do grafo — cada projeto novo encontrado é consultado no
+  máximo uma vez por requisição (cache em memória por request). Não é
+  mudança de modelo de acesso (ADR-006 já previa a SA do Hub com acesso
+  simultâneo a vários projetos-alvo) — é só um padrão de uso novo sobre
+  um acesso que já existia.
+  - Projeto **raiz** sem `roles/logging.viewer`/`privateLogViewer`:
+    HTTP 403 (hard-fail, igual v1 — sem a raiz não há nada pra montar).
+  - Projeto **não-raiz** sem acesso, encontrado durante a expansão: nó
+    marcado `access_denied=true`, esse ramo não expande, resto do grafo
+    segue intacto — não derruba a requisição inteira.
+- `JOIN` com múltiplas fontes vira fan-in natural no grafo (duas arestas
+  convergindo no mesmo nó) — não precisou de tratamento especial.
+- Auto-referência (job tipo MERGE que lê e escreve a própria tabela)
+  nunca vira aresta, em nenhum hop — mesma exclusão da v1, agora
+  aplicada uniformemente em toda a travessia.
+- `truncated: true` na resposta quando `max_hops` foi atingido com
+  fronteira ainda não expandida (pode haver mais tabelas além do
+  retornado).
+
+Frontend: dependências novas `@xyflow/react` + `dagre` (+ `@types/dagre`)
+pra renderizar o grafo como diagrama interativo (layout automático via
+`dagre`) na aba "Lineage" do modal de profiling — antes era só duas
+listas (upstream/downstream). Ver spec completa em `docs/specs/lineage.md`
+v2.0 (formaliza retroativamente também o comportamento da v1, que nunca
+teve spec própria).
+
+### PII — fingerprinting via TABLESAMPLE + heurística de nome (commit `341a431`)
+Novo `domains/pii/`, duas camadas independentes:
+
+1. **Heurística de nome** (grátis, `INFORMATION_SCHEMA.COLUMNS` apenas)
+   — substring case-insensitive do nome da coluna contra keywords por
+   tipo de PII (ex: `num_cartao_cliente` bate `cartao_credito` por
+   conter `"cartao"`).
+2. **Amostragem real** via `TABLESAMPLE SYSTEM` + `REGEXP_CONTAINS` +
+   `COUNTIF` — tipos detectados: email, CPF, CNPJ, telefone BR, CEP,
+   cartão de crédito (regex de **formato**, sem validação de dígito
+   verificador nem algoritmo de Luhn — falso positivo/negativo é
+   limitação conhecida e documentada). **Garantia estrutural de
+   privacidade**: o matching roda inteiro dentro do BigQuery — a API
+   nunca recebe, processa ou loga um valor de coluna real, só contagens
+   agregadas por coluna/tipo.
+
+`flagged` por coluna = nome bateu **ou** amostra sinalizou algum tipo;
+`confidence` é `high` (os dois bateram), `medium` (só um) ou `null`
+(nenhum). Tabela/view: `TABLESAMPLE` não suportado em view — PII **pula
+a amostragem inteiramente** nesse caso (diferente de profiling, que
+ainda roda sem `TABLESAMPLE`), porque rodar sem amostragem escanearia a
+view inteira sem estimativa de custo prévia — só heurística de nome
+nesse caso. Endpoints: `POST /api/v1/pii/{project}/{dataset}/{table}/
+estimate` (dry run) e `/run` (executa). Cache em memória de 5min por
+`(tabela, parâmetros)` evita reexecutar a query paga em cliques
+repetidos. Ver `docs/specs/pii.md` v1.1 (a v1.1 adicionou histórico de
+scans em `pii_scan_history`, junto com o Admin v1.3 — ver seção Admin
+abaixo).
+
+### Status de fechamento parcial (commit `092fa34`, "6 de 7 itens, PII concluído")
+Neste ponto só faltava o mapa de acesso — ver próxima seção. Backend:
+recharts + xyflow/dagre já em uso; testes crescendo a cada domínio novo.
+
+### Mapa de acesso — 7º e último item da Sprint 3.2 (commits `f6db87d`, `ceff29d`)
+Novo `domains/access/`, mesma fonte de dados de lineage (audit logs de
+job do BigQuery via Cloud Logging, janela de 30 dias, custo $0) sob um
+ângulo diferente: lineage pergunta "de onde vem/pra onde vai esse dado",
+mapa de acesso pergunta "quem tocou nessa tabela e quando".
+`domains/access/repository.py` duplica o parsing do payload em vez de
+importar de `lineage` (nenhum domínio deste projeto importa de outro),
+com uma diferença: também extrai `jobStatistics.endTime` como timestamp
+do acesso.
+
+`GET /api/v1/access/{project}/{dataset}/{table}` agrega por
+`principal_email`: contagem de acessos, tipos (`read`/`write`, um job
+pode contribuir os dois — ex: MERGE — e aqui isso **não** é excluído
+como em lineage, porque pra mapa de acesso é um acesso real, não uma
+relação de dependência entre tabelas), timestamp mais recente, e
+`is_service_account` (heurística: e-mail termina em
+`gserviceaccount.com`).
+
+**Bug corrigido no mesmo dia (`ceff29d`)**: sem filtro, toda vez que
+alguém rodava profiling ou scan de PII pela própria UI do Hub, quem
+executa a query real no BigQuery é a SA de runtime do Hub
+(`backend-run@<projeto>`), não o usuário — isso fazia a própria SA do
+Hub aparecer como "acesso recente" em qualquer tabela inspecionada,
+mascarando os consumidores externos reais (o oposto do propósito da
+funcionalidade). Fix: todo evento cujo `principal_email` seja
+`backend-run@<projeto-onde-o-Hub-está-rodando>.iam.gserviceaccount.com`
+é descartado antes de agregar — outras service accounts (pipelines
+externos) continuam contando normalmente. Ver `docs/specs/access.md`
+v1.0, seção "Exclusão da SA do próprio Hub" — nota explícita de que
+`domains/finops` (budget) faz o oposto de propósito: lá a SA do Hub
+**conta**, porque a pergunta é "quanto está sendo gasto de verdade",
+não "quem é consumidor externo".
+
+### Status no fim da Sprint 3.2 (commit `ceff29d`)
+Backend: testes unitários crescendo (556 no total do repositório hoje,
+incluindo todo o trabalho posterior de FinOps/Admin — não isolado por
+sprint). `ruff check`/`ruff format` limpos em toda a sessão. PR #18
+mergeado em `main`/prod em 2026-08-15.
+
+---
+
+## FinOps — as 3 frentes do roadmap (Fase 4, PRs #19, #20, #21)
+
+Reconstruído a partir de `docs/specs/finops-waste-scanner.md` (v1.0),
+`docs/specs/finops-budget.md` (v1.1) e `docs/specs/finops-column-types.md`
+(v1.1) — nenhuma sessão anterior deixou nota no SESSIONLOG sobre este
+trabalho. **`CHANGELOG.md` continua dizendo Fase 4 "em andamento, falta
+otimizações sugeridas" — desatualizado, ver Backlog.**
+
+### 1. Scanner de desperdício (commits `a43bb1f`, `a5021a2`; PR #19)
+Duas checagens independentes num projeto: **tabelas sem uso** (nunca
+lidas, ou não lidas há N dias, nos audit logs — `GET /api/v1/finops/
+{project}/unused-tables?min_days_unused=30|60|90`) e **candidatas a
+particionamento** (tabelas grandes, sem partição, com coluna
+DATE/DATETIME/TIMESTAMP candidata — `GET .../partition-candidates`).
+Fonte: Cloud Logging (audit logs, custo $0) + `INFORMATION_SCHEMA`/
+`client.get_table()` (metadado, custo $0).
+
+Decisão de design explícita com o usuário: **nunca fabricar um número
+de aparência precisa sobre suposição não verificada**. Tabelas sem uso
+ganham estimativa **factual** (`size_bytes` × preço de storage — custo
+real já sendo pago). Candidatas a particionamento só ganham estimativa
+de economia se houver custo **observado de verdade** nos audit logs
+(soma de `totalBilledBytes`), e mesmo assim como **faixa** (30–70% de
+redução), nunca um valor único — sempre acompanhada de disclaimer
+explícito.
+
+**Bug corrigido (`a5021a2`)**: `min_days_unused` usava `Literal[30, 60,
+90]` no schema Pydantic, que o FastAPI/OpenAPI não conseguia validar
+corretamente via query param — 422 em requisições válidas. Trocado por
+`IntEnum`.
+
+### 2. Budget de custo (commits `abf8e28`, `b4ce5d5`, `5481447`, `9cc68b2`; PR #20)
+`GET /api/v1/finops/{project}/budget?group_by=table|user|day|month|year`
+— sempre relativo ao mês corrente. Mesma fonte de dados do scanner
+(audit logs), sem API/role nova. **Decisão de arquitetura documentada
+explicitamente**: BigQuery Billing Export foi considerado e rejeitado —
+só quebra custo por projeto+SKU, nunca por dataset/tabela, não resolveria
+o problema mesmo se configurado.
+
+Nota de precisão registrada na spec: o número é uma **estimativa**
+(`totalBilledBytes × preço on-demand`), correta só se o projeto cobra
+por bytes escaneados — não reflete o gasto real em projetos flat-rate/
+Editions (slots reservados). Mesma premissa on-demand já embutida em
+`domains/quality` e no scanner de desperdício, documentada aqui porque
+budget é onde um número errado mais provavelmente vira decisão
+financeira.
+
+**Diferença deliberada do mapa de acesso**: budget **não** exclui a SA
+de runtime do Hub da agregação — profiling/PII rodado pela UI custa
+dinheiro de verdade, então deve contar tanto em `group_by=table` quanto
+em `group_by=user`.
+
+**Bug real corrigido (`b4ce5d5`)**: agregação por dataset/tabela trazia
+entradas fantasma tipo `region-US` com custo residual (~$0,07), sem
+corresponder a nenhum dataset real. Investigado com `gcloud logging
+read` + replay contra ~5000 eventos reais de dev: **4989 de 5000 jobs
+(99,8%)** eram probes de `INFORMATION_SCHEMA` region-qualificado
+(`` `project.region-X.INFORMATION_SCHEMA.*` ``, disparadas pela própria
+SA do Hub para descoberta de metadados em catalog/freshness/finops) —
+o audit log registra `datasetId="region-US"`/`tableId="INFORMATION_
+SCHEMA.SCHEMATA"`, indistinguível à primeira vista de uma tabela real
+chamada `region-US`. Fix na origem (`repository._parse_table_ref`
+descarta qualquer referência cujo `table_id` comece com
+`INFORMATION_SCHEMA.`), benefício automático pra scanner de desperdício
+e budget juntos. `5481447`: mensagem de "sem acesso" do finops passou a
+explicitar a janela de 90 dias + filtro por dataset. `9cc68b2`: retry de
+cold start do Cloud Run (já existia em queries) estendido também pra
+mutations — cold start em dev podia derrubar a primeira ação do usuário
+depois de um tempo ocioso.
+
+Na v1.1 da spec, "top N gastadores" (existia na v1.0 como visão
+separada) foi removido — `group_by=user` cobre o mesmo caso sem duplicar
+lógica de agregação.
+
+### 3. Sugestão de tipo de coluna (commits `81db4a3`, `15d579e`; PR #20/#21)
+Terceira e última frente do roadmap de FinOps. Diferente das outras
+duas (100% metadado/audit-log, custo $0), esta amostra dado real via
+`TABLESAMPLE` — mesmo mecanismo (e mesmo custo real) de `pii`/`quality`,
+por isso exige clique explícito em "Estimar custo" antes de "Escanear",
+igual aos outros domínios que tocam dado real.
+
+Por coluna `STRING`, testa em ordem de prioridade (primeiro tipo com
+100% de match no não-nulo amostrado vence): `INT64` → `FLOAT64` → `BOOL`
+→ `DATE` → `DATETIME` → `TIMESTAMP`, via `SAFE_CAST` (mesma garantia
+estrutural de privacidade do PII — só contagens agregadas saem do BQ).
+Só sugere quando **as três** condições batem: 100% de match na amostra
+(não configurável — aplicar tipo mais estreito que não converte 100%
+quebraria dado real), amostra não-vazia, e economia de bytes
+**positiva** (uma STRING curta como `"1"` já ocupa menos que um INT64
+fixo de 8 bytes — sugerir a troca nesse caso pioraria o storage).
+
+`15d579e` (v1.1) adicionou **escopo explícito de tabelas**
+(`ColumnTypeScanRequest.tables`, lista `"dataset.tabela"`) — rodar em
+todas as tabelas de um projeto real é inviável (centenas/milhares de
+tabelas, cada uma custando uma query real); o frontend sempre manda
+escopo explícito nas duas telas onde a feature aparece: aba "Tipos de
+coluna" em `/finops` (seletor de datasets/tabelas via checkbox) e uma
+aba nova no modal de profiling (escopo implícito: só a tabela aberta).
+Orçamento de tempo de 120s pro lote inteiro no `/run` — se esgotar no
+meio, retorna parcial com warning em vez de erro.
+
+---
+
+## Sidebar — duas reorganizações (commits `c785c4e`, `94629a6`)
+
+**Round 1 (`c785c4e`, entre waste scanner e budget)**: sidebar agrupado
+por tópico — "Buscar tabelas" solto no topo, "Governança" (Freshness +
+Tabelas sem consumidor), "FinOps" (Scanner de desperdício, grupo já
+pronto pra crescer conforme budget/tipos de coluna viravam abas
+próprias). Renomeações: "Busca" → "Buscar tabelas", "Tabelas órfãs" →
+"Tabelas sem consumidor" (nome mais descritivo). Favoritos e Recentes
+viraram `Collapsible`, mesmo padrão que "Datasets disponíveis" já usava.
+
+**Round 2 (`94629a6`, logo antes do Admin v1)**: `DatasetSidebar.tsx`
+ganhou um nível hierárquico acima de tudo — `SidebarServiceGroup`, hoje
+só "BigQuery", **deliberadamente preparado pra o Hub expandir pra outros
+serviços GCP observáveis** (Cloud Storage, Pub/Sub, Dataflow — ver
+Backlog item 14, adiado conscientemente por decisão do usuário em
+2026-08-17, mas a estrutura de sidebar já não precisará de retrabalho
+quando isso acontecer). "Governança" e "FinOps" eram headers estáticos,
+viraram seções recolhíveis de verdade; todas as subseções passaram a
+abrir recolhidas por padrão (mudança de comportamento pra "Datasets
+disponíveis", que antes abria aberta) — só o grupo "BigQuery" abre por
+padrão, por ser o único serviço hoje.
+
+Depois disso, mais um ajuste pequeno em `77dacce` (junto com o Admin
+v1.1): "Buscar tabelas" moveu pra dentro de "Datasets disponíveis".
+
+---
+
+## Admin ACL — controle de acesso por usuário × projeto (ADR-009, v1.0→v1.3)
+
+Reconstruído a partir de `docs/adr/ADR-009-acl-usuario-projeto.md` e
+`docs/specs/admin.md` v1.3 — trabalho spread pelos PRs #20 e #21, nenhum
+registrado em SESSIONLOG até agora. **Nota de inconsistência encontrada
+nesta reconstrução:** o ADR-009 tem data "2026-08-18" no cabeçalho e uma
+"Nota de extensão" datada "2026-08-20" — mas todos os commits reais desta
+feature (`391d159` até `301fc59`) rodaram no mesmo dia, **2026-08-17**
+(confirmado via `git log --format=%ad`). As datas do ADR parecem ter sido
+assumidas/erradas no momento da escrita em vez de checadas — mesma classe
+de erro que a seção "Registro de acessos e configurações" do CLAUDE.md
+existe pra evitar, só que em datas de documento, não em concessões de
+acesso. Não corrigido nesta sessão (fora do escopo de só atualizar o
+SESSIONLOG) — sinalizar ao usuário.
+
+### Motivação
+O modelo cross-project (ADR-006) dá à SA de runtime do Hub acesso IAM
+simultâneo a vários projetos-cliente. Até aqui o único gate era
+`Depends(get_current_user)` — valida a sessão (login OAuth), não se
+aquele usuário deveria ver aquele `project_id` específico. Com 5+
+projetos-cliente no mesmo Hub, qualquer usuário logado podia digitar o
+`project_id` de outro cliente no seletor e ler os dados dele —
+vazamento cross-cliente real.
+
+### v1.0 (commit `391d159`) — fundação
+Nova coleção Firestore `hub_users/{email}` (`is_admin: bool`,
+`allowed_projects: list[str]`, aceita wildcard `"*"`). Duas dependencies
+novas em `core/auth.py`: `require_admin` (403 se `!is_admin`) e
+`require_project_access` (403 `ProjectNotAuthorizedError` se
+`project_id` não estiver na lista do usuário) — a segunda substitui
+`get_current_user` como gate em **todo** endpoint que recebe
+`project_id` como path param (catalog, freshness, profiling, quality,
+lineage, pii, access, finops, projects). **Fail closed por padrão**:
+usuário sem documento não acessa projeto nenhum, mesmo com a SA tendo
+IAM lá. Tela `/admin` nova, gated por `require_admin`. Decisão
+documentada de usar Firestore (não Secret Manager) — a SA já lê/escreve
+Firestore (favoritos, histórico), e Secret Manager é versionado/imutável
+por natureza, inadequado pra CRUD via UI; foi exatamente o
+`@lru_cache` sem TTL de `OAUTH_ALLOWLIST` que causou staleness real
+numa sessão anterior — o Firestore aqui é sempre leitura fresca, sem
+cache, de propósito.
+
+**Bootstrap do primeiro admin**: `hub_users` vazio bloqueia `/admin`
+pra todo mundo (ninguém é admin, ninguém cria o primeiro registro pela
+UI) — resolvido com `scripts/seed_admin.py` (credenciais do operador,
+não a SA de runtime). Confirmado rodado em `observability-hub-prod`
+antes do PR #20 promover o gate pra produção (ver corpo do PR #20).
+
+### v1.1 (commits `6ec0817`, `26a49b1`, `77dacce`) — feedback de uso real
+Três adições, motivadas por feedback de uso da v1.0 já em produção:
+
+1. **`hub_projects/{project_id}`** (`is_public: bool`) — eixo
+   **independente** de `allowed_projects`: libera um projeto pra
+   qualquer usuário, inclusive quem ainda não tem documento em
+   `hub_users` (usuário futuro). `has_project_access` checa
+   `hub_projects` **antes** de olhar o usuário. Aba "Por projeto" em
+   `/admin` é a visão inversa da aba "Por usuário".
+2. **`access_requests`** — qualquer usuário autenticado pode pedir
+   acesso a uma lista de `project_id` (`POST /api/v1/access-requests`,
+   fora do prefixo `/admin` de propósito). Filtra automaticamente
+   projetos já acessíveis e pedidos duplicados pendentes. Admin vê/
+   aprova/nega em `/admin` → aba "Solicitações", com badge de
+   pendentes no ícone de admin (`refetchInterval` 60s, sem WebSocket).
+3. **Mensagens de erro visíveis** — `ApiErrorNotice` ganhou uma prop
+   `action` (CTA opcional); `ProjectSelector` passou a mostrar
+   "Solicitar acesso" quando o erro é de autorização. `26a49b1`: os
+   comandos `gcloud` de remediação (que fazem sentido pro admin do
+   projeto GCP alvo) passaram a ficar ocultos nesse erro específico via
+   `showFix={false}` — usuário comum só vê a mensagem, não o comando
+   técnico que não pode nem deveria rodar.
+
+### v1.2 (commit `e29b4ea`) — painel de uso/gestão, 1ª parte
+Nova aba "Uso do Hub" em `/admin` (**é daqui que vem o nome da branch
+`feature/admin-usage-analytics`**) — três leituras cross-usuário que
+agregam dado que já existe em outros domínios, mais uma coleção nova:
+
+- **Logins**: nova coleção `login_events/{auto_id}`, gravada em
+  `POST /auth/callback` (best-effort — falha aqui nunca pode impedir o
+  login). Antes da v1.2 login era 100% stateless, sem registro nenhum.
+  Endpoint devolve buckets diário/semanal/mensal (padrão DAU/WAU/MAU).
+- **Favoritos entre usuários**: lê `collection_group("favorites")` sem
+  filtro (evita índice manual de collection-group), `owner_email`
+  derivado do path do documento-pai — drill-down bidirecional
+  (usuário→itens, base→usuários) no mesmo payload achatado.
+- **Atividade de profiling**: `quality/history_repository.py::save_run`
+  passou a gravar `project_id`/`dataset_id`/`table_id` explícitos
+  dentro de cada run (antes só existiam implícitos no ID do
+  documento-pai, ambíguo de parsear de volta) — lido via
+  `collection_group("runs")`.
+
+### v1.3 (commits `0266edb`, `568622a`, `301fc59`) — mais 3 mapeamentos + UX
+Três novas leituras na mesma aba "Uso do Hub":
+
+- **Solicitações de acesso** — zero gravação nova, `access_requests` já
+  tinha tudo; agrega por mês (`total`/`approved`/`denied`/`pending`),
+  lista projetos mais pedidos, `approval_rate` (`null` quando ainda não
+  houve nenhum pedido resolvido, nunca "0%" falso).
+- **Navegação agregada** — zero gravação nova, lê `history_table_views`/
+  `history_searches` (já existiam, cap de 20/usuário) via
+  `collection_group` — front agrega "tabelas mais vistas"/"buscas mais
+  frequentes". Cap de 20 é explícito na UI como limitação (métrica
+  recente, não histórico completo).
+- **Atividade de scans de PII** — **gravação nova**: até aqui PII só
+  tinha cache em memória (5min), sem histórico. Novo
+  `pii/history_repository.py`, grava em `pii_scan_history/{doc}/scans/
+  {auto-id}` a cada execução real (não em cache hit). Nome da
+  subcoleção é deliberadamente `scans`, não `runs` — a agregação lê via
+  `collection_group("runs"|"scans")`, que ignora o path do
+  documento-pai; nomes iguais fariam profiling e PII se misturarem na
+  mesma leitura.
+
+`568622a`: refactor que padronizou colunas projeto/dataset/tabela e
+filtros nas listas da aba "Uso do Hub" (as 6 seções tinham crescido
+cada uma com sua própria tabela ad-hoc). `301fc59`: tópicos recolhíveis
++ paginação nas listas — a aba tinha ficado longa demais com 6 seções
+de analytics simultâneas.
+
+---
+
+## Documentação para cliente — playbooks e manuais (PRs #22, #23, #24)
+
+Três commits, todos **docs-only** (não tocam `apps/`, então não
+disparam deploy — confirmado via `gh run list`, nenhum "Deploy" job
+rodou pra esses três pushes). Continuam na mesma branch
+`feature/admin-usage-analytics` por não terem justificado uma branch
+nova. Todos os quatro documentos citam `docs/onboarding-cliente.md`
+e/ou os ADRs 006/009 como referência técnica de fundo — são a camada
+"roteiro de execução rápida"/"material voltado a cliente final" em
+cima da mesma base já existente.
+
+### `docs/playbooks/liberar-projeto-para-o-hub.md` (commit `181aeef`, 216 linhas)
+Playbook interno: "eu já tenho um projeto GCP com dados — o que preciso
+fazer pra deixar o Hub ler esse projeto?". Explicitamente **não** é
+fonte de verdade — aponta pra `docs/onboarding-cliente.md` pra isso, e
+pede que quem executar o playbook volte lá pra registrar a linha
+concedida (mesmo processo de sempre). Deixa claro que liberar a nível
+de infraestrutura GCP é só metade do caminho — a segunda camada (ACL do
+Hub, ADR-009) é liberada depois, dentro do próprio `/admin`.
+
+### `docs/playbooks/hospedar-hub-em-novo-projeto.md` (commit `181aeef`, 449 linhas)
+Playbook interno: "quero rodar minha própria cópia do Hub (hospedagem e
+administração) em projetos GCP diferentes dos originais — o que precisa
+ser feito do zero?". Bootstrap único por par de ambientes (dev/prod);
+depois de concluído, o dia a dia vira só `git push`. Cobre os 2 Cloud
+Run, 1 Artifact Registry compartilhado, SAs de runtime, Firestore,
+Secret Manager, WIF e bucket GCS de state — o inventário completo de
+infraestrutura que o Hub precisa pra existir.
+
+### `docs/manual-implementacao-cliente.md` (commit `0e2acbe`, 361 linhas)
+Primeiro documento **voltado a cliente final** (linguagem sem jargão
+interno) — implementação de uma instância própria do Hub no GCP do
+cliente, hospedagem/administração completas sob controle dele. Seção
+explícita "Segurança e escopo" (o que o processo faz e não faz): tudo
+dentro dos projetos do próprio cliente, sem credencial de longa duração
+(WIF), permissões mínimas restritas aos dois projetos criados,
+reversível (apagar os projetos remove tudo), nada trafega pra fora do
+ambiente GCP do cliente, auditável via Terraform. Público: responsável
+técnico com papel *Owner* no GCP.
+
+### `docs/manual-liberacao-acesso-cliente.md` (commit `0461b36`, 197 linhas)
+Segundo documento voltado a cliente final — a contraparte do playbook
+`liberar-projeto-para-o-hub.md`, mas em linguagem de cliente: como
+autorizar o Hub (já hospedado, seja pelo time do Hub ou pelo próprio
+cliente via o manual acima) a ler um projeto GCP existente. Mesma
+seção "o que faz/não faz": só leitura, nada instalado no projeto do
+cliente, acesso escopado a uma SA nomeada, revogável a qualquer
+momento, cliente confirma cada permissão antes de conceder (comandos
+explícitos, nada automático). Público: responsável técnico com role
+*Owner*/*IAM Admin*. Tempo estimado 10–15min (vs. meio dia do manual de
+implementação).
 
 ---
 
@@ -636,36 +1256,71 @@ revisitar se o risco incomodar mais adiante.
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend — c33f950 pusheado (fix Forbidden/PermissionDenied),
-│   deploy automático disparado, ainda não confirmado verde nem revalidado
-│   em dev pelo usuário nesta sessão
-├── Cloud Run: frontend ✅ tag d9401d2 (branch feat/sprint-3.2, à frente de main)
-│   https://frontend-995219021404.us-central1.run.app
+├── Cloud Run: backend ✅ tag 9bafbee (feat/storage-mvp — domínio storage
+│   completo, deploy automático verde a cada push desta sessão)
+├── Cloud Run: frontend ✅ tag 9bafbee, idem
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
 ├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer +
-│   logging.viewer no próprio projeto e em observability-hub-prod
-│   (cross-project completo — logging.viewer cross adicionado nesta sessão)
-├── IAM backend-run@...-prod: as mesmas quatro roles em observability-hub-dev
-│   (cross-project completo, idem)
-├── Data Access audit logs (DATA_READ, DATA_WRITE, ADMIN_READ) habilitados
-│   em dev e prod pra bigquery.googleapis.com — descoberto nesta sessão que
-│   já estava assim antes (nunca documentado, ver Backlog itens 8/9/10)
+│   logging.viewer + logging.privateLogViewer no próprio projeto e em
+│   observability-hub-prod (cross-project completo nas 5 roles de
+│   BigQuery/Logging, sem mudança nesta sessão)
+├── IAM storage.bucketViewer + storage.objectViewer: **cross-project
+│   completo nos dois projetos** (backend-run@...-dev e
+│   backend-run@...-prod, cada um com as duas roles no próprio projeto
+│   e no outro — matriz 2×2 confirmada ao vivo via `gcloud projects
+│   get-iam-policy` em 2026-08-18)
+├── Data Access audit logs: bigquery.googleapis.com (DATA_READ,
+│   DATA_WRITE, ADMIN_READ) em dev e prod, sem mudança. storage.
+│   googleapis.com (DATA_READ) — **habilitado em dev E prod** nesta
+│   sessão (prod foi decisão consciente do usuário, ciente da nota de
+│   volume da spec seção 6.2)
 ├── Checklist completo de IAM/API/audit config pra onboarding de projeto
-│   alvo agora vive em docs/onboarding-cliente.md (criado nesta sessão)
-├── Pipeline validado ponta a ponta: 303 testes backend, ruff limpo, biome+
-│   tsc+vite build limpos, deploy automático verde a cada push nesta sessão
-└── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
+│   alvo vive em docs/onboarding-cliente.md — registro de concessões
+│   está em dia até 2026-08-18 (inclui as duas roles de storage nos
+│   dois projetos e os dois audit configs novos)
+├── Firestore (Native mode): sem mudança nesta sessão (domínio storage
+│   não usa Firestore — tudo vem de GCS/Cloud Logging direto)
+├── Pipeline: 597 testes unitários backend, 100% passando, ruff limpo;
+│   frontend tsc/biome/vite build limpos; deploy automático verde a cada
+│   push (gh run list confirmado até 2026-08-18)
+├── Buckets mock: observability-hub-dev-landing (STANDARD, com lifecycle
+│   rule), observability-hub-dev-processed (NEARLINE, sem regra),
+│   observability-hub-dev-archive (COLDLINE, sem regra, vazio) — já
+│   existiam antes desta sessão, usados como fixture real de validação
+├── 1 job LOAD real (landing → RAW.crm_leads_staging) e 1 job EXTRACT
+│   real (RAW.crm_leads_staging → processed) — já existiam, usados pra
+│   validar lineage com bucket
+└── Datasets mock: RAW (4 tabelas agora, incluindo crm_leads_staging),
+    TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ tag 44ad7c9 (merge commit do PR #17 — main atual)
-├── Cloud Run: frontend ✅ tag 44ad7c9
-│   https://frontend-906161007412.us-central1.run.app
+├── Cloud Run: backend ✅ tag c893c60 (merge commit do PR #21 — ainda a
+│   última mudança de APP; domínio storage não mergeado em main ainda,
+│   só a infra/mocks/IAM já foram promovidos, ver abaixo)
+├── Cloud Run: frontend ✅ tag c893c60, idem
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM: ver bloco de dev acima — simétrico nas duas direções, sem lacunas
-│   conhecidas no momento
-├── total_datasets: 3
-└── WIF: attribute_condition restrito a refs/heads/main (só push direto,
-    nunca PR) — plan de prod continua revisão manual
+├── IAM BigQuery/Logging: simétrico com dev, sem lacunas conhecidas
+├── IAM storage.bucketViewer + storage.objectViewer: **promovido nesta
+│   sessão** — self (backend-run@...-prod no próprio projeto) e cross
+│   (backend-run@...-dev também em prod) — ver bloco de dev acima, é a
+│   mesma matriz 2×2
+├── storage.googleapis.com: já habilitada antes desta sessão (dependência
+│   de outra coisa, não documentado quando)
+├── Data Access audit log DATA_READ de storage.googleapis.com:
+│   **habilitado nesta sessão** — decisão do usuário, ciente da nota de
+│   volume da spec (seção 6.2); confirmado coexistindo com o auditConfig
+│   de bigquery.googleapis.com, sem sobrescrever nada
+├── Buckets: observability-hub-prod-landing (STANDARD + lifecycle rule
+│   idêntica à de dev), -processed (NEARLINE), -archive (COLDLINE) —
+│   criados nesta sessão, espelhando dev
+├── 1 objeto mock em landing + 1 job LOAD real (→ RAW.crm_leads_staging,
+│   tabela nova) + 1 job EXTRACT real (→ processed) — criados nesta
+│   sessão, mesmo processo de dev
+├── Admin ACL gateando 9 routers desde o PR #20, sem mudança
+├── total_datasets: 4 (RAW ganhou crm_leads_staging nesta sessão, além
+│   do crm_leads que já existia)
+└── WIF: attribute_condition restrito a refs/heads/main — plan de prod
+    continua revisão manual
 
 GitHub Secrets
 ├── WIF_PROVIDER_DEV ✅
@@ -673,8 +1328,18 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-Dev está à frente de prod — feat/sprint-3.2 (c33f950) ainda não tem PR
-aberto pra main. Prod segue em 44ad7c9 (PR #17, Sprint 3.1).
+`main`/prod ainda estão parados no PR #24 (`35c0205`) do ponto de vista
+de **código** — o domínio storage inteiro (8 commits de app,
+`02adc81`..`9bafbee`, mais os commits de docs até `9a5f018`) vive só em
+`feat/storage-mvp`, sem PR aberto. A **infraestrutura/dados de prod**
+(IAM, buckets, mocks, audit config), porém, já foram promovidos nesta
+sessão, antes do PR — prod está pronta pra receber o deploy assim que o
+PR for mergeado. `main` local precisa de `git fetch && git checkout main
+&& git pull` antes de qualquer branch nova (mesmo aviso de sempre).
+
+Working tree limpo — a mudança não commitada em `variables.tf`
+(`max_instance_count`) registrada na atualização anterior foi descartada
+nesta sessão (`git restore`, sem justificativa encontrada).
 ```
 
 ---
@@ -707,11 +1372,20 @@ já estava documentado no encerramento daquela sessão.)
 |---|---|---|
 | #16 | `feature/partition-metadata` | Sprint 2.2 + 2.3 completas |
 | #17 | `feat/sprint-3.1` | Auth Google OAuth, favoritos, histórico, fixes no modal de profiling |
+| #18 | `feat/sprint-3.2` | Sprint 3.2 completa (7/7): lineage multi-hop, PII, mapa de acesso |
+| #19 | `feat/finops-waste-scanner` | FinOps 1/3 — scanner de desperdício (tabelas sem uso, candidatas a partição) |
+| #20 | `feat/finops-budget` | FinOps 2/3 (budget) + Admin ACL v1.0/v1.1 + 4 ajustes de UX — **promoveu dev→prod** (39 commits) |
+| #21 | `feature/admin-usage-analytics` | Admin ACL v1.2 + v1.3 (painel "Uso do Hub") + refactor de colunas + recolhível/paginação |
+| #22 | `feature/admin-usage-analytics` | Docs — playbooks operacionais (liberar projeto, hospedar o Hub) |
+| #23 | `feature/admin-usage-analytics` | Docs — manual de implementação pra cliente |
+| #24 | `feature/admin-usage-analytics` | Docs — manual de liberação de acesso pra cliente |
 
-Sprint 3.2 (esta sessão, branch `feat/sprint-3.2`, commits `5516b36`..
-`28f1f7f`) ainda **não tem PR aberto** — aguardando os 7 itens completos e
-validados em dev, como pedido explicitamente pelo usuário no início da
-sprint.
+Todos os PRs acima (#18–#24) estão **mergeados em `main`/`origin`**,
+confirmado via `gh pr list --state all` e `git log origin/main`.
+
+**`feat/storage-mvp` (esta sessão, commits `02adc81`..`ec0ae14`) ainda
+não tem PR aberto** — aguardando o checklist de promoção pra prod (ver
+seção "Storage — domínio novo"), como pedido explicitamente pelo usuário.
 
 ---
 
@@ -725,10 +1399,12 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
    SLA da sidebar por completo (pedido do usuário, não relacionado a este
    item). Não há mais bolinha de nenhum tipo ali.
 
-2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer, incluindo os
-   bindings cross-project desta sessão) em Terraform em vez de gcloud
-   manual — mais urgente agora que existem 6 bindings manuais por projeto
-   (3 roles x 2 SAs) em vez de 2. Fica mais fácil de perder rastro sem IaC.
+2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer/logging.*,
+   incluindo os bindings cross-project) em Terraform em vez de gcloud
+   manual — cada vez mais urgente: agora são 5 roles de BigQuery/Logging
+   x 2 SAs em dev, mais (depois da promoção de storage pra prod) 2 roles
+   de storage x 2 SAs x 2 projetos. Fica mais fácil de perder rastro sem
+   IaC a cada domínio novo que precisa de role própria.
 
 3. Senha de login hardcoded no frontend (`AuthGate.tsx`, "senha123",
    client-side, sessionStorage) — não é autenticação de verdade, qualquer
@@ -787,7 +1463,7 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     audit config) ser registrada no momento em que acontece, e verificada
     (não assumida) antes de marcar como feita.
 
-11. **Possíveis documentos órfãos na coleção `profiling_results` do
+12. **Possíveis documentos órfãos na coleção `profiling_results` do
     Firestore de dev** — a feature de score de qualidade escreveu nessa
     coleção enquanto esteve ativa nesta sessão (depois revertida, ver
     Sprint 3.2 acima). Nenhum código lê ou escreve mais nela, mas os
@@ -795,21 +1471,63 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     alguém limpar manualmente — não afeta nada em runtime, só
     "sujeira" de dado morto.
 
-12. **Bundle do frontend cresceu bastante nesta sessão** — 929.60 kB /
-    gzip 281 kB (era 524.80 kB antes da Sprint 3.2), principalmente por
-    causa do `recharts` (histórico de qualidade). Item 6 do backlog da
+13. **Bundle do frontend** — 1.327,96 kB / gzip 392,71 kB (medido ao vivo
+    ao fim desta sessão, 2026-08-18), depois de mais um domínio inteiro
+    (`storage`) somado a lineage/FinOps/Admin. Item 6 do backlog da
     Sprint 2 (code-splitting) fica mais urgente a cada domínio novo —
-    ainda não implementado.
+    ainda não implementado. Bom candidato pra próxima sessão que não
+    tenha feature nova pra entregar.
 
-13. **Expansão de cobertura pra além do BigQuery** — hoje os 7 domínios
-    (catálogo, lineage, PII, mapa de acesso, qualidade, freshness,
-    FinOps) só observam BigQuery/Cloud Logging/Cloud Billing. Cliente
-    (via usuário, 2026-08-17) confirmou interesse em mapear outros
-    serviços GCP do lado do cliente (ex: Cloud Storage, Pub/Sub,
-    Dataflow) no futuro, mas decidiu conscientemente adiar — quer
-    terminar de fechar os mapeamentos de uso do Hub em si (painel
-    admin — ver Admin v1.2 acima) e mais alguns pontos antes de abrir
-    essa frente nova. Não iniciar sem alinhamento explícito do usuário.
+14. **Expansão de cobertura pra além do BigQuery** — **1ª frente
+    concluída nesta sessão**: domínio `storage` (Cloud Storage) completo
+    e validado em dev (catálogo, waste scanner, extensão de lineage —
+    ver seção "Storage — domínio novo"). Ordem de prioridade planejada
+    (spec `docs/specs/storage.md`, seção 1): Storage → Scheduler →
+    Workflows. Scheduler/Workflows continuam não iniciados — não começar
+    sem alinhamento explícito do usuário, mesma regra de antes.
+
+15. ~~`CHANGELOG.md` desatualizado~~ — **obsoleto**: corrigido nesta
+    sessão (depois de recuperar os commits presos em
+    `feature/admin-usage-analytics`, ver "Storage — domínio novo" →
+    "Falha de processo"). `CHANGELOG.md` e `docs/prd.md` agora refletem
+    Fase 4 (FinOps) e Fase 5 (Storage) como concluídas.
+
+16. **`docs/adr/ADR-009-acl-usuario-projeto.md` com datas incorretas** —
+    cabeçalho diz "2026-08-18" e a "Nota de extensão" diz "2026-08-20",
+    mas todos os commits reais da feature (`391d159`..`301fc59`) rodaram
+    em 2026-08-17 (confirmado via `git log`). Provavelmente datas
+    assumidas/erradas no momento da escrita do ADR, não checadas contra
+    o commit real. Ainda não corrigido — CLAUDE.md diz "nunca apagar um
+    ADR", então a correção certa é uma nota de erratum, não reescrever a
+    data original; sinalizar ao usuário antes de mexer.
+
+17. ~~Mudança não commitada em `infra/terraform/modules/cloud-run/
+    variables.tf`~~ — **obsoleto**: descartada nesta sessão (`git
+    restore`) por decisão do usuário, sem justificativa encontrada nos
+    logs do Cloud Run.
+
+18. **IAM/audit config de `storage` pendente em prod** — domínio inteiro
+    validado em dev, mas `observability-hub-prod` ainda não tem nenhuma
+    role `storage.*` (nem self nem cross), nem os 3 buckets mock, nem os
+    jobs LOAD/EXTRACT reais pra popular lineage/waste scanner. Checklist
+    completo em "Storage — domínio novo" → "Pendências pra promover em
+    prod" — bloqueia o PR de `feat/storage-mvp` → `main`.
+
+19. **Gap de `jobStatus.state != "DONE"` em todo parser de audit log do
+    projeto** (lineage, access, finops) — nenhum dos três filtra jobs
+    que falharam antes de virar aresta/evento. Descoberto durante a
+    extensão do lineage pra bucket (item 4 do domínio storage), mas é
+    pré-existente e afeta os três domínios, não só bucket. Não corrigido
+    de propósito (fora do escopo daquele item) — considerar como um
+    item de qualidade próprio, com spec/discussão de nível de confiança
+    aceitável antes de implementar (mesma cautela já usada pra outras
+    heurísticas do projeto).
+
+20. **`Bucket.updated` (colunas "Criado em"/"Atualizado em" do catálogo
+    de storage) não é o mesmo sinal que "dado ainda sendo gravado"** —
+    documentado com clareza na spec (seção 5) e no CHANGELOG, mas vale
+    revisitar se algum usuário real confundir os dois conceitos na
+    prática. Trade-off aceito conscientemente, não é um bug.
 ```
 
 ---
@@ -817,20 +1535,37 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 ## Próxima sprint
 
 ```
-Continuar Sprint 3.2 na branch feat/sprint-3.2 (commits 5516b36..28f1f7f):
+Domínio storage completo e validado em dev (2026-08-18) — feat/storage-
+mvp, 8 commits de app + 5 commits de docs, sem PR pra main ainda.
+Infraestrutura de prod (IAM, buckets, mocks, audit config) já foi
+promovida nesta mesma sessão — ver "Storage — domínio novo" → "Promoção
+pra prod — concluída nesta sessão". Único passo que falta:
 
-1. Usuário valida lineage/órfãs em dev (último item entregue)
-2. Fingerprinting de PII — versão resumida da spec antes de implementar
-   (preferência já confirmada), depois domains/pii/, endpoint de scan,
-   badge na tabela de ativos, botão "Escanear PII" no modal de profiling
-3. Mapa de acesso — mesma janela de audit logs de lineage (Cloud Logging,
-   Data Access), mesmos pré-requisitos de IAM (item 8/9 do Backlog)
-4. Depois dos 7 itens completos e validados: docs/specs/lineage.md,
-   pii.md, access.md formais (deferidos pra este momento, por decisão do
-   usuário) + CHANGELOG/SESSIONLOG de encerramento + só então pedir
-   aprovação pra abrir o PR de feat/sprint-3.2 para main
+1. Abrir o PR de feat/storage-mvp → main (não aberto nesta sessão, sem
+   pedido explícito do usuário).
+2. Depois do merge, confirmar deploy automático de prod verde
+   (gh run list) e validar visualmente as 4 funcionalidades em prod
+   (mesma limitação de sempre — sem Chromium headless neste sandbox,
+   validação visual é sempre do usuário). A infra já está pronta pra
+   receber o deploy — não deve faltar nenhum bucket/role/dado quando o
+   app subir.
 
-Fase 4 — FinOps [pendente, depois da Sprint 3.2]
+Depois disso, nenhuma sprint nova está aprovada. Candidatos conhecidos
+pro próximo passo, nenhum iniciado, em ordem de menor pra maior escopo:
+1. Formalizar IAM cross-project em Terraform (Backlog item 2) — cresce
+   a cada domínio novo com role própria.
+2. ADR-009 com datas incorretas (Backlog item 16) — sinalizar ao
+   usuário antes de tocar (nunca apagar/reescrever ADR).
+3. Code-splitting do bundle frontend (Backlog item 13) — 1.327,96 kB /
+   gzip 392,71 kB, cresce a cada domínio novo.
+4. Gap de jobStatus.state != "DONE" em lineage/access/finops (Backlog
+   item 19) — precisa de spec/discussão de nível de confiança antes de
+   implementar.
+5. Scheduler/Workflows — próxima frente de "além do BigQuery" (Backlog
+   item 14), só com alinhamento explícito do usuário.
+
+Nenhum desses foi validado com o usuário como próxima sprint — são só o
+estado observável do backlog. Perguntar antes de agir.
 ```
 
 ---
@@ -839,18 +1574,26 @@ Fase 4 — FinOps [pendente, depois da Sprint 3.2]
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. Branch local está em `feat/sprint-3.2`, à frente de `main` em 11
-   commits (`5516b36`..`c33f950`) — itens 1, 2 (score, implementado e
-   revertido), 3 (histórico), 4 (lineage/órfãs) e o ajuste de UX do
-   catálogo (`d9401d2`) completos; fix de bug cross-project em lineage
-   (`c33f950`) pusheado, aguardando revalidação do usuário em dev. **Sem PR
-   aberto.**
-4. Confirmar com o usuário se a revalidação do fix de lineage cross-project
-   já aconteceu antes de seguir pro próximo item (PII, item 6 da spec
-   original) — apresentar plano resumido antes de escrever qualquer arquivo
-   novo, como no restante desta sprint.
-5. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
+3. `git fetch && git checkout main && git pull` — a `main` local fica
+   desatualizada com frequência (era `44ad7c9`/PR #17 na sessão anterior,
+   hoje é `35c0205`/PR #24); sempre conferir contra `origin/main` antes
+   de assumir o estado, nunca só a `main` local.
+4. Branch de trabalho é `feat/storage-mvp` (16 commits à frente de
+   `main`, `02adc81`..`9a5f018`) — domínio storage completo e validado
+   em dev, infraestrutura de prod já promovida, **sem PR pra `main`
+   ainda**. Checar `git status`: working tree deve estar limpo (nada
+   pendente desta sessão).
+5. Próximo passo real: só abrir o PR de `feat/storage-mvp` → `main` —
+   não é uma sprint nova, é o fechamento desta. Prod já está pronta (ver
+   "Storage — domínio novo" → "Promoção pra prod — concluída nesta
+   sessão"), não precisa rodar mais nenhum comando de infra antes do PR.
+6. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
    alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que
    conceder/alterar IAM, API ou audit config num projeto deve registrar lá
    antes de considerar a tarefa concluída (ver CLAUDE.md, "Registro de
-   acessos e configurações").
+   acessos e configurações"). Está em dia até 2026-08-18.
+7. **Lição desta sessão, não repetir**: commits de documentação numa
+   branch de feature só são confiáveis depois de mergeados em `main` via
+   PR — presos numa branch (mesmo pusheados pro remoto), somem quando
+   uma branch nova nasce de `main` atualizada. Ver "Storage — domínio
+   novo" → "Falha de processo".
