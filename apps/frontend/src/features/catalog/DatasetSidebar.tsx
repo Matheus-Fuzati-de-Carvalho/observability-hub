@@ -3,6 +3,7 @@ import {
   Clock,
   Database,
   DollarSign,
+  HardDrive,
   History,
   PiggyBank,
   Search,
@@ -126,10 +127,12 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
     .filter((t) => t.project_id === projectId)
     .slice(0, MAX_RECENT_TABLES_SHOWN)
 
-  // BigQuery é o único serviço hoje — abre por padrão (sidebar vazia no
-  // primeiro acesso seria uma UX ruim pra um Hub de serviço único). Tudo
-  // que abre DENTRO dele começa recolhido, sem exceção.
+  // BigQuery é o serviço com mais conteúdo hoje — abre por padrão (sidebar
+  // vazia no primeiro acesso seria má UX). Cloud Storage começa recolhido,
+  // mesmo padrão de subseção nova com pouco conteúdo ainda. Tudo que abre
+  // DENTRO de um serviço começa recolhido, sem exceção.
   const [bigQueryOpen, setBigQueryOpen] = useState(true)
+  const [cloudStorageOpen, setCloudStorageOpen] = useState(false)
   const [governanceOpen, setGovernanceOpen] = useState(false)
   const [finopsOpen, setFinopsOpen] = useState(false)
   const [datasetsOpen, setDatasetsOpen] = useState(false)
@@ -359,6 +362,18 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
             </nav>
           </SidebarSection>
         )}
+      </SidebarServiceGroup>
+
+      <SidebarServiceGroup
+        icon={<HardDrive size={16} />}
+        label="Cloud Storage"
+        open={cloudStorageOpen}
+        onOpenChange={setCloudStorageOpen}
+      >
+        <NavLink to="/storage" className={NAV_LINK_CLASS}>
+          <HardDrive size={16} />
+          Buckets
+        </NavLink>
       </SidebarServiceGroup>
     </aside>
   )

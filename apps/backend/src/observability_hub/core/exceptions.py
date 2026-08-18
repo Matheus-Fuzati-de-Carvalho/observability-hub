@@ -22,6 +22,18 @@ class LoggingAccessDeniedError(Exception):
         super().__init__(f"Acesso negado aos audit logs do projeto '{project_id}'.")
 
 
+class StorageAccessDeniedError(Exception):
+    """A SA de runtime não tem roles/storage.objectViewer no projeto alvo —
+    levantada por domains/storage ao consultar buckets/objetos via Cloud
+    Storage. Mesma família de LoggingAccessDeniedError (client REST,
+    Forbidden na ausência da role), papel distinto de
+    ProjectAccessDeniedError (que cobre só as roles de BigQuery)."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Acesso negado ao Cloud Storage do projeto '{project_id}'.")
+
+
 class ProjectNotFoundError(Exception):
     def __init__(self, project_id: str) -> None:
         self.project_id = project_id

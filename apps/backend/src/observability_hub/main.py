@@ -17,6 +17,7 @@ from observability_hub.api.v1 import (
     profiling,
     projects,
     quality,
+    storage,
 )
 from observability_hub.core.bigquery import get_client
 from observability_hub.core.config import settings
@@ -37,6 +38,7 @@ from observability_hub.core.exceptions import (
     ProjectAccessDeniedError,
     ProjectNotAuthorizedError,
     ProjectNotFoundError,
+    StorageAccessDeniedError,
     TableNotFoundError,
     TableNotPartitionedError,
 )
@@ -67,6 +69,7 @@ app.include_router(access.router)
 app.include_router(finops.router)
 app.include_router(admin.router)
 app.include_router(access_requests.router)
+app.include_router(storage.router)
 
 
 @app.get("/health")
@@ -125,6 +128,26 @@ def handle_logging_access_denied(request: Request, exc: LoggingAccessDeniedError
                 f"--member='serviceAccount:{sa_email}' "
                 f"--role='roles/{role}'"
                 for role in roles
+            ],
+        },
+    )
+
+
+@app.exception_handler(StorageAccessDeniedError)
+def handle_storage_access_denied(request: Request, exc: StorageAccessDeniedError) -> JSONResponse:
+    runtime_project = get_client().project
+    sa_email = f"backend-run@{runtime_project}.iam.gserviceaccount.com"
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "storage_access_denied",
+            "message": "A service account do Hub não tem acesso ao Cloud Storage deste projeto.",
+            "fix": [
+                (
+                    f"gcloud projects add-iam-policy-binding {exc.project_id} "
+                    f"--member='serviceAccount:{sa_email}' "
+                    "--role='roles/storage.objectViewer'"
+                )
             ],
         },
     )
