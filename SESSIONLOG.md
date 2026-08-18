@@ -1327,18 +1327,27 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-`main`/prod ainda estão parados no PR #24 (`35c0205`) do ponto de vista
-de **código** — o domínio storage inteiro (8 commits de app,
-`02adc81`..`9bafbee`, mais os commits de docs até `9a5f018`) vive só em
-`feat/storage-mvp`, sem PR aberto. A **infraestrutura/dados de prod**
-(IAM, buckets, mocks, audit config), porém, já foram promovidos nesta
-sessão, antes do PR — prod está pronta pra receber o deploy assim que o
-PR for mergeado. `main` local precisa de `git fetch && git checkout main
-&& git pull` antes de qualquer branch nova (mesmo aviso de sempre).
+`main`/prod: PR #25 mergeado (`d022061`), domínio storage completo em
+produção, deploy automático confirmado verde. Branch `feat/storage-mvp`
+já mergeada, pode ser deletada quando conveniente.
 
 Working tree limpo — a mudança não commitada em `variables.tf`
 (`max_instance_count`) registrada na atualização anterior foi descartada
 nesta sessão (`git restore`, sem justificativa encontrada).
+
+**Achado e corrigido no fim desta sessão (investigação de billing, não
+relacionado ao domínio storage)**: os 4 serviços Cloud Run (dev/prod ×
+backend/frontend) estavam com `run.googleapis.com/cpu-throttling: false`
+("CPU sempre alocada", cobra pelo tempo de vida da instância inteira,
+não só durante o processamento da requisição) — confirmado que não vem
+do Terraform (`resources.cpu_idle` não é declarado no módulo
+`cloud-run`) nem do workflow de deploy (`gcloud run deploy` sem essa
+flag em nenhum dos 4 workflows), foi mudado manualmente em algum
+momento fora do fluxo do projeto. Revertido pros 4 serviços via
+`gcloud run services update --cpu-throttling` (volta pro padrão, CPU só
+durante request) em 2026-08-18 — confirmado `cpu-throttling: true` nos
+4 e health check 200 nos 4 depois do rollout. `min_instance_count = 0`
+(scale-to-zero) confirmado intacto nos 4, nunca foi o problema.
 ```
 
 ---
@@ -1527,6 +1536,19 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     documentado com clareza na spec (seção 5) e no CHANGELOG, mas vale
     revisitar se algum usuário real confundir os dois conceitos na
     prática. Trade-off aceito conscientemente, não é um bug.
+
+21. ~~`cpu-throttling: false` ("CPU sempre alocada") nos 4 serviços Cloud
+    Run~~ — **obsoleto**: descoberto e corrigido no fim desta sessão,
+    numa investigação de custo do Cloud Run não relacionada ao domínio
+    storage. Não vinha do Terraform nem do workflow de deploy — mudado
+    manualmente fora do fluxo do projeto, sem registro de quando ou por
+    quê. Revertido pro padrão (CPU só durante request) nos 4 serviços.
+    **Sem explicação de quem/quando ligou originalmente** — se acontecer
+    de novo, vale investigar antes de só reverter (pode ter sido uma
+    tentativa de mitigar cold start, mas `cpu-throttling` não ajuda
+    nisso, quem ajuda é `min_instance_count` > 0, que tem custo
+    contínuo mais previsível e foi conscientemente mantido em 0 pelo
+    projeto).
 ```
 
 ---
