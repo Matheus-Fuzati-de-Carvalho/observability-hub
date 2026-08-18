@@ -120,6 +120,24 @@ Por que é MVP: elimina o maior gargalo de qualidade — escrever queries de pro
 
 - Recomendações automáticas de particionamento, clustering e tipo de coluna com estimativa de economia
 
+### 4.4 Fase 5 — Cloud Storage (primeira expansão pra além do BigQuery)
+
+Ver `docs/specs/storage.md` pra detalhe completo. Quatro funcionalidades,
+mesma filosofia de custo mínimo do resto do produto (metadado/audit log,
+nunca amostragem de dado real de objeto):
+
+- **Catálogo de buckets**: nome, storage class, região, tamanho total,
+  contagem de objetos, lifecycle rule, data de criação/atualização.
+- **Scanner de desperdício**: duas checagens — idade + ausência de
+  lifecycle rule (sempre disponível) e confirmação de "sem leitura
+  recente" via Data Access audit log do GCS (opcional, precisa de config
+  de audit separada da do BigQuery). Faixa de economia estimada
+  (migração pra NEARLINE/COLDLINE), nunca um valor único.
+- **Extensão do lineage**: bucket vira nó do grafo já existente (jobs
+  LOAD/EXTRACT do BigQuery) — sempre nó folha, não expande recursivamente
+  a partir de um bucket (sem forma confiável de saber "o projeto dono" de
+  um bucket via API).
+
 ## 5. Fora do escopo (explicitamente)
 
 - Mover, transformar ou gravar dados — a ferramenta é somente leitura
@@ -143,7 +161,8 @@ Por que é MVP: elimina o maior gargalo de qualidade — escrever queries de pro
 | Fase 2 | MVP: Catálogo + Volumetria + Freshness + Profiling (backend + frontend) | ✅ Concluída |
 | Sprint 2.2/2.3 | Metadados de partição, busca reversa tabela→datasets, refresh e melhorias de UX sobre o MVP do Catálogo | ✅ Concluída |
 | Fase 3 | Lineage, PII, Mapa de acesso | ✅ Concluída |
-| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício, budget e sugestão de tipo de coluna concluídos; sugestão de clustering deferida — ver docs/specs/finops-column-types.md, "Fora do escopo") |
+| Fase 4 | FinOps completo | ✅ Concluída (scanner de desperdício, budget e sugestão de tipo de coluna; sugestão de clustering deferida — ver docs/specs/finops-column-types.md, "Fora do escopo") |
+| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício, extensão do lineage | ✅ Concluída, validada em dev — aguardando promoção pra prod e PR pra `main` |
 
 Ver `CHANGELOG.md` para o detalhe fase a fase (o que foi feito, erros
 corrigidos e decisões de arquitetura) e `SESSIONLOG.md` para o estado

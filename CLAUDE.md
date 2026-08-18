@@ -6,19 +6,20 @@ Este documento é a fonte de verdade das convenções do projeto. Qualquer sess�
 
 ## Visão geral do domínio
 
-O produto monitora datasets e tabelas do BigQuery em toda a organização e expõe:
+O produto monitora BigQuery (todos os datasets/tabelas da organização) e, a partir da expansão iniciada em 2026-08-18, também Cloud Storage — primeiro passo de uma frente maior de cobertura pra além do BigQuery (Storage → Scheduler → Workflows, nessa ordem de prioridade, ver `docs/specs/storage.md` seção 1):
 
 | Funcionalidade | O que faz | Fonte de dados principal |
 |---|---|---|
 | Catálogo | Inventário navegável de datasets/tabelas | `INFORMATION_SCHEMA` (BigQuery) |
-| Lineage e tabelas órfãs | Reconstrói relações de dependência entre tabelas e identifica tabelas sem consumidores conhecidos | Cloud Logging (audit logs de jobs BigQuery) |
+| Lineage e tabelas órfãs | Reconstrói relações de dependência entre tabelas (incluindo bucket do GCS como nó, via jobs LOAD/EXTRACT) e identifica tabelas sem consumidores conhecidos | Cloud Logging (audit logs de jobs BigQuery) |
 | Fingerprinting de PII | Detecta colunas com dados pessoais sensíveis | `INFORMATION_SCHEMA` + amostragem de dados |
 | Mapa de acesso | Quem acessou o quê e quando | Cloud Logging (data access audit logs) |
 | Qualidade de dados e schema drift | Detecta mudanças de schema e quebras de contrato | `INFORMATION_SCHEMA` (snapshots ao longo do tempo) |
 | Freshness com SLA | Monitora se tabelas estão sendo atualizadas dentro do esperado | Metadados de última modificação (BigQuery) |
 | FinOps | Scanner de desperdício (tabelas não usadas, partições mal configuradas) e acompanhamento de budget | BigQuery + Cloud Billing |
+| Cloud Storage | Catálogo de buckets, scanner de desperdício (idade + config, com confirmação opcional de uso real via audit log) | Cloud Storage API + Cloud Logging (audit logs de leitura de objeto) |
 
-Esses sete domínios são a espinha dorsal da estrutura de pastas do backend e do frontend — cada um vira um módulo isolado, não uma feature espalhada por camadas transversais.
+Esses oito domínios são a espinha dorsal da estrutura de pastas do backend e do frontend — cada um vira um módulo isolado, não uma feature espalhada por camadas transversais. `storage` é o único que não segue o agrupamento "BigQuery" da sidebar (`SidebarServiceGroup` próprio, "Cloud Storage") — ver `docs/specs/storage.md`.
 
 ## Stack
 
@@ -92,7 +93,7 @@ Nunca compartilhar recursos entre `dev` e `prod`. Cada ambiente tem seu próprio
 └── .gitignore
 ```
 
-Regra geral: **domains/ (backend) e features/ (frontend) espelham exatamente os 7 domínios da tabela acima**. Ao adicionar uma funcionalidade nova, ela ganha uma pasta própria nos dois lados — não se mistura lógica de domínios diferentes no mesmo módulo.
+Regra geral: **domains/ (backend) e features/ (frontend) espelham exatamente os domínios da tabela acima**. Ao adicionar uma funcionalidade nova, ela ganha uma pasta própria nos dois lados — não se mistura lógica de domínios diferentes no mesmo módulo.
 
 ## Convenções — Backend
 

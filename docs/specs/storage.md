@@ -1,8 +1,11 @@
 # Spec — `domains/storage` (Cloud Storage)
 
-**Status:** Implementada — os 4 itens do MVP (catálogo, colunas nativas de
-data, scanner de desperdício 6.1+6.2, extensão do lineage) codificados e
-com testes; item 4 (lineage) aguardando validação em dev
+**Status:** Implementada e validada em dev — os 4 itens do MVP (catálogo,
+colunas nativas de data, scanner de desperdício 6.1+6.2, extensão do
+lineage) completos, testados e confirmados em `observability-hub-dev`
+pelo usuário em 2026-08-18. Branch `feat/storage-mvp`, sem PR pra `main`
+ainda — aguardando promoção de mocks/IAM pra `observability-hub-prod`
+(ver `docs/onboarding-cliente.md`)
 **Versão:** v1.1
 **Depende de:** `domains/lineage` (extensão, não substituição)
 
