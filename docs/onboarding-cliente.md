@@ -220,6 +220,10 @@ checklist, e servem de precedente real de que o processo funciona.
 | 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.objectViewer` (domínio `storage`, ver `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
 | 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.bucketViewer` (faltava pra `objectViewer` sozinha ser suficiente, ver nota da seção 8 de `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
 | 2026-08-18 | `observability-hub-dev` | — | Data Access audit log `DATA_READ` habilitado para `storage.googleapis.com` (via `auditConfigs` do projeto) — domínio `storage`, checagem de objeto sem leitura recente (spec `storage.md` v1.1, seção 6.2) | `gcloud projects get-iam-policy` (campo `auditConfigs`) |
+| 2026-08-18 | `observability-hub-prod` | `backend-run@...-prod` (self) | `roles/storage.bucketViewer` + `roles/storage.objectViewer` | `gcloud projects get-iam-policy` |
+| 2026-08-18 | `observability-hub-prod` | `backend-run@...-dev` (cross) | `roles/storage.bucketViewer` + `roles/storage.objectViewer` | `gcloud projects get-iam-policy` |
+| 2026-08-18 | `observability-hub-dev` | `backend-run@...-prod` (cross) | `roles/storage.bucketViewer` + `roles/storage.objectViewer` | `gcloud projects get-iam-policy` |
+| 2026-08-18 | `observability-hub-prod` | — | Data Access audit log `DATA_READ` habilitado para `storage.googleapis.com` (mesma config de dev, aplicada em prod nesta sessão — decisão do usuário, ciente da nota de volume da seção 6.2) | `gcloud projects get-iam-policy` (campo `auditConfigs`) |
 
 **Nota:** os dois itens "antes de 2026-08-14" foram descobertos ao vivo
 nesta sessão via `gcloud projects get-iam-policy` — o SESSIONLOG.md

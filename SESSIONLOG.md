@@ -22,9 +22,17 @@ branch `feat/storage-mvp` (a partir de `main` pós-PR #24), commits
 `02adc81`..`ec0ae14`. **Todos os 4 itens validados em dev pelo usuário**,
 incluindo o grafo de lineage real (`RAW.crm_leads_staging` com bucket
 `landing` upstream e `processed` downstream, jobs LOAD/EXTRACT reais).
-**Sem PR pra `main` ainda** — aguardando o usuário rodar os comandos de
-promoção pra prod (buckets mock, IAM, ver seção própria abaixo) antes de
-abrir o PR.
+
+**Promoção pra prod concluída nesta mesma sessão** (checklist completo
+na seção "Storage — domínio novo" abaixo): IAM self+cross das duas roles
+de storage nos dois projetos, 3 buckets mock em prod espelhando dev
+(landing com lifecycle rule, processed, archive), objeto mock + jobs
+LOAD/EXTRACT reais (`RAW.crm_leads_staging` populada), e — decisão do
+usuário — Data Access audit log `DATA_READ` de `storage.googleapis.com`
+também habilitado em prod (não só dev). Tudo confirmado ao vivo via
+`gcloud`/`bq`, não assumido. **Só falta abrir o PR de `feat/storage-mvp`
+→ `main`** — não aberto ainda nesta sessão, sem pedido explícito do
+usuário pra abrir.
 
 **Item resolvido nesta sessão**: a mudança não commitada em
 `infra/terraform/modules/cloud-run/variables.tf` (`max_instance_count`
@@ -39,14 +47,11 @@ audit log capturados). As seções anteriores (Sprint 3.2, FinOps, Admin
 ACL, Documentação para cliente) continuam válidas — nada mudou nelas
 nesta sessão, só ficaram mais antigas na lista.
 
-**Próximo passo:** rodar o checklist de prod (comandos passados ao
-usuário fora deste arquivo, resumo na seção "Storage — domínio novo" →
-"Pendências pra promover em prod") — buckets mock, IAM (`storage.
-bucketViewer`+`storage.objectViewer`, self e cross-project), jobs LOAD/
-EXTRACT reais pra popular o lineage. Depois disso, abrir o PR de
-`feat/storage-mvp` → `main`, como pedido explicitamente pelo usuário no
-início desta sprint (mesmo padrão das sprints anteriores — sem PR até
-tudo validado).
+**Próximo passo:** abrir o PR de `feat/storage-mvp` → `main` — todo o
+resto do checklist (dev, prod, docs) está fechado. Depois do merge,
+confirmar deploy automático de prod verde (`gh run list`) e validar
+visualmente as 4 funcionalidades em prod (sem ferramenta de browser
+neste sandbox — validação visual sempre do usuário).
 
 ---
 
@@ -198,38 +203,47 @@ acontece de verdade. Considerar, numa sessão futura, abrir PRs só de
 docs quando uma branch de feature demorar muito pra fechar (em vez de
 esperar o PR final que empacota tudo junto).
 
-### Pendências pra promover em prod (antes do PR pra `main`)
-Nada disso foi aplicado em prod ainda — comandos passados ao usuário
-fora deste arquivo (ele roda via `!`, mesmo padrão de sempre):
-1. IAM self: `backend-run@...-prod` ganha `roles/storage.bucketViewer` +
-   `roles/storage.objectViewer` em `observability-hub-prod`.
-2. IAM cross (mesmo padrão simétrico já usado pra BigQuery/Logging):
-   `backend-run@...-dev` ganha as mesmas duas roles em
-   `observability-hub-prod`; `backend-run@...-prod` ganha as mesmas duas
-   roles em `observability-hub-dev`.
+### Promoção pra prod — concluída nesta sessão (antes do PR pra `main`)
+Checklist passado ao usuário fora deste arquivo, ele confirmou ter
+rodado (parte em paralelo comigo, parte eu mesmo rodei quando pedido
+diretamente) — tudo confirmado ao vivo depois, não assumido:
+1. ✅ IAM self: `backend-run@...-prod` ganhou `roles/storage.
+   bucketViewer` + `roles/storage.objectViewer` em `observability-hub-
+   prod`.
+2. ✅ IAM cross (mesmo padrão simétrico já usado pra BigQuery/Logging):
+   `backend-run@...-dev` ganhou as mesmas duas roles em
+   `observability-hub-prod`; `backend-run@...-prod` ganhou as mesmas
+   duas roles em `observability-hub-dev`. Confirmado via `gcloud
+   projects get-iam-policy` nos dois projetos — matriz 2×2 completa
+   (2 roles × 2 SAs × 2 projetos).
 3. `storage.googleapis.com` já estava habilitada em prod antes desta
    sessão (confirmado via `gcloud services list` — provavelmente
    habilitada como dependência de outra coisa, não documentado quando).
-4. 3 buckets mock em prod, espelhando dev: `observability-hub-prod-
-   landing` (STANDARD, com lifecycle rule), `observability-hub-prod-
-   processed` (NEARLINE, sem regra), `observability-hub-prod-archive`
-   (COLDLINE, sem regra).
-5. 1 objeto mock em `landing`, 1 job LOAD real (landing → nova tabela
-   `RAW.crm_leads_staging`, prod já tem `RAW.crm_leads` mas não
-   `_staging`) e 1 job EXTRACT real (`crm_leads_staging` → `processed`)
-   — pra popular lineage/waste scanner com dado real, mesmo mock que
-   valida em dev.
-6. **Não** habilitar Data Access audit log `DATA_READ` de
-   `storage.googleapis.com` em prod nesta rodada — spec (seção 6.2)
-   registra nota de volume/custo (evento por leitura de objeto, pode ser
-   alto em bucket de tráfego real); decisão de quando habilitar fica
-   pro usuário, não é bloqueante pro MVP funcionar (6.2 degrada
-   graciosamente sem essa config).
-7. Depois de tudo confirmado (`gcloud ... get-iam-policy`/`buckets
-   list`/`bq show` ao vivo, não assumido), registrar as linhas em
-   `docs/onboarding-cliente.md` (checklist já cobre as roles/API, só
-   falta a confirmação em prod) e abrir o PR de `feat/storage-mvp` →
-   `main`.
+4. ✅ 3 buckets mock em prod, espelhando dev exatamente: `observability-
+   hub-prod-landing` (STANDARD, mesma lifecycle rule de dev —
+   `SetStorageClass NEARLINE` aos 30 dias por `customTime`),
+   `observability-hub-prod-processed` (NEARLINE, sem regra),
+   `observability-hub-prod-archive` (COLDLINE, sem regra, vazio).
+5. ✅ 1 objeto mock em `landing` (mesmo conteúdo do de dev), 1 job LOAD
+   real (`landing` → `RAW.crm_leads_staging`, tabela nova — prod já
+   tinha `RAW.crm_leads`, sem `_staging`) e 1 job EXTRACT real
+   (`crm_leads_staging` → `processed`) — confirmados via `bq show`/
+   `gcloud storage ls` ao vivo.
+6. ✅ **Decisão do usuário**: habilitar Data Access audit log
+   `DATA_READ` de `storage.googleapis.com` **também em prod** (não só
+   dev) — diferente do planejado inicialmente (a spec, seção 6.2,
+   registra a nota de volume/custo — evento por leitura de objeto — como
+   motivo pra adiar; o usuário decidiu prosseguir mesmo assim,
+   consciente do trade-off). Aplicado via merge de `auditConfigs`
+   (mesmo padrão de `docs/onboarding-cliente.md` seção 3), sem
+   sobrescrever a config existente de `bigquery.googleapis.com`.
+   Confirmado via `gcloud projects get-iam-policy` — as duas entradas
+   coexistem.
+7. ✅ Tudo registrado em `docs/onboarding-cliente.md` (6 linhas novas na
+   tabela "Registro de acessos concedidos").
+
+**Falta só**: abrir o PR de `feat/storage-mvp` → `main` — não feito
+nesta sessão, sem pedido explícito do usuário pra abrir.
 
 ### Status final
 - Backend: 597 testes unitários (0 quando o domínio começou), 100%
@@ -237,7 +251,8 @@ fora deste arquivo (ele roda via `!`, mesmo padrão de sempre):
 - Frontend: `biome check`, `tsc -b`, `vite build` limpos em cada commit.
 - Validado em dev pelo usuário — os 4 itens, incluindo o grafo de
   lineage com bucket real.
-- **Sem PR pra `main`** — aguardando promoção de prod (seção acima).
+- Prod promovida por completo (IAM, buckets, dados mock, audit config)
+  — ver seção acima. **Sem PR pra `main` ainda.**
 
 ---
 
@@ -1249,22 +1264,20 @@ GCP Dev  (observability-hub-dev)
 │   logging.viewer + logging.privateLogViewer no próprio projeto e em
 │   observability-hub-prod (cross-project completo nas 5 roles de
 │   BigQuery/Logging, sem mudança nesta sessão)
-├── IAM backend-run@...-dev: storage.bucketViewer + storage.objectViewer
-│   — **só self, no próprio projeto** (concedidas nesta sessão). Ainda
-│   **não cross-granted** pra observability-hub-prod nem vice-versa —
-│   ver "Storage — domínio novo" → "Pendências pra promover em prod"
-├── IAM backend-run@...-prod: as cinco roles de BigQuery/Logging em
-│   observability-hub-dev (cross-project completo, sem mudança). **Zero**
-│   roles de storage.* em nenhum projeto — nunca concedidas
+├── IAM storage.bucketViewer + storage.objectViewer: **cross-project
+│   completo nos dois projetos** (backend-run@...-dev e
+│   backend-run@...-prod, cada um com as duas roles no próprio projeto
+│   e no outro — matriz 2×2 confirmada ao vivo via `gcloud projects
+│   get-iam-policy` em 2026-08-18)
 ├── Data Access audit logs: bigquery.googleapis.com (DATA_READ,
 │   DATA_WRITE, ADMIN_READ) em dev e prod, sem mudança. storage.
-│   googleapis.com (DATA_READ) — **habilitado só em dev**, nesta sessão
-│   (2026-08-18), pra checagem 6.2 do waste scanner. Prod não tem essa
-│   config, de propósito (nota de volume na spec, seção 6.2)
+│   googleapis.com (DATA_READ) — **habilitado em dev E prod** nesta
+│   sessão (prod foi decisão consciente do usuário, ciente da nota de
+│   volume da spec seção 6.2)
 ├── Checklist completo de IAM/API/audit config pra onboarding de projeto
 │   alvo vive em docs/onboarding-cliente.md — registro de concessões
-│   está em dia até 2026-08-18 (inclui as duas roles de storage e o
-│   audit config novo)
+│   está em dia até 2026-08-18 (inclui as duas roles de storage nos
+│   dois projetos e os dois audit configs novos)
 ├── Firestore (Native mode): sem mudança nesta sessão (domínio storage
 │   não usa Firestore — tudo vem de GCS/Cloud Logging direto)
 ├── Pipeline: 597 testes unitários backend, 100% passando, ruff limpo;
@@ -1282,21 +1295,30 @@ GCP Dev  (observability-hub-dev)
 
 GCP Prod (observability-hub-prod)
 ├── Cloud Run: backend ✅ tag c893c60 (merge commit do PR #21 — ainda a
-│   última mudança de app; domínio storage não mergeado em main ainda)
+│   última mudança de APP; domínio storage não mergeado em main ainda,
+│   só a infra/mocks/IAM já foram promovidos, ver abaixo)
 ├── Cloud Run: frontend ✅ tag c893c60, idem
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
 ├── IAM BigQuery/Logging: simétrico com dev, sem lacunas conhecidas
-├── IAM storage.*: **nenhuma role concedida** — ver checklist de
-│   promoção na seção "Storage — domínio novo"
-├── storage.googleapis.com: **já habilitada** (confirmado via `gcloud
-│   services list` nesta sessão — provavelmente por outra dependência,
-│   não documentado quando; não precisa habilitar de novo)
-├── Data Access audit log DATA_READ de storage.googleapis.com: **não
-│   habilitado**, de propósito (ver nota de volume acima)
-├── Buckets: **nenhum** além do `-tfstate` — precisa criar os 3 mocks
+├── IAM storage.bucketViewer + storage.objectViewer: **promovido nesta
+│   sessão** — self (backend-run@...-prod no próprio projeto) e cross
+│   (backend-run@...-dev também em prod) — ver bloco de dev acima, é a
+│   mesma matriz 2×2
+├── storage.googleapis.com: já habilitada antes desta sessão (dependência
+│   de outra coisa, não documentado quando)
+├── Data Access audit log DATA_READ de storage.googleapis.com:
+│   **habilitado nesta sessão** — decisão do usuário, ciente da nota de
+│   volume da spec (seção 6.2); confirmado coexistindo com o auditConfig
+│   de bigquery.googleapis.com, sem sobrescrever nada
+├── Buckets: observability-hub-prod-landing (STANDARD + lifecycle rule
+│   idêntica à de dev), -processed (NEARLINE), -archive (COLDLINE) —
+│   criados nesta sessão, espelhando dev
+├── 1 objeto mock em landing + 1 job LOAD real (→ RAW.crm_leads_staging,
+│   tabela nova) + 1 job EXTRACT real (→ processed) — criados nesta
+│   sessão, mesmo processo de dev
 ├── Admin ACL gateando 9 routers desde o PR #20, sem mudança
-├── total_datasets: 4 (RAW já tem `crm_leads`, mas não `crm_leads_staging`
-│   — precisa ser criado via job LOAD real, mesmo processo de dev)
+├── total_datasets: 4 (RAW ganhou crm_leads_staging nesta sessão, além
+│   do crm_leads que já existia)
 └── WIF: attribute_condition restrito a refs/heads/main — plan de prod
     continua revisão manual
 
@@ -1306,9 +1328,13 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-`main`/prod estão parados no PR #24 (`35c0205`) — o domínio storage
-inteiro (8 commits, `02adc81`..`ec0ae14`) vive só em `feat/storage-mvp`,
-sem PR aberto. `main` local precisa de `git fetch && git checkout main
+`main`/prod ainda estão parados no PR #24 (`35c0205`) do ponto de vista
+de **código** — o domínio storage inteiro (8 commits de app,
+`02adc81`..`9bafbee`, mais os commits de docs até `9a5f018`) vive só em
+`feat/storage-mvp`, sem PR aberto. A **infraestrutura/dados de prod**
+(IAM, buckets, mocks, audit config), porém, já foram promovidos nesta
+sessão, antes do PR — prod está pronta pra receber o deploy assim que o
+PR for mergeado. `main` local precisa de `git fetch && git checkout main
 && git pull` antes de qualquer branch nova (mesmo aviso de sempre).
 
 Working tree limpo — a mudança não commitada em `variables.tf`
@@ -1510,22 +1536,19 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 
 ```
 Domínio storage completo e validado em dev (2026-08-18) — feat/storage-
-mvp, 8 commits, sem PR pra main ainda. Único bloqueador pro PR: promover
-mocks/IAM/audit config pra prod (checklist completo na seção "Storage —
-domínio novo" → "Pendências pra promover em prod", comandos passados ao
-usuário fora deste arquivo).
+mvp, 8 commits de app + 5 commits de docs, sem PR pra main ainda.
+Infraestrutura de prod (IAM, buckets, mocks, audit config) já foi
+promovida nesta mesma sessão — ver "Storage — domínio novo" → "Promoção
+pra prod — concluída nesta sessão". Único passo que falta:
 
-Passo a passo até fechar esta sprint:
-1. Usuário roda o checklist de prod (IAM self+cross de storage.
-   bucketViewer/objectViewer, 3 buckets mock, 1 objeto + jobs LOAD/
-   EXTRACT reais em observability-hub-prod).
-2. Confirmar cada item ao vivo (gcloud/bq, não assumir) e registrar em
-   docs/onboarding-cliente.md — mesma disciplina de sempre.
-3. Abrir o PR de feat/storage-mvp → main.
-4. Depois do merge, confirmar deploy automático de prod verde
+1. Abrir o PR de feat/storage-mvp → main (não aberto nesta sessão, sem
+   pedido explícito do usuário).
+2. Depois do merge, confirmar deploy automático de prod verde
    (gh run list) e validar visualmente as 4 funcionalidades em prod
    (mesma limitação de sempre — sem Chromium headless neste sandbox,
-   validação visual é sempre do usuário).
+   validação visual é sempre do usuário). A infra já está pronta pra
+   receber o deploy — não deve faltar nenhum bucket/role/dado quando o
+   app subir.
 
 Depois disso, nenhuma sprint nova está aprovada. Candidatos conhecidos
 pro próximo passo, nenhum iniciado, em ordem de menor pra maior escopo:
@@ -1555,13 +1578,15 @@ estado observável do backlog. Perguntar antes de agir.
    desatualizada com frequência (era `44ad7c9`/PR #17 na sessão anterior,
    hoje é `35c0205`/PR #24); sempre conferir contra `origin/main` antes
    de assumir o estado, nunca só a `main` local.
-4. Branch de trabalho é `feat/storage-mvp` (8 commits à frente de `main`,
-   `02adc81`..`ec0ae14`) — domínio storage completo e validado em dev,
-   **sem PR pra `main`**. Checar `git status`: working tree deve estar
-   limpo (nada pendente desta sessão).
-5. Próximo passo real: checklist de promoção pra prod (ver seção
-   "Storage — domínio novo" → "Pendências pra promover em prod") antes
-   de abrir o PR — não é uma sprint nova, é o fechamento desta.
+4. Branch de trabalho é `feat/storage-mvp` (16 commits à frente de
+   `main`, `02adc81`..`9a5f018`) — domínio storage completo e validado
+   em dev, infraestrutura de prod já promovida, **sem PR pra `main`
+   ainda**. Checar `git status`: working tree deve estar limpo (nada
+   pendente desta sessão).
+5. Próximo passo real: só abrir o PR de `feat/storage-mvp` → `main` —
+   não é uma sprint nova, é o fechamento desta. Prod já está pronta (ver
+   "Storage — domínio novo" → "Promoção pra prod — concluída nesta
+   sessão"), não precisa rodar mais nenhum comando de infra antes do PR.
 6. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
    alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que
    conceder/alterar IAM, API ou audit config num projeto deve registrar lá
