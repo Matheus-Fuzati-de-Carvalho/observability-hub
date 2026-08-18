@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -57,3 +58,24 @@ def test_list_buckets_empty_project(monkeypatch):
     result = service.list_buckets(MagicMock(), "observability-hub-dev")
 
     assert result.buckets == []
+
+
+def test_get_bucket_freshness_returns_last_modified_without_warning(monkeypatch):
+    when = datetime(2026, 8, 17, tzinfo=UTC)
+    monkeypatch.setattr(service.repository, "get_bucket_last_modified", lambda client, name: when)
+
+    result = service.get_bucket_freshness(MagicMock(), "landing")
+
+    assert result.bucket_name == "landing"
+    assert result.last_modified == when
+    assert result.warning is None
+
+
+def test_get_bucket_freshness_returns_warning_for_empty_bucket(monkeypatch):
+    monkeypatch.setattr(service.repository, "get_bucket_last_modified", lambda client, name: None)
+
+    result = service.get_bucket_freshness(MagicMock(), "archive")
+
+    assert result.last_modified is None
+    assert result.warning is not None
+    assert "archive" in result.warning

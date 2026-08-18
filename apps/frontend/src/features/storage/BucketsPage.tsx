@@ -1,8 +1,10 @@
-import { Search } from 'lucide-react'
+import { Clock, Search } from 'lucide-react'
+import { useState } from 'react'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SortableTableHead } from '@/components/SortableTableHead'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -13,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useProjectContext } from '@/features/projects/ProjectContext'
+import { BucketFreshnessDialog } from '@/features/storage/BucketFreshnessDialog'
 import { useBuckets } from '@/features/storage/hooks'
 import { useTableFilterSort } from '@/hooks/useTableFilterSort'
 import { formatBytes, formatNumber } from '@/lib/format'
@@ -31,6 +34,7 @@ export function BucketsPage() {
   const { projectId } = useProjectContext()
   const bucketsQuery = useBuckets(projectId)
   const data = bucketsQuery.data
+  const [freshnessTarget, setFreshnessTarget] = useState<string | null>(null)
 
   const {
     search,
@@ -118,6 +122,7 @@ export function BucketsPage() {
               align="right"
             />
             <TableHead>Lifecycle rule</TableHead>
+            <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -137,11 +142,17 @@ export function BucketsPage() {
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
+              <TableCell>
+                <Button size="sm" variant="outline" onClick={() => setFreshnessTarget(bucket.name)}>
+                  <Clock size={14} />
+                  Ver freshness
+                </Button>
+              </TableCell>
             </TableRow>
           ))}
           {visibleBuckets.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
                 {data.buckets.length === 0
                   ? 'Nenhum bucket encontrado neste projeto.'
                   : 'Nenhum bucket encontrado com esse filtro.'}
@@ -150,6 +161,11 @@ export function BucketsPage() {
           )}
         </TableBody>
       </Table>
+
+      <BucketFreshnessDialog
+        bucketName={freshnessTarget}
+        onOpenChange={(open) => !open && setFreshnessTarget(null)}
+      />
     </div>
   )
 }

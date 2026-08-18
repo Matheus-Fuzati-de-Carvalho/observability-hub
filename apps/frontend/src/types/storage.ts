@@ -10,3 +10,9 @@ export interface BucketSummary {
 export interface BucketsListResponse {
   buckets: BucketSummary[]
 }
+
+export interface BucketFreshnessResponse {
+  bucket_name: string
+  last_modified: string | null
+  warning: string | null
+}

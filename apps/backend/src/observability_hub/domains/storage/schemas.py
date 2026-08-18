@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -12,3 +14,9 @@ class BucketSummary(BaseModel):
 
 class BucketsListResponse(BaseModel):
     buckets: list[BucketSummary]
+
+
+class BucketFreshnessResponse(BaseModel):
+    bucket_name: str
+    last_modified: datetime | None
+    warning: str | None
