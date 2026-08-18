@@ -1,7 +1,8 @@
 # Spec — `domains/storage` (Cloud Storage)
 
-**Status:** Em implementação (catálogo, colunas nativas de data e 6.1 do
-scanner de desperdício concluídos e validados em dev; 6.2 em andamento)
+**Status:** Implementada — os 4 itens do MVP (catálogo, colunas nativas de
+data, scanner de desperdício 6.1+6.2, extensão do lineage) codificados e
+com testes; item 4 (lineage) aguardando validação em dev
 **Versão:** v1.1
 **Depende de:** `domains/lineage` (extensão, não substituição)
 
@@ -232,20 +233,49 @@ ambiguidade.
 - Mantém a regra já existente de auto-referência nunca virar aresta (não
   deve se aplicar aqui na prática — load/extract sempre têm lados de tipo
   diferente — mas manter a checagem por segurança)
-- Bucket como nó participa da mesma travessia BFS multi-hop já existente
-  (`max_hops`) — não é uma estrutura de grafo paralela. Se um bucket for
-  alcançado e pertencer a um projeto sem acesso, aplica a mesma regra já
-  existente pra tabela não-raiz (`access_denied=true`, ramo não expande,
-  resto do grafo segue).
+
+**Revisado durante a implementação (2026-08-18)**: bucket como nó **não**
+participa da mesma travessia BFS multi-hop igual a tabela — decisão
+tomada com o usuário depois de identificar que, diferente de tabela,
+bucket não tem "projeto dono" confiável via API pra saber em qual audit
+log procurar quem mais o referencia (o nome do bucket não garante o
+projeto GCP que o possui, e jobs que o tocam podem rodar em qualquer
+projeto observado pelo Hub, não necessariamente "o projeto do bucket").
+**Bucket é sempre nó folha**: entra no grafo (nó + aresta) quando
+descoberto a partir dos eventos já buscados pro projeto do lado tabela
+(dado que já temos, sem custo extra), mas a travessia nunca tenta
+expandir mais a partir dele. `access_denied` nunca é `true` pra um nó
+bucket — não existe esse conceito pra ele neste desenho (não fazemos
+nenhuma chamada adicional que pudesse falhar por falta de acesso).
+
+**Implementado (2026-08-18)**: `JobEvent` (repository.py) ganhou
+`source_buckets`/`destination_buckets`; `_parse_entry` passou a ler
+`load.sourceUris` e `extract.{sourceTable,destinationUris}` junto do que
+já lia pra `query`/`load.destinationTable`. `NodeRef` em service.py virou
+união de `TableRefTuple` (3-tupla) e `BucketRef` (1-tupla,
+`(bucket_name,)`) — discriminável só pelo tamanho da tupla, sem precisar
+de uma terceira estrutura. `LineageNode` (schemas.py) ganhou `type`
+("table"/"bucket") e `bucket_name`; `project_id`/`dataset_id`/`table_id`
+viraram opcionais (só preenchidos quando `type="table"`). Frontend:
+`LineageGraph.tsx` ganhou `bucketNode` como segundo `nodeTypes` do
+`@xyflow/react` (ícone `HardDrive`, cor `status-ok`, mesma identidade
+visual do grupo "Cloud Storage" da sidebar).
 
 ### 7.3 Não coberto ainda
 
 - Formato do payload quando `sourceUris`/`destinationUris` usa wildcard
-  (`gs://bucket/path/*.csv`) — extração do nome do bucket continua válida
-  (primeiro segmento), mas não testado ao vivo com wildcard real.
-- Comportamento quando o job falha (`jobStatus.state != "DONE"`) — mesmo
-  tratamento que lineage já dá pra job de query com erro, a confirmar que
-  se aplica igual aqui.
+  (`gs://bucket/path/*.csv`) — **resolvido por construção**: a extração do
+  nome do bucket (primeiro segmento após `gs://`) não depende do resto do
+  path ser literal, funciona igual com ou sem glob. Coberto por teste
+  unitário (`test_parse_bucket_name_handles_wildcard_path`), ainda não
+  visto ao vivo com wildcard real em dev.
+- Comportamento quando o job falha (`jobStatus.state != "DONE"`) —
+  **continua não coberto, de propósito**: descoberto durante a
+  implementação que isso é uma lacuna do domínio `lineage` inteiro (query/
+  load/extract), não específica de bucket — nenhum parser de audit log do
+  projeto (lineage, access, finops) filtra por status de job hoje. Fora do
+  escopo deste item por decisão do usuário; registrar como item de backlog
+  do domínio lineage, não do domínio storage.
 
 ## 8. IAM necessária
 

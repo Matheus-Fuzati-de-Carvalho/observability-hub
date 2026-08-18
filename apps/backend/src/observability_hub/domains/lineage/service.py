@@ -40,13 +40,64 @@ _EMPTY_RESULT_WARNING = (
 
 _MAX_HOPS_DEFAULT = 8
 
+# Bucket é representado como uma 1-tupla (bucket_name,) — discriminável de
+# TableRefTuple (sempre 3-tupla) só pelo tamanho, sem precisar de uma
+# terceira estrutura/classe. NodeRef é a união dos dois usada em todo o
+# grafo (visited/nodes/frontier) a partir da extensão de 2026-08-18 (ver
+# docs/specs/storage.md seção 7) — antes disso só existia TableRefTuple.
+BucketRef = tuple[str]
+NodeRef = TableRefTuple | BucketRef
+
+
+def _is_bucket(ref: NodeRef) -> bool:
+    return len(ref) == 1
+
 
 def _empty_result_warning(project_id: str) -> str:
     return _EMPTY_RESULT_WARNING.format(days=repository.LOOKBACK_DAYS, project_id=project_id)
 
 
-def _node_id(ref: TableRefTuple) -> str:
+def _node_id(ref: NodeRef) -> str:
+    if _is_bucket(ref):
+        return f"bucket:{ref[0]}"
     return f"{ref[0]}:{ref[1]}:{ref[2]}"
+
+
+def _neighbors(
+    node: NodeRef, event: JobEvent, direction: Literal["upstream", "downstream"]
+) -> list[NodeRef]:
+    """Vizinhos de `node` dentro de um único job (`query`, `load` ou
+    `extract`), na direção pedida. `load` → aresta bucket→tabela (bucket é
+    upstream da tabela); `extract` → aresta tabela→bucket (bucket é
+    downstream da tabela). Tabela continua se comportando exatamente como
+    antes da extensão de bucket (query upstream/downstream via
+    referenced_tables/destination_table), só ganhou mais dois conjuntos de
+    candidatos (source_buckets/destination_buckets)."""
+    if _is_bucket(node):
+        bucket_name = node[0]
+        if direction == "upstream":
+            # Quem escreveu neste bucket via EXTRACT — a tabela de origem
+            # do extract é upstream do bucket.
+            if bucket_name not in event.destination_buckets:
+                return []
+            return list(event.referenced_tables)
+        # Quem lê deste bucket via LOAD — a tabela de destino do load é
+        # downstream do bucket.
+        if bucket_name not in event.source_buckets:
+            return []
+        return [event.destination_table] if event.destination_table else []
+
+    if direction == "upstream":
+        if event.destination_table != node:
+            return []
+        buckets: list[NodeRef] = [(b,) for b in event.source_buckets]
+        return [*event.referenced_tables, *buckets]
+
+    if node not in event.referenced_tables:
+        return []
+    tables: list[NodeRef] = [event.destination_table] if event.destination_table else []
+    buckets = [(b,) for b in event.destination_buckets]
+    return [*tables, *buckets]
 
 
 def _get_project_events(
@@ -72,6 +123,30 @@ def _get_project_events(
     return events
 
 
+def _bucket_node(ref: BucketRef, hop_distance: int) -> LineageNode:
+    return LineageNode(
+        id=_node_id(ref),
+        type="bucket",
+        bucket_name=ref[0],
+        hop_distance=hop_distance,
+        is_root=False,
+        access_denied=False,
+    )
+
+
+def _table_node(ref: TableRefTuple, hop_distance: int, access_denied: bool) -> LineageNode:
+    return LineageNode(
+        id=_node_id(ref),
+        type="table",
+        project_id=ref[0],
+        dataset_id=ref[1],
+        table_id=ref[2],
+        hop_distance=hop_distance,
+        is_root=False,
+        access_denied=access_denied,
+    )
+
+
 def _traverse(
     logging_client: cloud_logging.Client,
     root: TableRefTuple,
@@ -80,13 +155,20 @@ def _traverse(
     max_hops: int,
     events_cache: dict[str, list[JobEvent]],
     denied_projects: set[str],
-) -> tuple[dict[TableRefTuple, LineageNode], dict[tuple[str, str], LineageEdge], bool]:
+) -> tuple[dict[NodeRef, LineageNode], dict[tuple[str, str], LineageEdge], bool]:
     """BFS a partir de root, só nessa direção. Um nó já visitado não é
     reexpandido, mas a aresta que fecha um ciclo sobre ele ainda é
-    registrada (cycle-safe sem perder a aresta)."""
+    registrada (cycle-safe sem perder a aresta).
+
+    Bucket é sempre nó folha: entra no grafo (nó + aresta) quando
+    descoberto a partir dos eventos já buscados pro projeto do lado
+    tabela, mas nunca entra na frontier pra expansão — diferente de
+    tabela, um bucket não tem "projeto dono" confiável via API pra saber
+    em qual audit log procurar quem mais o referencia (ver
+    docs/specs/storage.md seção 7.2, decisão tomada com o usuário)."""
     sign = -1 if direction == "upstream" else 1
-    visited: dict[TableRefTuple, int] = {root: 0}
-    nodes: dict[TableRefTuple, LineageNode] = {}
+    visited: dict[NodeRef, int] = {root: 0}
+    nodes: dict[NodeRef, LineageNode] = {}
     edges: dict[tuple[str, str], LineageEdge] = {}
 
     frontier: list[tuple[TableRefTuple, list[JobEvent]]] = [(root, root_events)]
@@ -101,16 +183,7 @@ def _traverse(
         next_frontier: list[tuple[TableRefTuple, list[JobEvent]]] = []
         for table_ref, events in frontier:
             for event in events:
-                if direction == "upstream":
-                    if event.destination_table != table_ref:
-                        continue
-                    candidates = event.referenced_tables
-                else:
-                    if table_ref not in event.referenced_tables:
-                        continue
-                    candidates = [event.destination_table] if event.destination_table else []
-
-                for neighbor in candidates:
+                for neighbor in _neighbors(table_ref, event, direction):
                     if neighbor is None or neighbor == table_ref:
                         continue  # auto-referência (ex: MERGE), nunca vira aresta
 
@@ -128,30 +201,19 @@ def _traverse(
 
                     next_hop = hop + 1
                     visited[neighbor] = next_hop
+
+                    if _is_bucket(neighbor):
+                        nodes[neighbor] = _bucket_node(neighbor, sign * next_hop)
+                        continue  # folha — nunca entra na frontier
+
                     neighbor_events = _get_project_events(
                         logging_client, neighbor[0], events_cache, denied_projects
                     )
                     if neighbor_events is None:
-                        nodes[neighbor] = LineageNode(
-                            id=_node_id(neighbor),
-                            project_id=neighbor[0],
-                            dataset_id=neighbor[1],
-                            table_id=neighbor[2],
-                            hop_distance=sign * next_hop,
-                            is_root=False,
-                            access_denied=True,
-                        )
+                        nodes[neighbor] = _table_node(neighbor, sign * next_hop, access_denied=True)
                         continue
 
-                    nodes[neighbor] = LineageNode(
-                        id=_node_id(neighbor),
-                        project_id=neighbor[0],
-                        dataset_id=neighbor[1],
-                        table_id=neighbor[2],
-                        hop_distance=sign * next_hop,
-                        is_root=False,
-                        access_denied=False,
-                    )
+                    nodes[neighbor] = _table_node(neighbor, sign * next_hop, access_denied=False)
                     next_frontier.append((neighbor, neighbor_events))
 
         frontier = next_frontier
@@ -181,7 +243,7 @@ def get_table_lineage(
         logging_client, root, root_events, "downstream", max_hops, events_cache, denied_projects
     )
 
-    merged_nodes: dict[TableRefTuple, LineageNode] = dict(upstream_nodes)
+    merged_nodes: dict[NodeRef, LineageNode] = dict(upstream_nodes)
     for ref, node in downstream_nodes.items():
         existing = merged_nodes.get(ref)
         if existing is None or abs(node.hop_distance) < abs(existing.hop_distance):
