@@ -1,7 +1,8 @@
 # Spec — `domains/storage` (Cloud Storage)
 
-**Status:** Proposta — não implementada
-**Versão:** v1.0
+**Status:** Em implementação (catálogo, colunas nativas de data e 6.1 do
+scanner de desperdício concluídos e validados em dev; 6.2 em andamento)
+**Versão:** v1.1
 **Depende de:** `domains/lineage` (extensão, não substituição)
 
 ---
@@ -31,10 +32,12 @@ Fora do escopo do MVP (registrar como item futuro, não implementar agora):
 - Freshness por prefixo/pasta (mais granular, mais chamadas de API)
 - Objetos individuais como nós de lineage (granularidade excessiva —
   decisão já tomada, bucket é o nó, não o objeto)
-- "Objeto nunca lido" no waste scanner — depende de Data Access audit logs
-  do GCS habilitados, que é uma config de audit **separada** da do
-  BigQuery (não vem de graça pela IAM já concedida pra BQ/Logging hoje).
-  Ver seção 6.
+
+**Revisado em v1.1**: "objeto nunca lido" no waste scanner **entrou no
+escopo** (seção 6.2) depois de Data Access audit logs do GCS terem sido
+habilitados em dev (2026-08-18) — não é mais um item futuro, é a checagem
+`confidence: "usage_confirmed"`. Continua degradando graciosamente em
+projetos sem essa config habilitada (ex: prod hoje).
 
 ## 3. Fonte de dados
 
@@ -42,7 +45,8 @@ Fora do escopo do MVP (registrar como item futuro, não implementar agora):
 |---|---|---|
 | Catálogo | `storage.googleapis.com` — listagem de buckets/metadado | Grátis (metadado) |
 | Freshness | Metadado de objeto (`updated`, opcionalmente `customTime`) | Grátis (metadado) |
-| Waste scanner | Metadado de bucket (`lifecycleRule`) + metadado de objeto | Grátis (metadado) |
+| Waste scanner (6.1) | Metadado de bucket (`lifecycleRule`) + metadado de objeto | Grátis (metadado) |
+| Waste scanner (6.2) | Cloud Logging — Data Access audit logs do GCS (`storage.objects.get`), config separada da do BigQuery | Grátis (já habilitado em dev) |
 | Lineage (extensão) | Cloud Logging — mesma fonte já usada por `domains/lineage` (audit logs de job do BigQuery) | Grátis (já habilitado) |
 
 Diferente de PII/quality/column-types, nenhuma funcionalidade deste domínio
@@ -90,43 +94,82 @@ removido por completo, não deixado como dead code.
 
 `GET /api/v1/storage/{project}/waste-candidates`
 
-Regra do MVP: bucket **sem** `lifecycleRule` configurada E com objetos em
-`STANDARD` mais antigos que um limiar configurável (default 60 dias, via
+Duas checagens independentes, cada uma com sua própria confiabilidade —
+não combinadas num único score, mesmo espírito do scanner de desperdício
+do FinOps (nunca fabricar um número de aparência precisa sobre suposição
+não verificada).
+
+### 6.1 Regra por configuração (idade + ausência de lifecycle rule)
+
+Bucket **sem** `lifecycleRule` configurada E com objetos em `STANDARD`
+mais antigos que um limiar configurável (default 60 dias, via
 `customTime`/`updated`). Buckets com lifecycle rule configurada nunca
-aparecem, mesmo com objetos antigos — a regra observa a **config**, não
-só a idade (mesmo espírito do scanner de tabelas sem uso do FinOps: nunca
-fabricar economia sobre suposição não verificada).
+aparecem aqui, mesmo com objetos antigos — a regra observa a **config**,
+não só a idade.
 
-**Limitação explícita, documentada na resposta** (não implementada no
-MVP): não há verificação de "objeto nunca lido" — isso exigiria Data
-Access audit logs do GCS, habilitados separadamente dos do BigQuery. Sem
-essa config, a API deve dizer isso explicitamente em vez de simular uma
-certeza que não tem, mesmo padrão do `warning` de lineage. Adicionar como
-novo item ao checklist de `docs/onboarding-cliente.md` quando essa
-funcionalidade for implementada (não faz parte deste MVP).
+Esta checagem é sempre executada, independente de audit log habilitado —
+é só metadado. `confidence: "config_based"` na resposta, pra o frontend
+diferenciar da checagem 6.2.
 
-Estimativa de economia: nunca um valor único — faixa (mesmo padrão do
-scanner de particionamento do FinOps), calculada só sobre bytes reais
-armazenados (`size` × diferença de preço STANDARD→NEARLINE), nunca sobre
-suposição de padrão de acesso.
-
-**Implementado (2026-08-17)**: `GET /api/v1/storage/{project}/waste-
-candidates?min_days_unused=30|60|90` (`IntEnum`, mesma correção de
-`Literal`→422 já feita no FinOps). Diferente do FinOps (que ancora a
-faixa em custo de scan *observado*), aqui não há sinal de acesso real
-disponível — a faixa reflete **duas classes de destino plausíveis** sobre
-o mesmo byte real armazenado: `NEARLINE` (mínimo, conservador) e
-`COLDLINE` (máximo, agressivo). `ARCHIVE` fica de fora de propósito
-(custo de retrieval + duração mínima de 365 dias tornam a recomendação
-automática arriscada). Preços GCS entram em `core/config.py`
-(`gcs_storage_price_usd_per_gb_month_{standard,nearline,coldline}`),
-mesmo padrão dos preços do BigQuery já lá. Reaproveita 100% da
+**Implementado (2026-08-17)**: `min_days_unused=30|60|90` como `IntEnum`
+(mesma correção de `Literal`→422 já feita no FinOps). Reaproveita 100% da
 infraestrutura do item 1 (`list_bucket_objects_cached`, `has_lifecycle_
-rule`) — nenhuma chamada nova à API do GCS. A limitação de "objeto nunca
-lido" vai sempre preenchida no campo `limitation` da resposta (não
-condicional), e o campo `savings_disclaimer` explica a faixa NEARLINE/
-COLDLINE por completo — evita que o frontend precise adivinhar o porquê
-de dois números.
+rule`) — nenhuma chamada nova à API do GCS.
+
+### 6.2 Regra por uso real (objeto nunca lido) — depende de Data Access audit logs do GCS
+
+**Habilitado em dev em 2026-08-18** (`DATA_READ` pra
+`storage.googleapis.com`, ver `docs/onboarding-cliente.md`). Fonte:
+Cloud Logging, mesmo client/roles já usados por lineage/access
+(`roles/logging.viewer` + `roles/logging.privateLogViewer`, já
+cross-granted — nenhuma role nova necessária pra **ler** o log).
+
+Consulta o audit log de leitura de objeto (`storage.objects.get` e
+equivalentes) numa janela de 90 dias (mesma janela já usada por lineage/
+access/finops, por consistência). Objeto elegível por 6.1 (idade +
+Standard) que **não aparece nenhuma vez** como leitura nessa janela
+ganha `confidence: "usage_confirmed"` — sinal mais forte que 6.1 sozinha,
+porque combina idade **e** ausência de acesso real.
+
+**Limitação a manter explícita na resposta** (mesmo padrão do `warning`
+de lineage): a ausência de evento de leitura na janela não distingue
+"nunca lido" de "lido só fora da janela de 90 dias" — sempre comunicar
+como "sem leitura registrada nos últimos 90 dias", nunca como "nunca
+lido" categórico.
+
+**Ainda não habilitado em prod** — checagem 6.2 deve degradar
+graciosamente (retornar só o resultado de 6.1, com aviso explicando por
+quê) quando os audit logs do GCS não estiverem habilitados no projeto
+consultado. Mesmo padrão de warning condicional já usado por lineage
+quando falta `roles/logging.viewer`.
+
+**Nota de volume/custo**: diferente de audit log de job do BigQuery
+(evento por job, volume baixo), `DATA_READ` de GCS gera um evento por
+operação de leitura de objeto — pode ser volume alto em bucket de
+tráfego intenso. Antes de habilitar em prod, medir volume esperado.
+Registrar em `docs/onboarding-cliente.md` como item de atenção antes de
+replicar a config de dev.
+
+### 6.3 Estimativa de economia
+
+Nunca um valor único — faixa (mesmo padrão do scanner de particionamento
+do FinOps), calculada só sobre bytes reais armazenados (`size` ×
+diferença de preço STANDARD→NEARLINE/COLDLINE), nunca sobre suposição de
+padrão de acesso. Quando 6.2 está disponível e confirma "sem leitura", a
+faixa pode ser apresentada com confiança maior (menos disclaimer), mas o
+cálculo em si não muda.
+
+**Implementado (2026-08-17)**: a faixa reflete **duas classes de destino
+plausíveis** sobre o mesmo byte real armazenado: `NEARLINE` (mínimo,
+conservador) e `COLDLINE` (máximo, agressivo). `ARCHIVE` fica de fora de
+propósito (custo de retrieval + duração mínima de 365 dias tornam a
+recomendação automática arriscada). Preços GCS entram em
+`core/config.py` (`gcs_storage_price_usd_per_gb_month_
+{standard,nearline,coldline}`), mesmo padrão dos preços do BigQuery já
+lá. A limitação de "objeto nunca lido" (6.2) vai sempre preenchida no
+campo `limitation` da resposta quando 6.2 não roda, e o campo
+`savings_disclaimer` explica a faixa NEARLINE/COLDLINE por completo —
+evita que o frontend precise adivinhar o porquê de dois números.
 
 ## 7. Extensão do lineage — bucket como nó do grafo
 
@@ -238,6 +281,13 @@ ver nota abaixo.
 Cross-project: mesma lógica já aplicada a BigQuery/Logging — se o Hub
 observa múltiplos projetos, as duas roles precisam ser concedidas
 cross-project nos dois sentidos, mesmo padrão de dev↔prod já em uso.
+
+**Nota (v1.1)**: Data Access audit logs (`DATA_READ`) pra
+`storage.googleapis.com` habilitados via `auditConfigs` do projeto (não é
+uma IAM role — é config de auditoria a nível de projeto, aplicada via
+`set-iam-policy`). Confirmado em `observability-hub-dev` em 2026-08-18.
+Pendente de habilitação em `observability-hub-prod` — medir volume antes
+de replicar (ver seção 6.2).
 
 ## 9. Dados mock usados na validação (dev)
 

@@ -185,7 +185,16 @@ motivo.
     pro catálogo listar buckets (storage.objectViewer sozinha NÃO cobre
     metadado de bucket, só de objeto)
 [ ] roles/storage.objectViewer concedida à SA do Hub — idem, necessária
-    pra freshness/waste (metadado e leitura de objeto)
+    pro tamanho agregado do catálogo e pra checagem 6.1 do waste scanner
+    (metadado e leitura de objeto)
+[ ] storage.googleapis.com — Data Access audit log DATA_READ habilitado
+    no projeto (config de auditConfigs, não é IAM role — ver exemplo em
+    observability-hub-dev) — só necessário pra checagem 6.2 do waste
+    scanner do domínio storage (objeto sem leitura recente,
+    confidence: "usage_confirmed")
+    Atenção: gera um evento de log por leitura de objeto — volume pode
+    ser alto em bucket de tráfego intenso. Medir volume esperado antes
+    de habilitar em projeto de produção ou projeto-cliente com uso real.
 ```
 
 ---
@@ -210,6 +219,7 @@ checklist, e servem de precedente real de que o processo funciona.
 | 2026-08-17 (comando fornecido em 2026-08-14) | `observability-hub-dev` | `backend-run@...-prod` | `roles/logging.privateLogViewer` (cross) | `gcloud projects get-iam-policy` |
 | 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.objectViewer` (domínio `storage`, ver `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
 | 2026-08-17 | `observability-hub-dev` | `backend-run@...-dev` (self) | `roles/storage.bucketViewer` (faltava pra `objectViewer` sozinha ser suficiente, ver nota da seção 8 de `docs/specs/storage.md`) | `gcloud projects get-iam-policy` |
+| 2026-08-18 | `observability-hub-dev` | — | Data Access audit log `DATA_READ` habilitado para `storage.googleapis.com` (via `auditConfigs` do projeto) — domínio `storage`, checagem de objeto sem leitura recente (spec `storage.md` v1.1, seção 6.2) | `gcloud projects get-iam-policy` (campo `auditConfigs`) |
 
 **Nota:** os dois itens "antes de 2026-08-14" foram descobertos ao vivo
 nesta sessão via `gcloud projects get-iam-policy` — o SESSIONLOG.md
