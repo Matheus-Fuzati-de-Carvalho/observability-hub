@@ -5,6 +5,124 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Fase 5 — Storage (Cloud Storage): domínio novo, 4 itens (concluída, validada em dev)
+
+Branch `feat/storage-mvp`, a partir de `main` pós-PR #24. Primeira
+expansão do Hub pra além do BigQuery (spec `docs/specs/storage.md`,
+motivação registrada lá: Storage → Scheduler → Workflows é a ordem de
+prioridade planejada). Quatro itens, cada um validado em dev pelo usuário
+antes do próximo começar, nenhum PR pra `main` ainda.
+
+### 1. Catálogo de buckets
+`GET /api/v1/storage/{project}/buckets` — nome, storage class, região,
+tamanho total + contagem de objetos (via listagem cacheada 5min, mesmo
+padrão de `core/bigquery.py::get_table_cached`), `has_lifecycle_rule`,
+`time_created`/`updated` (metadado nativo do `Bucket`, de graça na mesma
+chamada). Novo `core/storage_client.py`, novo grupo `SidebarServiceGroup`
+"Cloud Storage" na sidebar (irmão de "BigQuery").
+
+**Bug real encontrado em dev**: `roles/storage.objectViewer` (única role
+que a v1 da spec previa) não cobre `storage.buckets.list`/`storage.
+buckets.get` — só `storage.objects.*`. `list_buckets()` (a primeira
+chamada do domínio) precisa também de `roles/storage.bucketViewer`
+(role dedicada, só leitura de metadado de bucket). Confirmado com
+`gcloud iam roles describe`, corrigido no handler de 403 e no checklist
+de `docs/onboarding-cliente.md` (as duas roles, sempre juntas).
+
+### 2. Freshness — implementada, validada, depois substituída
+V1: endpoint dedicado (`GET .../buckets/{bucket}/freshness`), botão "Ver
+freshness" sob demanda no frontend, `last_modified` = `max(customTime ou
+updated)` entre os **objetos** do bucket. Validada em dev e então
+**descartada por decisão do usuário**, substituída por `time_created`/
+`updated` do próprio `Bucket` (item 1) como colunas direto na tabela —
+mais barato (zero chamada extra), mas semanticamente diferente:
+`Bucket.updated` reflete mudança de config (lifecycle, storage class),
+não gravação de objeto. Trade-off registrado explicitamente na spec
+(seção 5) — código da v1 removido por completo, não deixado como dead
+code.
+
+### 3. Scanner de desperdício — duas checagens independentes
+`GET /api/v1/storage/{project}/waste-candidates?min_days_unused=30|60|90`
+(`IntEnum`, mesma correção de `Literal`→422 já feita no FinOps):
+- **6.1 (config-based)**: bucket sem lifecycle rule + objetos `STANDARD`
+  mais antigos que o threshold. Sempre disponível, só metadado.
+- **6.2 (usage-based, pedido numa segunda rodada depois de habilitar
+  Data Access audit log `DATA_READ` do GCS em dev)**: objeto elegível por
+  6.1 sem nenhuma leitura (`storage.objects.get`) nos audit logs em 90
+  dias ganha `confidence: "usage_confirmed"`. Payload do audit log de GCS
+  é o proto padrão `google.cloud.audit.AuditLog` — **diferente** do
+  formato legado que lineage/access usam pra job do BigQuery, parser novo
+  em `domains/storage/repository.py::list_read_object_keys`, mesmo client
+  de Cloud Logging (roles já cross-granted). Degradação graciosa
+  obrigatória: `Forbidden` ou resultado vazio pro projeto inteiro (audit
+  log pode estar desabilitado) nunca falha a requisição — cai pra
+  `config_based` em todos os candidatos, com `usage_check_warning`
+  explicando o motivo.
+
+Faixa de economia (nunca valor único) reflete migração pra `NEARLINE`
+(mínimo) ou `COLDLINE` (máximo) sobre bytes reais armazenados —
+`ARCHIVE` fica de fora de propósito (retrieval caro + duração mínima de
+365 dias).
+
+**Gap pré-existente encontrado, corrigido junto** (não era novo deste
+item): `list_bucket_objects_cached` não capturava `Forbidden` — um
+projeto com `bucketViewer` mas sem `objectViewer` estourava 500 cru em
+vez do 403 limpo do domínio. `repository.py` ganhou `project_id` nos
+parâmetros de listagem de objetos pra poder relançar
+`StorageAccessDeniedError`.
+
+### 4. Extensão do lineage — bucket como nó do grafo
+`load` (GCS→BQ) vira aresta bucket→tabela; `extract` (BQ→GCS) vira aresta
+tabela→bucket. Payloads reais capturados ao vivo em dev (gravação real de
+objeto + `gcloud logging read`) usados como fixture de teste, não
+inventados. `JobEvent` ganhou `source_buckets`/`destination_buckets`;
+`NodeRef` (service.py) generaliza `TableRefTuple` (3-tupla) +
+`BucketRef` (1-tupla) — discriminável só pelo tamanho da tupla.
+
+**Decisão de desenho tomada com o usuário**: bucket é sempre nó **folha**
+— entra no grafo quando descoberto pelos eventos já buscados do lado
+tabela, mas a travessia BFS nunca expande a partir dele. Diferente de
+tabela, bucket não tem "projeto dono" confiável via API pra saber em qual
+audit log procurar quem mais o referencia (nome do bucket não garante o
+projeto GCP dono, e jobs que o tocam podem rodar em qualquer projeto
+observado pelo Hub). `LineageNode` ganhou `type`/`bucket_name`;
+`project_id`/`dataset_id`/`table_id` viraram opcionais. Frontend:
+`bucketNode` novo em `LineageGraph.tsx` (ícone `HardDrive`, cor
+`status-ok`).
+
+**Gap encontrado, deliberadamente não corrigido** (fora do escopo deste
+item — é do domínio `lineage` inteiro, não específico de bucket): nenhum
+parser de audit log do projeto (lineage, access, finops) filtra
+`jobStatus.state != "DONE"` — um job que falhou mas tem `destinationTable`/
+`sourceUris` no config já criaria uma aresta hoje. Registrado como
+backlog do domínio lineage na spec.
+
+### Falha de processo encontrada e corrigida durante esta sessão
+Commits de fechamento do SESSIONLOG/CHANGELOG de uma sessão anterior
+(reconstrução completa depois de 4 dias sem atualização, ver seção
+"Documentação para cliente" abaixo) tinham ficado presos na branch
+`feature/admin-usage-analytics` — nunca foram mergeados em `main` via PR,
+só pusheados pra o remoto da própria branch. Quando `feat/storage-mvp`
+foi criada a partir de `main` atualizada, herdou a versão **velha** do
+SESSIONLOG (de 2026-08-14). Descoberto e corrigido nesta sessão com um
+merge explícito de `feature/admin-usage-analytics` em `feat/storage-mvp`
+antes do fechamento de documentação — sem isso, a reconstrução de 4 dias
+de trabalho teria se perdido uma segunda vez.
+
+### Status final
+- Backend: 597 testes unitários (0 no início do domínio storage), 100%
+  passando, `ruff check`/`ruff format` limpos.
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos.
+- Validado em dev pelo usuário — os 4 itens, incluindo o grafo de lineage
+  com bucket real (`RAW.crm_leads_staging` ⟷ buckets `landing`/
+  `processed`, jobs LOAD/EXTRACT reais).
+- **Sem PR pra `main` ainda** — aguardando promoção de mocks/IAM/audit
+  config pra `observability-hub-prod` (checklist em
+  `docs/onboarding-cliente.md`, comandos passados ao usuário fora deste
+  arquivo).
+
+---
+
 ## Documentação para cliente — playbooks operacionais e manuais (PRs #22, #23, #24)
 
 Branch `feature/admin-usage-analytics`, três commits **docs-only** (não
@@ -1298,3 +1416,4 @@ implementação**
 | Fase 4 | FinOps completo (scanner de desperdício, budget de custo, sugestão de tipo de coluna) | ✅ Concluída (3 de 3 frentes — clustering deferido, ver ADR/spec) |
 | — | Admin ACL v1.0–v1.3 (controle de acesso usuário×projeto, projetos públicos, solicitação de acesso, painel "Uso do Hub") | ✅ Concluída |
 | — | Documentação para cliente (2 playbooks operacionais + 2 manuais voltados a cliente final) | ✅ Concluída |
+| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício (config + uso real), extensão do lineage | ✅ Concluída, validada em dev — aguardando promoção pra prod e PR pra `main` |
