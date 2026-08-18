@@ -162,7 +162,7 @@ nunca amostragem de dado real de objeto):
 | Sprint 2.2/2.3 | Metadados de partição, busca reversa tabela→datasets, refresh e melhorias de UX sobre o MVP do Catálogo | ✅ Concluída |
 | Fase 3 | Lineage, PII, Mapa de acesso | ✅ Concluída |
 | Fase 4 | FinOps completo | ✅ Concluída (scanner de desperdício, budget e sugestão de tipo de coluna; sugestão de clustering deferida — ver docs/specs/finops-column-types.md, "Fora do escopo") |
-| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício, extensão do lineage | ✅ Concluída, validada em dev — aguardando promoção pra prod e PR pra `main` |
+| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício, extensão do lineage | ✅ Concluída — validada em dev, mergeada em `main` e deployada em prod (PR #25) |
 
 Ver `CHANGELOG.md` para o detalhe fase a fase (o que foi feito, erros
 corrigidos e decisões de arquitetura) e `SESSIONLOG.md` para o estado

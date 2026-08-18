@@ -8,31 +8,27 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 ## Status atual
 
 **Última atualização:** 2026-08-18 — sessão de implementação do domínio
-`storage` (Cloud Storage), do zero até validado em dev, 4 itens
-completos. Sessão anterior (2026-08-17) tinha reconstruído este arquivo
-depois de 4 dias sem atualização (ver seção "Storage — domínio novo"
-abaixo, "Falha de processo" — os commits dessa reconstrução ficaram
-presos numa branch errada e quase se perderam de novo; corrigido nesta
-sessão com um merge explícito).
+`storage` (Cloud Storage), do zero até deployado em produção, 4 itens
+completos, **sprint fechada de ponta a ponta**. Sessão anterior
+(2026-08-17) tinha reconstruído este arquivo depois de 4 dias sem
+atualização (ver seção "Storage — domínio novo" abaixo, "Falha de
+processo" — os commits dessa reconstrução ficaram presos numa branch
+errada e quase se perderam de novo; corrigido nesta sessão com um merge
+explícito).
 
 **Estado real agora:** domínio `storage` (Cloud Storage) implementado
 por completo — catálogo de buckets, scanner de desperdício (config +
-uso real via audit log), extensão do lineage (bucket como nó) — na
-branch `feat/storage-mvp` (a partir de `main` pós-PR #24), commits
-`02adc81`..`ec0ae14`. **Todos os 4 itens validados em dev pelo usuário**,
-incluindo o grafo de lineage real (`RAW.crm_leads_staging` com bucket
-`landing` upstream e `processed` downstream, jobs LOAD/EXTRACT reais).
-
-**Promoção pra prod concluída nesta mesma sessão** (checklist completo
-na seção "Storage — domínio novo" abaixo): IAM self+cross das duas roles
-de storage nos dois projetos, 3 buckets mock em prod espelhando dev
-(landing com lifecycle rule, processed, archive), objeto mock + jobs
-LOAD/EXTRACT reais (`RAW.crm_leads_staging` populada), e — decisão do
-usuário — Data Access audit log `DATA_READ` de `storage.googleapis.com`
-também habilitado em prod (não só dev). Tudo confirmado ao vivo via
-`gcloud`/`bq`, não assumido. **Só falta abrir o PR de `feat/storage-mvp`
-→ `main`** — não aberto ainda nesta sessão, sem pedido explícito do
-usuário pra abrir.
+uso real via audit log), extensão do lineage (bucket como nó). Todos os
+4 itens validados em dev pelo usuário, incluindo o grafo de lineage real
+(`RAW.crm_leads_staging` com bucket `landing` upstream e `processed`
+downstream, jobs LOAD/EXTRACT reais). Infraestrutura de prod promovida
+(IAM cross-project completo das duas roles de storage, 3 buckets mock
+espelhando dev, dados reais, Data Access audit log habilitado — decisão
+do usuário, também em prod, não só dev). **PR #25 aberto e mergeado em
+`main`**; deploy automático de prod confirmado verde (`gh run list`) e
+as duas rotas novas (`/api/v1/storage/.../buckets`,
+`/api/v1/storage/.../waste-candidates`) e o `LineageNode` com
+`type`/`bucket_name` confirmados no ar via `/openapi.json` de prod.
 
 **Item resolvido nesta sessão**: a mudança não commitada em
 `infra/terraform/modules/cloud-run/variables.tf` (`max_instance_count`
@@ -47,11 +43,12 @@ audit log capturados). As seções anteriores (Sprint 3.2, FinOps, Admin
 ACL, Documentação para cliente) continuam válidas — nada mudou nelas
 nesta sessão, só ficaram mais antigas na lista.
 
-**Próximo passo:** abrir o PR de `feat/storage-mvp` → `main` — todo o
-resto do checklist (dev, prod, docs) está fechado. Depois do merge,
-confirmar deploy automático de prod verde (`gh run list`) e validar
-visualmente as 4 funcionalidades em prod (sem ferramenta de browser
-neste sandbox — validação visual sempre do usuário).
+**Próximo passo:** nenhum pendente desta sprint — está fechada por
+completo (dev, prod, PR, deploy, docs). Validação visual das 4
+funcionalidades em prod fica a cargo do usuário (sem ferramenta de
+browser neste sandbox, mesma limitação de sempre). Candidatos pra
+próxima sprint estão em "Backlog"/"Próxima sprint" abaixo, nenhum
+aprovado ainda.
 
 ---
 
@@ -242,8 +239,9 @@ diretamente) — tudo confirmado ao vivo depois, não assumido:
 7. ✅ Tudo registrado em `docs/onboarding-cliente.md` (6 linhas novas na
    tabela "Registro de acessos concedidos").
 
-**Falta só**: abrir o PR de `feat/storage-mvp` → `main` — não feito
-nesta sessão, sem pedido explícito do usuário pra abrir.
+**PR #25 aberto e mergeado em `main`** no mesmo dia, a pedido explícito
+do usuário. Deploy automático de prod confirmado verde (`gh run list`)
+e as rotas novas confirmadas no ar via `/openapi.json` de prod.
 
 ### Status final
 - Backend: 597 testes unitários (0 quando o domínio começou), 100%
@@ -252,7 +250,8 @@ nesta sessão, sem pedido explícito do usuário pra abrir.
 - Validado em dev pelo usuário — os 4 itens, incluindo o grafo de
   lineage com bucket real.
 - Prod promovida por completo (IAM, buckets, dados mock, audit config)
-  — ver seção acima. **Sem PR pra `main` ainda.**
+  antes do merge — ver seção acima.
+- **PR #25 mergeado, deploy de prod verde. Sprint fechada.**
 
 ---
 
@@ -1535,22 +1534,15 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 ## Próxima sprint
 
 ```
-Domínio storage completo e validado em dev (2026-08-18) — feat/storage-
-mvp, 8 commits de app + 5 commits de docs, sem PR pra main ainda.
-Infraestrutura de prod (IAM, buckets, mocks, audit config) já foi
-promovida nesta mesma sessão — ver "Storage — domínio novo" → "Promoção
-pra prod — concluída nesta sessão". Único passo que falta:
+Domínio storage fechado de ponta a ponta em 2026-08-18: implementado,
+validado em dev, infra de prod promovida, PR #25 aberto e mergeado em
+main, deploy automático de prod confirmado verde, rotas novas
+confirmadas no ar via /openapi.json de prod. Nada pendente desta
+sprint. Validação visual das 4 funcionalidades em prod fica a cargo do
+usuário (sem Chromium headless neste sandbox, mesma limitação de
+sempre).
 
-1. Abrir o PR de feat/storage-mvp → main (não aberto nesta sessão, sem
-   pedido explícito do usuário).
-2. Depois do merge, confirmar deploy automático de prod verde
-   (gh run list) e validar visualmente as 4 funcionalidades em prod
-   (mesma limitação de sempre — sem Chromium headless neste sandbox,
-   validação visual é sempre do usuário). A infra já está pronta pra
-   receber o deploy — não deve faltar nenhum bucket/role/dado quando o
-   app subir.
-
-Depois disso, nenhuma sprint nova está aprovada. Candidatos conhecidos
+Nenhuma sprint nova está aprovada. Candidatos conhecidos
 pro próximo passo, nenhum iniciado, em ordem de menor pra maior escopo:
 1. Formalizar IAM cross-project em Terraform (Backlog item 2) — cresce
    a cada domínio novo com role própria.
@@ -1575,17 +1567,18 @@ estado observável do backlog. Perguntar antes de agir.
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
 3. `git fetch && git checkout main && git pull` — a `main` local fica
-   desatualizada com frequência (era `44ad7c9`/PR #17 na sessão anterior,
-   hoje é `35c0205`/PR #24); sempre conferir contra `origin/main` antes
-   de assumir o estado, nunca só a `main` local.
-4. Branch de trabalho é `feat/storage-mvp` (16 commits à frente de
-   `main`, `02adc81`..`9a5f018`) — domínio storage completo e validado
-   em dev, infraestrutura de prod já promovida, **sem PR pra `main`
-   ainda**. Checar `git status`: working tree deve estar limpo (nada
-   pendente desta sessão).
-5. Próximo passo real: só abrir o PR de `feat/storage-mvp` → `main` —
-   não é uma sprint nova, é o fechamento desta. Prod já está pronta (ver
-   "Storage — domínio novo" → "Promoção pra prod — concluída nesta
+   desatualizada com frequência (chegou a ficar 2 sessões pra trás nesta
+   mesma sprint); sempre conferir contra `origin/main` antes de assumir
+   o estado, nunca só a `main` local. Estado no fim desta sessão:
+   `main` = `d022061` (merge do PR #25).
+4. Domínio `storage` (Cloud Storage) está **completo e fechado**: PR #25
+   mergeado em `main`, deploy de prod confirmado verde. Branch
+   `feat/storage-mvp` pode ser deletada (local e remota) quando
+   conveniente — já está toda mergeada. `git status` na `main` deve
+   estar limpo.
+5. Nenhuma sprint em andamento — confirmar com o usuário qual é o
+   próximo passo antes de começar qualquer implementação (ver "Storage
+   — domínio novo" → "Promoção pra prod — concluída nesta
    sessão"), não precisa rodar mais nenhum comando de infra antes do PR.
 6. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
    alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que

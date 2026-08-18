@@ -116,10 +116,10 @@ de trabalho teria se perdido uma segunda vez.
 - Validado em dev pelo usuário — os 4 itens, incluindo o grafo de lineage
   com bucket real (`RAW.crm_leads_staging` ⟷ buckets `landing`/
   `processed`, jobs LOAD/EXTRACT reais).
-- **Sem PR pra `main` ainda** — aguardando promoção de mocks/IAM/audit
-  config pra `observability-hub-prod` (checklist em
-  `docs/onboarding-cliente.md`, comandos passados ao usuário fora deste
-  arquivo).
+- Infraestrutura de prod promovida antes do merge (IAM, buckets, mocks,
+  audit config — checklist em `docs/onboarding-cliente.md`) e deploy
+  automático confirmado verde depois (`gh run list`).
+- **PR #25 mergeado em `main`, deployado em prod.**
 
 ---
 
@@ -1416,4 +1416,4 @@ implementação**
 | Fase 4 | FinOps completo (scanner de desperdício, budget de custo, sugestão de tipo de coluna) | ✅ Concluída (3 de 3 frentes — clustering deferido, ver ADR/spec) |
 | — | Admin ACL v1.0–v1.3 (controle de acesso usuário×projeto, projetos públicos, solicitação de acesso, painel "Uso do Hub") | ✅ Concluída |
 | — | Documentação para cliente (2 playbooks operacionais + 2 manuais voltados a cliente final) | ✅ Concluída |
-| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício (config + uso real), extensão do lineage | ✅ Concluída, validada em dev — aguardando promoção pra prod e PR pra `main` |
+| Fase 5 | Storage (Cloud Storage): catálogo, scanner de desperdício (config + uso real), extensão do lineage | ✅ Concluída — validada em dev, mergeada em `main` e deployada em prod (PR #25) |
