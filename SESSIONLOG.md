@@ -9,7 +9,13 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 **Última atualização:** 2026-08-18 — sessão de implementação do domínio
 `storage` (Cloud Storage), do zero até deployado em produção, 4 itens
-completos, **sprint fechada de ponta a ponta**. Sessão anterior
+completos, **sprint fechada de ponta a ponta**; seguida, na mesma
+sessão, de um gate de aprovação manual pro deploy de app em prod
+(pedido do usuário) e de uma auditoria completa da documentação de
+acesso/hospedagem (ver seção "CI/CD: gate de aprovação manual em prod +
+auditoria de documentação" abaixo — achou e corrigiu lacunas reais,
+incluindo um requisito obrigatório de nomenclatura de projeto GCP que
+nunca tinha sido documentado como obrigatório). Sessão anterior
 (2026-08-17) tinha reconstruído este arquivo depois de 4 dias sem
 atualização (ver seção "Storage — domínio novo" abaixo, "Falha de
 processo" — os commits dessa reconstrução ficaram presos numa branch
@@ -252,6 +258,103 @@ e as rotas novas confirmadas no ar via `/openapi.json` de prod.
 - Prod promovida por completo (IAM, buckets, dados mock, audit config)
   antes do merge — ver seção acima.
 - **PR #25 mergeado, deploy de prod verde. Sprint fechada.**
+
+---
+
+## CI/CD: gate de aprovação manual em prod + auditoria de documentação
+
+Trabalho direto em `main`, depois da sprint do domínio storage, sem
+sprint formal — dois pedidos separados do usuário na mesma sessão.
+
+### Gate de aprovação de prod (commit `6e2d506`)
+Pedido do usuário depois de investigar um custo de Cloud Run acima do
+normal (ver abaixo). Brainstorm de opções (workflow_dispatch puro vs.
+GitHub Environment com approval vs. desacoplar build de deploy) —
+usuário escolheu a opção 2: `backend-deploy-prod.yml`/`frontend-deploy-
+prod.yml` ganharam `environment: production` no job de deploy, GitHub
+segura em "Waiting" até aprovação manual. `terraform-apply-prod.yml`
+fica de fora, de propósito (infra já passa por plan revisado antes do
+merge). `dev` não muda.
+
+**Corrida de tempo na primeira aplicação**: o usuário configurou o
+environment "production" (Settings → Environments, required reviewers)
+enquanto os dois workflows do push seguinte já estavam rodando —
+`backend-deploy-prod` ficou corretamente em "Waiting", mas
+`frontend-deploy-prod` já estava `in_progress` e terminou sem gate
+(deploy único sem aprovação, não repetido). Backend foi aprovado
+manualmente pelo usuário depois (eu não aprovei — é exatamente o tipo
+de ação que o gate existe pra exigir de um humano).
+
+### Diagnóstico de custo do Cloud Run (achado no caminho)
+Usuário perguntou como o Cloud Run é cobrado e por que um dia custou
+mais que os outros. Investigação ao vivo:
+- `min_instance_count = 0` (scale-to-zero) confirmado intacto nos 4
+  serviços (dev/prod × backend/frontend) — nunca foi o problema.
+- **Achado real**: os 4 serviços estavam com `run.googleapis.com/
+  cpu-throttling: false` ("CPU sempre alocada") — não vinha do Terraform
+  (`resources.cpu_idle` não declarado no módulo `cloud-run`) nem dos 4
+  workflows de deploy (nenhum passa essa flag) — mudado manualmente fora
+  do fluxo do projeto, sem registro de quando/por quê/quem. Revertido
+  pro padrão (CPU só durante request) nos 4, confirmado
+  `cpu-throttling: true` + health check 200 nos 4 depois do rollout.
+- Contagem de requests do dia mais caro (dev 1163, prod 37) bateu com um
+  dia de implementação intensa (a própria sprint de storage) — não foi
+  vazamento de tráfego, foi o multiplicador de custo do CPU sempre
+  alocado em cima de um dia de uso real alto.
+- TanStack Query do frontend não gera tráfego de fundo com abas abertas
+  sem foco por padrão (`refetchIntervalInBackground` é `false`, único
+  uso de `refetchInterval` é o badge de admin a cada 60s) — confirmado
+  lendo `query-client.ts`/`features/admin/hooks.ts`, não assumido.
+
+### Auditoria completa de documentação de acesso e hospedagem
+Pedido explícito: revisar de ponta a ponta tudo que vai ser entregue a
+terceiros (liberar acesso a projeto-alvo) e usado pelo próprio usuário
+pra hospedar o Hub do zero em outra conta GCP e outro repositório
+GitHub — "tudo precisa estar 100% pronto e funcional, sem nada
+faltando".
+
+**Achados, todos corrigidos:**
+1. `docs/playbooks/liberar-projeto-para-o-hub.md` e `docs/manual-
+   liberacao-acesso-cliente.md` **não mencionavam o domínio storage em
+   nenhum lugar** — escritos antes da Fase 5 (PRs #22-24, antes de
+   `feat/storage-mvp`), nunca atualizados depois. Faltavam a API
+   `storage.googleapis.com`, as duas roles (`storage.bucketViewer`/
+   `storage.objectViewer`, sempre juntas — mesma pegadinha do par
+   `logging.viewer`/`logging.privateLogViewer`) e o audit log opcional
+   de `storage.googleapis.com` com o aviso de volume. Adicionado por
+   completo nos dois (seção técnica + versão em linguagem de cliente),
+   incluindo checklist e troubleshooting.
+2. `docs/onboarding-cliente.md`: introdução citava só 4 dos 8 domínios;
+   a tabela de roles não creditava `pii`/`access`/`finops` como
+   consumidores das mesmas roles já listadas (davam a entender, por
+   omissão, que só catalog/freshness/quality/lineage precisavam delas);
+   a justificativa de "`billing.viewer` não necessário" ainda dizia
+   "domínio FinOps não implementado" — implementado há dias, a razão
+   real é que FinOps usa audit log + preço público, nunca Billing
+   Export. Todos corrigidos.
+3. **Achado crítico, nos dois documentos de hospedagem** (`hospedar-hub-
+   em-novo-projeto.md`, `manual-implementacao-cliente.md`): a escolha de
+   nome dos dois projetos GCP novos nunca foi documentada como
+   **obrigatória** terminar em `-dev`/`-prod` — só aparecia como exemplo
+   sugerido (`acme-hub-dev`/`acme-hub-prod`), dando a impressão de que
+   era só uma convenção de nomenclatura. Na prática,
+   `core/secrets.py::_is_prod()` decide qual par de secrets OAuth ler
+   checando literalmente `project_id.endswith("-prod")` — o único lugar
+   do código que depende disso, mas se os nomes escolhidos não seguirem
+   esse padrão, o backend de "prod" leria os secrets de "_DEV" pra
+   sempre, **sem erro nenhum**, e o login falharia de um jeito confuso de
+   debugar. Promovido de "exemplo" pra aviso obrigatório (⚠️) + item de
+   checklist + linha de troubleshooting nos dois documentos.
+4. Os dois playbooks de hospedagem também ganharam o passo de configurar
+   o `environment: production` do GitHub (ver seção de CI/CD acima) —
+   replicar o repositório copia os workflows já com `environment:
+   production` no YAML, mas sem a regra de proteção configurada nas
+   Settings do novo repositório, o gate simplesmente não existe (nenhum
+   erro, só não bloqueia nada).
+
+Nenhuma mudança de código nesta parte da sessão — só documentação.
+`CHANGELOG.md` ganhou as duas seções correspondentes (CI/CD + auditoria)
+no mesmo padrão de sempre.
 
 ---
 

@@ -5,6 +5,87 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## CI/CD: gate de aprovação manual antes de deploy de app em prod
+
+Direto em `main`, fora de qualquer sprint — pedido do usuário depois de
+investigar um custo de Cloud Run maior que o normal (ver item abaixo).
+
+### O que foi feito
+`backend-deploy-prod.yml`/`frontend-deploy-prod.yml` ganharam
+`environment: production` no job de deploy — GitHub segura o job em
+"Waiting" até alguém aprovar manualmente (Settings → Environments →
+`production`, "Required reviewers"), em vez de publicar sozinho a cada
+push em `main`. `terraform-apply-prod.yml` continua automático, de
+propósito: mudança de infra já passa por `terraform plan` revisado
+antes do merge, diferente do deploy de app, que sobe uma imagem nova
+sem revisão nenhuma no meio. `dev` não muda — continua 100% automático.
+
+### Nota sobre a primeira aplicação (corrida de tempo)
+No dia em que o gate foi configurado, o `backend-deploy-prod.yml` do
+push seguinte ficou corretamente em "Waiting", mas o
+`frontend-deploy-prod.yml` do mesmo push **não** — já estava
+`in_progress` quando a regra de proteção do environment foi salva.
+Deploy único, sem gate, não repetido depois — não é um problema na
+configuração, é só o tipo de corrida que só acontece na primeira vez
+que a regra é criada.
+
+### Diagnóstico de custo do Cloud Run (achado no caminho, não relacionado ao domínio storage)
+Investigando por que um dia teve custo bem maior que os outros: os 4
+serviços Cloud Run (dev/prod × backend/frontend) estavam com
+`run.googleapis.com/cpu-throttling: false` ("CPU sempre alocada" —
+cobra pelo tempo de vida da instância inteira, não só durante o
+processamento da requisição). Confirmado que não vinha do Terraform
+(`resources.cpu_idle` não é declarado no módulo `cloud-run`) nem do
+workflow de deploy (nenhum dos 4 passa essa flag) — foi mudado
+manualmente fora do fluxo do projeto, sem registro de quando ou por
+quê. Revertido pro padrão (CPU só durante request) nos 4 serviços,
+confirmado com `gcloud run services describe` + health check 200 nos
+4 depois do rollout. `min_instance_count = 0` (scale-to-zero) confirmado
+intacto nos 4 — nunca foi a causa.
+
+Volume de requisições do dia em questão (dev 1163, prod 37) bateu com
+um dia de implementação intensa (a própria sprint do domínio storage) —
+não foi um vazamento de tráfego, foi o multiplicador de custo do CPU
+sempre alocado em cima de um dia de uso real e alto.
+
+---
+
+## Auditoria completa de documentação de acesso e hospedagem
+
+Pedido explícito do usuário: revisão de ponta a ponta de toda a
+documentação que será entregue a terceiros (para liberar acesso a
+projetos-alvo) e usada pelo próprio usuário (para hospedar o Hub do
+zero em outra conta/repositório GitHub). Achados e correções:
+
+- `docs/playbooks/liberar-projeto-para-o-hub.md` e
+  `docs/manual-liberacao-acesso-cliente.md` **não mencionavam o domínio
+  `storage` de forma alguma** (escritos antes da Fase 5) — nenhuma das
+  duas roles de storage, nenhuma API, nenhum audit log. Atualizados com
+  a seção completa (API, as 2 roles sempre juntas, audit log opcional
+  com aviso de volume, checklist, troubleshooting).
+- `docs/onboarding-cliente.md`: introdução citava só 4 dos 8 domínios;
+  tabela de roles não creditava `pii`/`access`/`finops` como
+  consumidores das roles já listadas; justificativa de "`billing.viewer`
+  não necessário" ainda dizia "FinOps não implementado" (implementado
+  há dias). Todos corrigidos.
+- **Achado crítico nos dois playbooks de hospedagem**
+  (`hospedar-hub-em-novo-projeto.md`, `manual-implementacao-cliente.md`):
+  a escolha de nome dos dois projetos GCP nunca foi documentada como
+  **obrigatória** terminar em `-dev`/`-prod` — só aparecia como exemplo
+  sugerido. `core/secrets.py::_is_prod()` decide qual par de secrets
+  OAuth ler checando literalmente `project_id.endswith("-prod")`; um
+  nome fora desse padrão faz login de prod ler secrets de dev
+  silenciosamente, sem erro. Adicionado como aviso obrigatório, item de
+  checklist e linha de troubleshooting nos dois documentos.
+- Os dois playbooks de hospedagem também ganharam o passo de configurar
+  o `environment: production` do GitHub (ver seção de CI/CD acima) — sem
+  isso, replicar o repositório copia os workflows já gateados, mas sem
+  a regra de proteção configurada o gate simplesmente não existe.
+
+Nenhuma mudança de código nesta sessão — só documentação.
+
+---
+
 ## Fase 5 — Storage (Cloud Storage): domínio novo, 4 itens (concluída, validada em dev)
 
 Branch `feat/storage-mvp`, a partir de `main` pós-PR #24. Primeira
