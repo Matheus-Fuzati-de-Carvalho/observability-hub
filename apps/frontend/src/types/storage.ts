@@ -5,14 +5,10 @@ export interface BucketSummary {
   total_size_bytes: number
   object_count: number
   has_lifecycle_rule: boolean
+  time_created: string
+  updated: string
 }
 
 export interface BucketsListResponse {
   buckets: BucketSummary[]
-}
-
-export interface BucketFreshnessResponse {
-  bucket_name: string
-  last_modified: string | null
-  warning: string | null
 }

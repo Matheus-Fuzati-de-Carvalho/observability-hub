@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -9,8 +8,8 @@ from observability_hub.core.exceptions import StorageAccessDeniedError
 from observability_hub.domains.storage import repository
 
 
-def _blob(size=0, custom_time=None, updated=None):
-    return SimpleNamespace(size=size, custom_time=custom_time, updated=updated)
+def _blob(size=0):
+    return SimpleNamespace(size=size)
 
 
 def test_list_buckets_returns_client_result():
@@ -53,41 +52,3 @@ def test_get_buckets_sizes_and_counts_runs_per_bucket(monkeypatch):
 
 def test_get_buckets_sizes_and_counts_empty_list_returns_empty_dict():
     assert repository.get_buckets_sizes_and_counts(MagicMock(), []) == {}
-
-
-def test_get_bucket_last_modified_prefers_custom_time_over_updated(monkeypatch):
-    custom = datetime(2026, 8, 17, tzinfo=UTC)
-    updated = datetime(2026, 8, 10, tzinfo=UTC)
-    blobs = [_blob(custom_time=custom, updated=updated)]
-    monkeypatch.setattr(repository, "list_bucket_objects_cached", lambda client, name: blobs)
-
-    result = repository.get_bucket_last_modified(MagicMock(), "landing")
-
-    assert result == custom
-
-
-def test_get_bucket_last_modified_falls_back_to_updated_when_no_custom_time(monkeypatch):
-    updated = datetime(2026, 8, 10, tzinfo=UTC)
-    blobs = [_blob(custom_time=None, updated=updated)]
-    monkeypatch.setattr(repository, "list_bucket_objects_cached", lambda client, name: blobs)
-
-    result = repository.get_bucket_last_modified(MagicMock(), "landing")
-
-    assert result == updated
-
-
-def test_get_bucket_last_modified_returns_max_across_objects(monkeypatch):
-    older = datetime(2026, 8, 1, tzinfo=UTC)
-    newer = datetime(2026, 8, 17, tzinfo=UTC)
-    blobs = [_blob(updated=older), _blob(updated=newer)]
-    monkeypatch.setattr(repository, "list_bucket_objects_cached", lambda client, name: blobs)
-
-    result = repository.get_bucket_last_modified(MagicMock(), "landing")
-
-    assert result == newer
-
-
-def test_get_bucket_last_modified_returns_none_for_empty_bucket(monkeypatch):
-    monkeypatch.setattr(repository, "list_bucket_objects_cached", lambda client, name: [])
-
-    assert repository.get_bucket_last_modified(MagicMock(), "archive") is None

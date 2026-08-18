@@ -1,10 +1,8 @@
-import { Clock, Search } from 'lucide-react'
-import { useState } from 'react'
+import { Search } from 'lucide-react'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SortableTableHead } from '@/components/SortableTableHead'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -15,13 +13,19 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useProjectContext } from '@/features/projects/ProjectContext'
-import { BucketFreshnessDialog } from '@/features/storage/BucketFreshnessDialog'
 import { useBuckets } from '@/features/storage/hooks'
 import { useTableFilterSort } from '@/hooks/useTableFilterSort'
-import { formatBytes, formatNumber } from '@/lib/format'
+import { formatBytes, formatDate, formatNumber } from '@/lib/format'
 import type { BucketSummary } from '@/types/storage'
 
-type SortKey = 'name' | 'location' | 'storage_class' | 'total_size_bytes' | 'object_count'
+type SortKey =
+  | 'name'
+  | 'location'
+  | 'storage_class'
+  | 'total_size_bytes'
+  | 'object_count'
+  | 'time_created'
+  | 'updated'
 
 function compare(a: BucketSummary, b: BucketSummary, key: SortKey): number {
   if (key === 'total_size_bytes' || key === 'object_count') {
@@ -34,7 +38,6 @@ export function BucketsPage() {
   const { projectId } = useProjectContext()
   const bucketsQuery = useBuckets(projectId)
   const data = bucketsQuery.data
-  const [freshnessTarget, setFreshnessTarget] = useState<string | null>(null)
 
   const {
     search,
@@ -122,7 +125,18 @@ export function BucketsPage() {
               align="right"
             />
             <TableHead>Lifecycle rule</TableHead>
-            <TableHead />
+            <SortableTableHead
+              label="Criado em"
+              active={sortKey === 'time_created'}
+              direction={sortDir}
+              onClick={() => toggleSort('time_created')}
+            />
+            <SortableTableHead
+              label="Atualizado em"
+              active={sortKey === 'updated'}
+              direction={sortDir}
+              onClick={() => toggleSort('updated')}
+            />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -142,17 +156,13 @@ export function BucketsPage() {
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
-              <TableCell>
-                <Button size="sm" variant="outline" onClick={() => setFreshnessTarget(bucket.name)}>
-                  <Clock size={14} />
-                  Ver freshness
-                </Button>
-              </TableCell>
+              <TableCell>{formatDate(bucket.time_created)}</TableCell>
+              <TableCell>{formatDate(bucket.updated)}</TableCell>
             </TableRow>
           ))}
           {visibleBuckets.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 {data.buckets.length === 0
                   ? 'Nenhum bucket encontrado neste projeto.'
                   : 'Nenhum bucket encontrado com esse filtro.'}
@@ -161,11 +171,6 @@ export function BucketsPage() {
           )}
         </TableBody>
       </Table>
-
-      <BucketFreshnessDialog
-        bucketName={freshnessTarget}
-        onOpenChange={(open) => !open && setFreshnessTarget(null)}
-      />
     </div>
   )
 }

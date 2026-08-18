@@ -56,7 +56,9 @@ custo por execução.
 
 Retorna, por bucket: nome, storage class default, região, tamanho total
 (soma de `size` dos objetos — via listagem, não há campo agregado nativo
-no bucket), contagem de objetos, `has_lifecycle_rule: bool`.
+no bucket), contagem de objetos, `has_lifecycle_rule: bool`, `time_created`
+e `updated` (metadado nativo do próprio recurso `Bucket`, incluído de graça
+na mesma chamada de listagem — sem custo/chamada extra).
 
 **Decisão**: tamanho total agregado por bucket exige listar objetos
 (`storage.objects.list`), que pode ser uma chamada cara em bucket com
@@ -65,17 +67,24 @@ muitos objetos. Mesmo padrão de cache TTL já usado em `core/bigquery.py`
 
 ## 5. Freshness por bucket
 
-`GET /api/v1/storage/{project}/buckets/{bucket}/freshness`
+**Revisado em 2026-08-17, depois de validar a v1 em dev** — a v1 desta
+seção (endpoint dedicado `GET .../buckets/{bucket}/freshness`, botão "Ver
+freshness" sob demanda no frontend, `last_modified` calculado a partir de
+`max(customTime ou updated)` entre os **objetos** do bucket) foi
+implementada, validada em dev e depois **descartada por decisão do
+usuário**, substituída por `time_created`/`updated` do próprio `Bucket`
+(seção 4) exibidos como colunas na tabela, sem endpoint/dialog separado.
 
-Retorna `last_modified` = `max(updated)` entre os objetos do bucket. Usa
-`customTime` como campo primário quando presente, `updated` (timestamp de
-upload real) como fallback — mesmo raciocínio de lifecycle-by-custom-time
-do próprio GCS, não uma invenção do Hub.
-
-**Nota de limitação a documentar na API** (mesmo padrão de
-`_EMPTY_RESULT_WARNING` em lineage): bucket vazio ou sem objetos legíveis
-pela SA retorna `last_modified: null` com aviso — não confundir com "sem
-atividade".
+**Diferença semântica registrada aqui de propósito**: `Bucket.updated` é
+quando a **configuração** do bucket mudou (lifecycle, storage class,
+IAM...), não quando um objeto foi gravado — bem diferente do
+`last_modified` da v1, que refletia atividade de dado real via
+`customTime`/`updated` dos objetos. A v1 é uma métrica mais precisa pra
+"a esteira de dados desse bucket ainda está viva?"; a v2 é mais barata
+(zero chamada extra) mas não responde exatamente a mesma pergunta. Trade-
+off aceito conscientemente pelo usuário — código da v1 (`get_bucket_last_
+modified` em `repository.py`, endpoint, `BucketFreshnessDialog.tsx`)
+removido por completo, não deixado como dead code.
 
 ## 6. Scanner de desperdício
 

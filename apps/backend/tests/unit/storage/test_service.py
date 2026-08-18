@@ -5,13 +5,25 @@ from unittest.mock import MagicMock
 from observability_hub.domains.storage import service
 from observability_hub.domains.storage.schemas import BucketSummary
 
+_CREATED = datetime(2026, 1, 1, tzinfo=UTC)
+_UPDATED = datetime(2026, 8, 17, tzinfo=UTC)
 
-def _bucket(name, location="US", storage_class="STANDARD", lifecycle_rules=()):
+
+def _bucket(
+    name,
+    location="US",
+    storage_class="STANDARD",
+    lifecycle_rules=(),
+    time_created=_CREATED,
+    updated=_UPDATED,
+):
     return SimpleNamespace(
         name=name,
         location=location,
         storage_class=storage_class,
         lifecycle_rules=lifecycle_rules,
+        time_created=time_created,
+        updated=updated,
     )
 
 
@@ -37,6 +49,8 @@ def test_list_buckets_builds_response(monkeypatch):
             total_size_bytes=1000,
             object_count=1,
             has_lifecycle_rule=True,
+            time_created=_CREATED,
+            updated=_UPDATED,
         ),
         BucketSummary(
             name="processed",
@@ -45,6 +59,8 @@ def test_list_buckets_builds_response(monkeypatch):
             total_size_bytes=500,
             object_count=1,
             has_lifecycle_rule=False,
+            time_created=_CREATED,
+            updated=_UPDATED,
         ),
     ]
 
@@ -58,24 +74,3 @@ def test_list_buckets_empty_project(monkeypatch):
     result = service.list_buckets(MagicMock(), "observability-hub-dev")
 
     assert result.buckets == []
-
-
-def test_get_bucket_freshness_returns_last_modified_without_warning(monkeypatch):
-    when = datetime(2026, 8, 17, tzinfo=UTC)
-    monkeypatch.setattr(service.repository, "get_bucket_last_modified", lambda client, name: when)
-
-    result = service.get_bucket_freshness(MagicMock(), "landing")
-
-    assert result.bucket_name == "landing"
-    assert result.last_modified == when
-    assert result.warning is None
-
-
-def test_get_bucket_freshness_returns_warning_for_empty_bucket(monkeypatch):
-    monkeypatch.setattr(service.repository, "get_bucket_last_modified", lambda client, name: None)
-
-    result = service.get_bucket_freshness(MagicMock(), "archive")
-
-    assert result.last_modified is None
-    assert result.warning is not None
-    assert "archive" in result.warning
