@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ApiErrorNotice } from '@/components/ApiErrorNotice'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SortableTableHead } from '@/components/SortableTableHead'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -24,6 +25,7 @@ type SortKey =
   | 'eligible_size_bytes'
   | 'oldest_object_age_days'
   | 'estimated_savings_usd_month_min'
+  | 'confidence'
 
 function formatUsd(value: number): string {
   return `US$ ${value.toFixed(value < 0.01 ? 6 : 2)}`
@@ -33,7 +35,36 @@ function compare(a: WasteCandidate, b: WasteCandidate, key: SortKey): number {
   if (key === 'bucket_name') {
     return a.bucket_name.localeCompare(b.bucket_name)
   }
+  if (key === 'confidence') {
+    return a.confidence.localeCompare(b.confidence)
+  }
   return a[key] - b[key]
+}
+
+function ConfidenceBadge({ candidate }: { candidate: WasteCandidate }) {
+  if (candidate.confidence === 'usage_confirmed') {
+    return (
+      <Badge
+        variant="secondary"
+        className="border-status-ok/30 bg-status-ok/10 text-status-ok"
+        title={`${candidate.usage_confirmed_object_count} de ${candidate.eligible_object_count} objetos sem leitura registrada nos últimos 90 dias`}
+      >
+        Sem leitura confirmada
+      </Badge>
+    )
+  }
+  return (
+    <Badge
+      variant="secondary"
+      title={
+        candidate.usage_confirmed_object_count > 0
+          ? `${candidate.usage_confirmed_object_count} de ${candidate.eligible_object_count} objetos sem leitura registrada — os demais foram lidos nos últimos 90 dias`
+          : 'Baseado só em idade + ausência de lifecycle rule, sem checagem de leitura'
+      }
+    >
+      Só configuração
+    </Badge>
+  )
 }
 
 export function WastePage() {
@@ -79,9 +110,11 @@ export function WastePage() {
         />
       </div>
 
-      <div className="rounded-lg border border-status-warn/30 bg-status-warn/10 p-3 text-sm text-status-warn">
-        {data.limitation}
-      </div>
+      {data.usage_check_warning && (
+        <div className="rounded-lg border border-status-warn/30 bg-status-warn/10 p-3 text-sm text-status-warn">
+          {data.usage_check_warning}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">
@@ -141,6 +174,12 @@ export function WastePage() {
               onClick={() => toggleSort('estimated_savings_usd_month_min')}
               align="right"
             />
+            <SortableTableHead
+              label="Confiança"
+              active={sortKey === 'confidence'}
+              direction={sortDir}
+              onClick={() => toggleSort('confidence')}
+            />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -158,11 +197,14 @@ export function WastePage() {
                 {formatUsd(candidate.estimated_savings_usd_month_min)} –{' '}
                 {formatUsd(candidate.estimated_savings_usd_month_max)}
               </TableCell>
+              <TableCell>
+                <ConfidenceBadge candidate={candidate} />
+              </TableCell>
             </TableRow>
           ))}
           {visibleCandidates.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
+              <TableCell colSpan={6} className="text-center text-muted-foreground">
                 Nenhum bucket candidato encontrado com esse threshold.
               </TableCell>
             </TableRow>

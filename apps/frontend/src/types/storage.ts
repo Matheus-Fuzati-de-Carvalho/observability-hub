@@ -15,6 +15,8 @@ export interface BucketsListResponse {
 
 export type MinDaysUnused = 30 | 60 | 90
 
+export type WasteConfidence = 'config_based' | 'usage_confirmed'
+
 export interface WasteCandidate {
   bucket_name: string
   eligible_object_count: number
@@ -22,6 +24,9 @@ export interface WasteCandidate {
   oldest_object_age_days: number
   estimated_savings_usd_month_min: number
   estimated_savings_usd_month_max: number
+  usage_confirmed_object_count: number
+  usage_confirmed_size_bytes: number
+  confidence: WasteConfidence
 }
 
 export interface WasteCandidatesResponse {
@@ -29,5 +34,5 @@ export interface WasteCandidatesResponse {
   min_days_unused: MinDaysUnused
   candidates: WasteCandidate[]
   savings_disclaimer: string
-  limitation: string
+  usage_check_warning: string | null
 }

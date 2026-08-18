@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from google.api_core.exceptions import Forbidden
 
-from observability_hub.core.exceptions import StorageAccessDeniedError
+from observability_hub.core.exceptions import LoggingAccessDeniedError, StorageAccessDeniedError
 from observability_hub.domains.storage import repository
 
 _PROJECT_ID = "observability-hub-dev"
@@ -20,6 +20,10 @@ def _blob(size=0, storage_class="STANDARD", custom_time=None, updated=None):
 
 def _days_ago(days):
     return _NOW - timedelta(days=days)
+
+
+def _entry(payload):
+    return SimpleNamespace(payload=payload)
 
 
 def test_list_buckets_returns_client_result():
@@ -123,3 +127,49 @@ def test_get_eligible_waste_objects_raises_storage_access_denied_on_forbidden(mo
 
     with pytest.raises(StorageAccessDeniedError):
         repository.get_eligible_waste_objects(MagicMock(), _PROJECT_ID, "landing", 60, _NOW)
+
+
+def test_parse_resource_name_extracts_bucket_and_object():
+    result = repository._parse_resource_name(
+        "projects/_/buckets/landing/objects/crm_leads/2026-08-17/part-0001.csv"
+    )
+    assert result == ("landing", "crm_leads/2026-08-17/part-0001.csv")
+
+
+def test_parse_resource_name_returns_none_for_bucket_only():
+    assert repository._parse_resource_name("projects/_/buckets/landing") is None
+
+
+def test_parse_resource_name_returns_none_for_empty():
+    assert repository._parse_resource_name(None) is None
+    assert repository._parse_resource_name("") is None
+
+
+def test_list_read_object_keys_parses_object_get_events():
+    client = MagicMock()
+    read_payload = {
+        "resourceName": "projects/_/buckets/landing/objects/crm_leads/part-0001.csv",
+        "methodName": "storage.objects.get",
+    }
+    # entrada sem resourceName (ex: evento de bucket, não de objeto) é ignorada
+    other_payload = {"methodName": "storage.buckets.getStorageLayout"}
+    client.list_entries.return_value = [_entry(read_payload), _entry(other_payload), _entry(None)]
+
+    result = repository.list_read_object_keys(client, _PROJECT_ID, 90)
+
+    assert result == {("landing", "crm_leads/part-0001.csv")}
+
+
+def test_list_read_object_keys_empty_when_no_entries():
+    client = MagicMock()
+    client.list_entries.return_value = []
+
+    assert repository.list_read_object_keys(client, _PROJECT_ID, 90) == set()
+
+
+def test_list_read_object_keys_raises_logging_access_denied_on_forbidden():
+    client = MagicMock()
+    client.list_entries.side_effect = Forbidden("denied")
+
+    with pytest.raises(LoggingAccessDeniedError):
+        repository.list_read_object_keys(client, _PROJECT_ID, 90)
