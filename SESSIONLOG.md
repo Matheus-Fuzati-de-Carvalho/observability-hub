@@ -7,75 +7,237 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-17 — reconstrução completa a partir do
-histórico real de commits/PRs (`git log`, `gh pr list`, specs e ADRs),
-porque o SESSIONLOG não foi atualizado desde 2026-08-14 (commit `5741ae7`)
-apesar de **quatro dias inteiros de trabalho** terem acontecido nesse
-meio-tempo — mesma falha de processo já registrada antes neste arquivo
-(ver Backlog item 11), desta vez numa escala bem maior. Sessão atual não
-implementou nada — só leu o estado real do repositório e desta vez
-**escreveu o SESSIONLOG antes de qualquer outra tarefa**, em vez de
-depois.
+**Última atualização:** 2026-08-18 — sessão de implementação do domínio
+`storage` (Cloud Storage), do zero até validado em dev, 4 itens
+completos. Sessão anterior (2026-08-17) tinha reconstruído este arquivo
+depois de 4 dias sem atualização (ver seção "Storage — domínio novo"
+abaixo, "Falha de processo" — os commits dessa reconstrução ficaram
+presos numa branch errada e quase se perderam de novo; corrigido nesta
+sessão com um merge explícito).
 
-**Estado real agora:** todo o trabalho de Sprint 3.2 (fechamento), FinOps
-completo (3 frentes) e Admin ACL (v1.0 a v1.3) **já está mergeado em
-`main` e deployado em prod**, via PRs #18 a #24. A branch local
-`feature/admin-usage-analytics` (HEAD `0461b36`) é **idêntica** ao
-merge-base com `origin/main` (`origin/main` = `35c0205`, merge do PR
-#24) — ou seja, não há nada pendente de merge nesta branch; ela só
-ainda não foi limpa/deletada localmente. A `main` local (`44ad7c9`) está
-desatualizada (ainda no PR #17) e precisa de `git pull`/`fetch` antes de
-qualquer trabalho novo a partir dela — só o remoto (`origin/main`) reflete
-o estado real.
+**Estado real agora:** domínio `storage` (Cloud Storage) implementado
+por completo — catálogo de buckets, scanner de desperdício (config +
+uso real via audit log), extensão do lineage (bucket como nó) — na
+branch `feat/storage-mvp` (a partir de `main` pós-PR #24), commits
+`02adc81`..`ec0ae14`. **Todos os 4 itens validados em dev pelo usuário**,
+incluindo o grafo de lineage real (`RAW.crm_leads_staging` com bucket
+`landing` upstream e `processed` downstream, jobs LOAD/EXTRACT reais).
+**Sem PR pra `main` ainda** — aguardando o usuário rodar os comandos de
+promoção pra prod (buckets mock, IAM, ver seção própria abaixo) antes de
+abrir o PR.
 
-**Único item pendente nesta sessão:** `infra/terraform/modules/cloud-run/
-variables.tf` tem uma mudança **não commitada, não staged** —
-`max_instance_count` default `2` → `5` — sem contexto de por que ou pra
-qual ambiente na conversa atual. Não faz parte de nenhum PR listado
-acima. Perguntar ao usuário antes de commitar (contexto de IaC exige
-`terraform plan` revisado + aprovação antes de qualquer apply, ver
-CLAUDE.md).
+**Item resolvido nesta sessão**: a mudança não commitada em
+`infra/terraform/modules/cloud-run/variables.tf` (`max_instance_count`
+2→5, registrada como pendente na atualização anterior) foi **descartada**
+por decisão do usuário (`git restore`) — sem justificativa encontrada
+nos logs do Cloud Run (nenhum sinal de estar batendo no teto de 2
+instâncias), não fazia parte de nenhum trabalho desta sessão.
 
-**Sprints/fases concluídas desde a última atualização real do log:**
+Ver a seção "Storage — domínio novo" abaixo pra todo o detalhe técnico
+(decisões de desenho, bugs reais encontrados em dev, payloads reais de
+audit log capturados). As seções anteriores (Sprint 3.2, FinOps, Admin
+ACL, Documentação para cliente) continuam válidas — nada mudou nelas
+nesta sessão, só ficaram mais antigas na lista.
 
-1. ✅ **Sprint 3.2 completa (7 de 7 itens)** — os 2 itens que faltavam
-   (PII, mapa de acesso) mais lineage evoluindo de 1-hop pra grafo
-   transitivo multi-hop cross-project. PR #18.
-2. ✅ **FinOps completo (as 3 frentes do roadmap, Fase 4 do CHANGELOG)**
-   — scanner de desperdício (PR #19), budget de custo por
-   dataset/usuário/dia/mês/ano (PR #20), sugestão de tipo de coluna (PR
-   #20/#21). **`CHANGELOG.md` ainda diz Fase 4 "em andamento, falta
-   otimizações sugeridas" — isso está desatualizado, a spec
-   `finops-column-types.md` v1.1 está com `Status: Aprovada` e é a
-   última coisa implementada dessa frente.** Ver Backlog.
-3. ✅ **Admin ACL v1.0 → v1.3** (ADR-009) — segunda camada de
-   autorização usuário×projeto (fail closed), tela `/admin`, projetos
-   públicos, solicitação de acesso self-service, e um painel de
-   analytics de uso do próprio Hub (aba "Uso do Hub" — de onde vem o
-   nome da branch `feature/admin-usage-analytics`: logins, favoritos
-   entre usuários, atividade de profiling/PII, solicitações de acesso,
-   navegação agregada). PRs #20, #21.
-4. ✅ **Documentação para cliente** — dois playbooks operacionais
-   (`docs/playbooks/`) e dois manuais voltados a cliente final
-   (`docs/manual-implementacao-cliente.md`,
-   `docs/manual-liberacao-acesso-cliente.md`). PRs #22, #23, #24.
-5. ✅ Duas reorganizações de sidebar (agrupamento por tópico, depois
-   hierarquia por serviço observável — `SidebarServiceGroup`,
-   deliberadamente pronta pra um serviço GCP além do BigQuery).
+**Próximo passo:** rodar o checklist de prod (comandos passados ao
+usuário fora deste arquivo, resumo na seção "Storage — domínio novo" →
+"Pendências pra promover em prod") — buckets mock, IAM (`storage.
+bucketViewer`+`storage.objectViewer`, self e cross-project), jobs LOAD/
+EXTRACT reais pra popular o lineage. Depois disso, abrir o PR de
+`feat/storage-mvp` → `main`, como pedido explicitamente pelo usuário no
+início desta sprint (mesmo padrão das sprints anteriores — sem PR até
+tudo validado).
 
-Ver as seções próprias abaixo ("Sprint 3.2 — fechamento", "FinOps",
-"Admin ACL", "Documentação para cliente", "Sidebar") para o detalhe
-técnico de cada uma, reconstruído a partir de commits/specs/ADRs — não
-de memória de sessão, já que nenhuma sessão anterior deixou notas.
+---
 
-**Próximo passo:** confirmar com o usuário o contexto da mudança não
-commitada em `variables.tf` (`max_instance_count`); depois, perguntar
-qual é o próximo item de trabalho — não há nenhuma spec pendente nem
-sprint em andamento no momento. Candidatos conhecidos, nenhum iniciado:
-Backlog item 14 (expansão de cobertura pra além do BigQuery, adiada
-conscientemente pelo usuário em 2026-08-17), atualizar `CHANGELOG.md`/
-`docs/prd.md` (roadmap desatualizado desde a Sprint 3.2), e formalizar
-IAM cross-project em Terraform (Backlog item 2, cada vez mais adiado).
+## Storage — domínio novo (Fase 5, branch `feat/storage-mvp`, concluída)
+
+Primeira expansão do Hub pra além do BigQuery — spec completa em
+`docs/specs/storage.md` (v1.0 → v1.1 ao longo desta sessão). Regras de
+execução (mesmas de sempre, confirmadas no início): plano resumido antes
+de cada item, `pytest` depois de cada domínio backend tocado, testar em
+dev antes do próximo item, commit por item, push só com aprovação
+explícita a cada vez, sem PR pra `main` até os 4 itens validados.
+
+### Decisões de abertura (seção 10 da spec)
+Três pontos abertos, confirmados com o usuário antes de qualquer código:
+nome do domínio `domains/storage` (sem colisão encontrada no repo),
+rótulo da sidebar "Cloud Storage" (não "GCS"), threshold default do
+waste scanner 60 dias. Branch `feat/storage-mvp` a partir de `main`
+atualizada (local estava desatualizada, `git fetch && git pull`
+necessário antes de criar a branch).
+
+### Item 1 — Catálogo de buckets (commits `02adc81`, `133736f`)
+`GET /api/v1/storage/{project}/buckets`. `core/storage_client.py` novo
+(client + cache TTL 5min de listagem de objetos, mesmo padrão de
+`core/bigquery.py`). `has_lifecycle_rule` via `bucket.lifecycle_rules`;
+tamanho total/contagem via listagem de objetos (não há campo agregado
+nativo no bucket). Novo `SidebarServiceGroup` "Cloud Storage".
+
+**Bug real em dev**: `roles/storage.objectViewer` (única role prevista
+na v1 da spec) devolveu 403 mesmo concedida — `gcloud iam roles describe`
+confirmou que ela cobre só `storage.objects.*`/`storage.folders.*`/
+`storage.managedFolders.*`, **sem** `storage.buckets.list`/`storage.
+buckets.get`. `list_buckets()` (a primeira chamada do domínio) precisa
+também de `roles/storage.bucketViewer` (role dedicada, só metadado de
+bucket). Corrigido no handler de 403 (`StorageAccessDeniedError` sugere
+as duas juntas) e no checklist de `docs/onboarding-cliente.md`. Grant
+self em dev confirmado ao vivo via `gcloud projects get-iam-policy`
+depois do usuário rodar o comando.
+
+### Item 2 — Freshness: implementada, validada, depois descartada (commits `98bee27`, `7dd64e0`)
+V1: endpoint dedicado (`GET .../buckets/{bucket}/freshness`), botão "Ver
+freshness" sob demanda (mesmo padrão de `PartitionsDialog` do catálogo),
+`last_modified` = `max(customTime ou updated)` entre os **objetos** do
+bucket. Implementada e validada em dev — e então o usuário pediu pra
+trocar por algo mais simples: `time_created`/`updated` do próprio
+`Bucket` (metadado nativo, já vem de graça no `list_buckets()` do item
+1) como duas colunas direto na tabela, sem endpoint/dialog separado.
+
+Diferença semântica registrada explicitamente na spec (seção 5):
+`Bucket.updated` é quando a **configuração** mudou (lifecycle, storage
+class...), não quando um objeto foi gravado — não é o mesmo sinal que a
+v1 media (atividade real de dado). Trade-off (mais barato, menos
+preciso) aceito conscientemente. Código da v1 removido por completo
+(endpoint, `get_bucket_last_modified`, `BucketFreshnessDialog.tsx`,
+`useBucketFreshness`) — não deixado como dead code.
+
+### Item 3 — Scanner de desperdício, duas rodadas (commits `381c30b`, `14c6b74`, `f3e352e`)
+
+**Rodada 1 (6.1, config-based)**: bucket sem lifecycle rule + objetos
+`STANDARD` mais antigos que o threshold (`IntEnum` 30/60/90, mesma
+correção de `Literal`→422 já feita no FinOps). Faixa de economia (nunca
+valor único) sobre bytes reais: migração pra `NEARLINE` (mínimo) ou
+`COLDLINE` (máximo) — `ARCHIVE` fica de fora de propósito (retrieval
+caro + duração mínima de 365 dias tornariam a recomendação automática
+arriscada). Preços GCS novos em `core/config.py`, mesmo padrão dos
+preços do BigQuery já lá.
+
+**Gap pré-existente corrigido junto** (não era novo deste item):
+`list_bucket_objects_cached` não capturava `Forbidden` — um projeto com
+`bucketViewer` mas sem `objectViewer` estourava 500 cru em vez do 403
+limpo do domínio. `repository.py` ganhou `project_id` nos parâmetros de
+listagem de objetos pra relançar `StorageAccessDeniedError`.
+
+**Rodada 2 (6.2, usage-based)** — depois do usuário habilitar Data
+Access audit log `DATA_READ` pra `storage.googleapis.com` em dev
+(2026-08-18, confirmado ao vivo): objeto elegível por 6.1 sem nenhuma
+leitura (`storage.objects.get`) em 90 dias ganha `confidence:
+"usage_confirmed"`. Payload do audit log de GCS confirmado ao vivo
+(gerei uma leitura real do objeto + `gcloud logging read`): é o proto
+padrão `google.cloud.audit.AuditLog` (`resource.type="gcs_bucket"`) —
+**diferente** do formato legado `AuditData`/`jobCompletedEvent` que
+lineage/access usam pra job do BigQuery, parser novo (`list_read_object_
+keys`), mesmo client de Cloud Logging (roles já cross-granted, nenhuma
+role nova).
+
+**Ponto de desenho confirmado com o usuário antes de codar**: `Waste
+Candidate` é agregado por bucket (validado em dev no item anterior), mas
+a spec fala de confidence por **objeto** — resolvido com dois campos
+novos (`usage_confirmed_object_count`/`usage_confirmed_size_bytes`,
+subconjunto do total elegível) e `confidence` só vira `"usage_confirmed"`
+quando **todos** os objetos elegíveis do bucket estão sem leitura
+confirmada. Degradação graciosa obrigatória (pedida explicitamente):
+`Forbidden` ou resultado vazio pro projeto inteiro (audit log pode estar
+desabilitado, ambíguo) nunca falha a requisição — cai pra
+`config_based` em todos os candidatos, com `usage_check_warning`
+explicando por quê.
+
+### Item 4 — Extensão do lineage: bucket como nó (commit `9bafbee`, maior risco da sprint)
+`load` (GCS→BQ) → aresta bucket→tabela; `extract` (BQ→GCS) → aresta
+tabela→bucket. Os dois payloads reais (seção 7.1 da spec) foram usados
+como fixture de teste, não inventados — confirmados ao vivo em dev antes
+de escrever qualquer parser.
+
+**Ponto de desenho que exigiu pausa** (conforme pedido explícito do
+usuário no início do item): diferente de tabela, um bucket não tem
+"projeto dono" confiável via API pra saber em qual audit log procurar
+quem mais o referencia. Resolvido com o usuário: **bucket é sempre nó
+folha** — entra no grafo (nó + aresta) quando descoberto pelos eventos
+já buscados do lado tabela (sem chamada nova), mas a travessia BFS nunca
+expande a partir dele. `NodeRef` (service.py) generaliza `TableRefTuple`
+(3-tupla) + `BucketRef` (1-tupla), discriminável só pelo tamanho da
+tupla. `LineageNode` ganhou `type`/`bucket_name`;
+`project_id`/`dataset_id`/`table_id` viraram opcionais. Frontend:
+`bucketNode` novo em `LineageGraph.tsx` (ícone `HardDrive`, cor
+`status-ok`, mesma identidade do grupo "Cloud Storage" da sidebar).
+
+**Gap encontrado, deliberadamente não corrigido** (fora do escopo —
+é do domínio `lineage` inteiro, não específico de bucket): nenhum parser
+de audit log do projeto (lineage/access/finops) filtra `jobStatus.state
+!= "DONE"` — um job que falhou mas tem `destinationTable`/`sourceUris`
+no config já criaria uma aresta hoje. Registrado como backlog do domínio
+lineage, não do domínio storage.
+
+**Validado em dev pelo usuário**: lineage de `RAW.crm_leads_staging`
+mostrou bucket `observability-hub-dev-landing` upstream (via LOAD real)
+e `observability-hub-dev-processed` downstream (via EXTRACT real), com o
+estilo visual diferenciado e sem seta de expansão nos nós de bucket.
+
+### Falha de processo encontrada e corrigida nesta sessão
+Os 4 commits de fechamento do SESSIONLOG/CHANGELOG de uma sessão
+anterior (reconstrução completa depois de 4 dias sem atualização — ver
+"Documentação para cliente" mais abaixo pro contexto) tinham sido
+pusheados só pro remoto de `feature/admin-usage-analytics`, **nunca
+mergeados em `main` via PR**. Quando `feat/storage-mvp` foi criada a
+partir de `main` atualizada (que não inclui esses 4 commits), herdou a
+versão **velha** do SESSIONLOG (2026-08-14) — quase repetindo a mesma
+falha que aquela reconstrução tinha corrigido. Descoberto no meio desta
+sessão (ao notar que o CHANGELOG.md não tinha as seções que eu mesmo
+tinha escrito antes), corrigido com `git merge feature/admin-usage-
+analytics` explícito em `feat/storage-mvp` antes de qualquer atualização
+final de documentação (commit `96c4db4`) — só um conflito real, na
+tabela de registro de acessos do `docs/onboarding-cliente.md` (as duas
+branches adicionaram linhas diferentes na mesma tabela), resolvido
+mantendo as duas.
+
+**Lição registrada aqui de propósito**: commits de documentação
+"soltos" numa branch de feature, sem PR, são tão frágeis quanto nenhuma
+documentação — o processo só é confiável quando o merge pra `main`
+acontece de verdade. Considerar, numa sessão futura, abrir PRs só de
+docs quando uma branch de feature demorar muito pra fechar (em vez de
+esperar o PR final que empacota tudo junto).
+
+### Pendências pra promover em prod (antes do PR pra `main`)
+Nada disso foi aplicado em prod ainda — comandos passados ao usuário
+fora deste arquivo (ele roda via `!`, mesmo padrão de sempre):
+1. IAM self: `backend-run@...-prod` ganha `roles/storage.bucketViewer` +
+   `roles/storage.objectViewer` em `observability-hub-prod`.
+2. IAM cross (mesmo padrão simétrico já usado pra BigQuery/Logging):
+   `backend-run@...-dev` ganha as mesmas duas roles em
+   `observability-hub-prod`; `backend-run@...-prod` ganha as mesmas duas
+   roles em `observability-hub-dev`.
+3. `storage.googleapis.com` já estava habilitada em prod antes desta
+   sessão (confirmado via `gcloud services list` — provavelmente
+   habilitada como dependência de outra coisa, não documentado quando).
+4. 3 buckets mock em prod, espelhando dev: `observability-hub-prod-
+   landing` (STANDARD, com lifecycle rule), `observability-hub-prod-
+   processed` (NEARLINE, sem regra), `observability-hub-prod-archive`
+   (COLDLINE, sem regra).
+5. 1 objeto mock em `landing`, 1 job LOAD real (landing → nova tabela
+   `RAW.crm_leads_staging`, prod já tem `RAW.crm_leads` mas não
+   `_staging`) e 1 job EXTRACT real (`crm_leads_staging` → `processed`)
+   — pra popular lineage/waste scanner com dado real, mesmo mock que
+   valida em dev.
+6. **Não** habilitar Data Access audit log `DATA_READ` de
+   `storage.googleapis.com` em prod nesta rodada — spec (seção 6.2)
+   registra nota de volume/custo (evento por leitura de objeto, pode ser
+   alto em bucket de tráfego real); decisão de quando habilitar fica
+   pro usuário, não é bloqueante pro MVP funcionar (6.2 degrada
+   graciosamente sem essa config).
+7. Depois de tudo confirmado (`gcloud ... get-iam-policy`/`buckets
+   list`/`bq show` ao vivo, não assumido), registrar as linhas em
+   `docs/onboarding-cliente.md` (checklist já cobre as roles/API, só
+   falta a confirmação em prod) e abrir o PR de `feat/storage-mvp` →
+   `main`.
+
+### Status final
+- Backend: 597 testes unitários (0 quando o domínio começou), 100%
+  passando, `ruff check`/`ruff format` limpos em cada commit.
+- Frontend: `biome check`, `tsc -b`, `vite build` limpos em cada commit.
+- Validado em dev pelo usuário — os 4 itens, incluindo o grafo de
+  lineage com bucket real.
+- **Sem PR pra `main`** — aguardando promoção de prod (seção acima).
 
 ---
 
@@ -1079,45 +1241,64 @@ revisitar se o risco incomodar mais adiante.
 
 ```
 GCP Dev  (observability-hub-dev)
-├── Cloud Run: backend ✅ tag 0461b36 (feature/admin-usage-analytics —
-│   última mudança de app real foi no PR #21, 22/23/24 são docs-only e
-│   não disparam deploy)
-├── Cloud Run: frontend ✅ tag 0461b36, idem
+├── Cloud Run: backend ✅ tag 9bafbee (feat/storage-mvp — domínio storage
+│   completo, deploy automático verde a cada push desta sessão)
+├── Cloud Run: frontend ✅ tag 9bafbee, idem
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
 ├── IAM backend-run@...-dev: metadataViewer + jobUser + dataViewer +
 │   logging.viewer + logging.privateLogViewer no próprio projeto e em
-│   observability-hub-prod (cross-project completo nas 5 roles — a
-│   privateLogViewer cross foi a última peça, confirmada via
-│   `gcloud projects get-iam-policy` em 2026-08-17)
-├── IAM backend-run@...-prod: as mesmas cinco roles em observability-hub-dev
-│   (cross-project completo, idem)
-├── Data Access audit logs (DATA_READ, DATA_WRITE, ADMIN_READ) habilitados
-│   em dev e prod pra bigquery.googleapis.com
+│   observability-hub-prod (cross-project completo nas 5 roles de
+│   BigQuery/Logging, sem mudança nesta sessão)
+├── IAM backend-run@...-dev: storage.bucketViewer + storage.objectViewer
+│   — **só self, no próprio projeto** (concedidas nesta sessão). Ainda
+│   **não cross-granted** pra observability-hub-prod nem vice-versa —
+│   ver "Storage — domínio novo" → "Pendências pra promover em prod"
+├── IAM backend-run@...-prod: as cinco roles de BigQuery/Logging em
+│   observability-hub-dev (cross-project completo, sem mudança). **Zero**
+│   roles de storage.* em nenhum projeto — nunca concedidas
+├── Data Access audit logs: bigquery.googleapis.com (DATA_READ,
+│   DATA_WRITE, ADMIN_READ) em dev e prod, sem mudança. storage.
+│   googleapis.com (DATA_READ) — **habilitado só em dev**, nesta sessão
+│   (2026-08-18), pra checagem 6.2 do waste scanner. Prod não tem essa
+│   config, de propósito (nota de volume na spec, seção 6.2)
 ├── Checklist completo de IAM/API/audit config pra onboarding de projeto
 │   alvo vive em docs/onboarding-cliente.md — registro de concessões
-│   (tabela "Registro de acessos concedidos") está em dia até 2026-08-17
-├── Firestore (Native mode): hub_users, hub_projects, access_requests,
-│   login_events, users/{email}/{favorites,history_*}, profiling_history,
-│   pii_scan_history — todas coleções/subcoleções próprias do Hub, SA de
-│   runtime já tinha datastore.user no próprio projeto (sem role nova)
-├── Admin seedado (scripts/seed_admin.py) — confirmado antes do PR #20
-├── Pipeline: 556 testes unitários backend, 100% passando, ruff limpo;
+│   está em dia até 2026-08-18 (inclui as duas roles de storage e o
+│   audit config novo)
+├── Firestore (Native mode): sem mudança nesta sessão (domínio storage
+│   não usa Firestore — tudo vem de GCS/Cloud Logging direto)
+├── Pipeline: 597 testes unitários backend, 100% passando, ruff limpo;
 │   frontend tsc/biome/vite build limpos; deploy automático verde a cada
-│   push (gh run list confirmado até 2026-08-17)
-└── Datasets mock: RAW (3 tabelas), TRUSTED (2 tabelas), REFINED (1 view)
+│   push (gh run list confirmado até 2026-08-18)
+├── Buckets mock: observability-hub-dev-landing (STANDARD, com lifecycle
+│   rule), observability-hub-dev-processed (NEARLINE, sem regra),
+│   observability-hub-dev-archive (COLDLINE, sem regra, vazio) — já
+│   existiam antes desta sessão, usados como fixture real de validação
+├── 1 job LOAD real (landing → RAW.crm_leads_staging) e 1 job EXTRACT
+│   real (RAW.crm_leads_staging → processed) — já existiam, usados pra
+│   validar lineage com bucket
+└── Datasets mock: RAW (4 tabelas agora, incluindo crm_leads_staging),
+    TRUSTED (2 tabelas), REFINED (1 view)
 
 GCP Prod (observability-hub-prod)
-├── Cloud Run: backend ✅ tag c893c60 (merge commit do PR #21 — última
-│   mudança de app; PR #22/23/24 são docs-only, sem deploy)
+├── Cloud Run: backend ✅ tag c893c60 (merge commit do PR #21 — ainda a
+│   última mudança de app; domínio storage não mergeado em main ainda)
 ├── Cloud Run: frontend ✅ tag c893c60, idem
 ├── Artifact Registry: apps ✅ (compartilhado backend+frontend)
-├── IAM: ver bloco de dev acima — simétrico nas duas direções, sem lacunas
-│   conhecidas no momento
-├── Admin ACL passou a gatear 9 routers em prod pela primeira vez no PR
-│   #20 (admin seedado em prod antes do merge, conforme corpo do PR)
-├── total_datasets: 3
-└── WIF: attribute_condition restrito a refs/heads/main (só push direto,
-    nunca PR) — plan de prod continua revisão manual
+├── IAM BigQuery/Logging: simétrico com dev, sem lacunas conhecidas
+├── IAM storage.*: **nenhuma role concedida** — ver checklist de
+│   promoção na seção "Storage — domínio novo"
+├── storage.googleapis.com: **já habilitada** (confirmado via `gcloud
+│   services list` nesta sessão — provavelmente por outra dependência,
+│   não documentado quando; não precisa habilitar de novo)
+├── Data Access audit log DATA_READ de storage.googleapis.com: **não
+│   habilitado**, de propósito (ver nota de volume acima)
+├── Buckets: **nenhum** além do `-tfstate` — precisa criar os 3 mocks
+├── Admin ACL gateando 9 routers desde o PR #20, sem mudança
+├── total_datasets: 4 (RAW já tem `crm_leads`, mas não `crm_leads_staging`
+│   — precisa ser criado via job LOAD real, mesmo processo de dev)
+└── WIF: attribute_condition restrito a refs/heads/main — plan de prod
+    continua revisão manual
 
 GitHub Secrets
 ├── WIF_PROVIDER_DEV ✅
@@ -1125,14 +1306,14 @@ GitHub Secrets
 ├── WIF_PROVIDER_PROD ✅
 └── WIF_SA_PROD ✅
 
-main/prod e a branch feature/admin-usage-analytics estão no MESMO ponto
-(origin/main = 35c0205 = merge do PR #24 = HEAD da branch). Não há
-trabalho de app pendente de merge. A `main` LOCAL está desatualizada
-(44ad7c9, PR #17) — rodar `git fetch && git checkout main && git pull`
-antes de criar qualquer branch nova a partir dela.
+`main`/prod estão parados no PR #24 (`35c0205`) — o domínio storage
+inteiro (8 commits, `02adc81`..`ec0ae14`) vive só em `feat/storage-mvp`,
+sem PR aberto. `main` local precisa de `git fetch && git checkout main
+&& git pull` antes de qualquer branch nova (mesmo aviso de sempre).
 
-Único estado não commitado no working tree: `infra/terraform/modules/
-cloud-run/variables.tf` (`max_instance_count` 2→5) — ver "Status atual".
+Working tree limpo — a mudança não commitada em `variables.tf`
+(`max_instance_count`) registrada na atualização anterior foi descartada
+nesta sessão (`git restore`, sem justificativa encontrada).
 ```
 
 ---
@@ -1174,8 +1355,11 @@ já estava documentado no encerramento daquela sessão.)
 | #24 | `feature/admin-usage-analytics` | Docs — manual de liberação de acesso pra cliente |
 
 Todos os PRs acima (#18–#24) estão **mergeados em `main`/`origin`**,
-confirmado via `gh pr list --state all` e `git log origin/main`. Não há
-sprint em andamento nem PR aberto no momento desta atualização.
+confirmado via `gh pr list --state all` e `git log origin/main`.
+
+**`feat/storage-mvp` (esta sessão, commits `02adc81`..`ec0ae14`) ainda
+não tem PR aberto** — aguardando o checklist de promoção pra prod (ver
+seção "Storage — domínio novo"), como pedido explicitamente pelo usuário.
 
 ---
 
@@ -1189,10 +1373,12 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
    SLA da sidebar por completo (pedido do usuário, não relacionado a este
    item). Não há mais bolinha de nenhum tipo ali.
 
-2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer, incluindo os
-   bindings cross-project desta sessão) em Terraform em vez de gcloud
-   manual — mais urgente agora que existem 6 bindings manuais por projeto
-   (3 roles x 2 SAs) em vez de 2. Fica mais fácil de perder rastro sem IaC.
+2. Formalizar IAM (bigquery.metadataViewer/jobUser/dataViewer/logging.*,
+   incluindo os bindings cross-project) em Terraform em vez de gcloud
+   manual — cada vez mais urgente: agora são 5 roles de BigQuery/Logging
+   x 2 SAs em dev, mais (depois da promoção de storage pra prod) 2 roles
+   de storage x 2 SAs x 2 projetos. Fica mais fácil de perder rastro sem
+   IaC a cada domínio novo que precisa de role própria.
 
 3. Senha de login hardcoded no frontend (`AuthGate.tsx`, "senha123",
    client-side, sessionStorage) — não é autenticação de verdade, qualquer
@@ -1259,49 +1445,63 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
     alguém limpar manualmente — não afeta nada em runtime, só
     "sujeira" de dado morto.
 
-13. **Bundle do frontend** — estava em 929.60 kB / gzip 281 kB no fim da
-    Sprint 3.2 (antes de FinOps/Admin), e ganhou mais duas dependências
-    desde então (`@xyflow/react` + `dagre`, pro diagrama de lineage
-    multi-hop) — tamanho atual não medido nesta reconstrução (não rodei
-    `vite build` completo). Item 6 do backlog da Sprint 2
-    (code-splitting) fica mais urgente a cada domínio novo — ainda não
-    implementado. Medir de novo na próxima sessão que tocar frontend.
+13. **Bundle do frontend** — 1.327,96 kB / gzip 392,71 kB (medido ao vivo
+    ao fim desta sessão, 2026-08-18), depois de mais um domínio inteiro
+    (`storage`) somado a lineage/FinOps/Admin. Item 6 do backlog da
+    Sprint 2 (code-splitting) fica mais urgente a cada domínio novo —
+    ainda não implementado. Bom candidato pra próxima sessão que não
+    tenha feature nova pra entregar.
 
-14. **Expansão de cobertura pra além do BigQuery** — hoje os 7 domínios
-    (catálogo, lineage, PII, mapa de acesso, qualidade, freshness,
-    FinOps) só observam BigQuery/Cloud Logging/Cloud Billing. Cliente
-    (via usuário, 2026-08-17) confirmou interesse em mapear outros
-    serviços GCP do lado do cliente (ex: Cloud Storage, Pub/Sub,
-    Dataflow) no futuro, mas decidiu conscientemente adiar. A
-    reorganização de sidebar em `SidebarServiceGroup` (commit `94629a6`,
-    mesma data) já deixa a estrutura de navegação pronta pra isso sem
-    retrabalho. Não iniciar sem alinhamento explícito do usuário.
+14. **Expansão de cobertura pra além do BigQuery** — **1ª frente
+    concluída nesta sessão**: domínio `storage` (Cloud Storage) completo
+    e validado em dev (catálogo, waste scanner, extensão de lineage —
+    ver seção "Storage — domínio novo"). Ordem de prioridade planejada
+    (spec `docs/specs/storage.md`, seção 1): Storage → Scheduler →
+    Workflows. Scheduler/Workflows continuam não iniciados — não começar
+    sem alinhamento explícito do usuário, mesma regra de antes.
 
-15. **`CHANGELOG.md` desatualizado** — a tabela "Próximas fases" ainda
-    lista Fase 4 (FinOps) como "⏳ Em andamento... falta otimizações
-    sugeridas", e não existe nenhuma seção "O que foi feito" pra Sprint
-    3.2 (fechamento), FinOps ou Admin ACL — só a Sprint 2.2/2.3 é a mais
-    recente documentada lá. `docs/prd.md` (seção de roadmap) provavelmente
-    tem a mesma defasagem, não verificado nesta reconstrução. Não
-    corrigido nesta sessão (fora do pedido explícito de só atualizar o
-    SESSIONLOG) — próxima sessão que tocar documentação deveria fechar
-    isso, CLAUDE.md pede atualização de CHANGELOG a cada fase concluída.
+15. ~~`CHANGELOG.md` desatualizado~~ — **obsoleto**: corrigido nesta
+    sessão (depois de recuperar os commits presos em
+    `feature/admin-usage-analytics`, ver "Storage — domínio novo" →
+    "Falha de processo"). `CHANGELOG.md` e `docs/prd.md` agora refletem
+    Fase 4 (FinOps) e Fase 5 (Storage) como concluídas.
 
 16. **`docs/adr/ADR-009-acl-usuario-projeto.md` com datas incorretas** —
     cabeçalho diz "2026-08-18" e a "Nota de extensão" diz "2026-08-20",
     mas todos os commits reais da feature (`391d159`..`301fc59`) rodaram
     em 2026-08-17 (confirmado via `git log`). Provavelmente datas
     assumidas/erradas no momento da escrita do ADR, não checadas contra
-    o commit real. Não corrigido nesta sessão — CLAUDE.md diz "nunca
-    apagar um ADR", então a correção certa é uma nota de erratum, não
-    reescrever a data original; sinalizar ao usuário antes de mexer.
+    o commit real. Ainda não corrigido — CLAUDE.md diz "nunca apagar um
+    ADR", então a correção certa é uma nota de erratum, não reescrever a
+    data original; sinalizar ao usuário antes de mexer.
 
-17. **Mudança não commitada em `infra/terraform/modules/cloud-run/
-    variables.tf`** (`max_instance_count` default `2` → `5`) — sem
-    contexto na conversa desta sessão sobre motivo ou ambiente-alvo.
-    Não commitado, não staged. Perguntar ao usuário antes de qualquer
-    `terraform plan`/commit (contexto de IaC do CLAUDE.md exige plan
-    revisado + aprovação).
+17. ~~Mudança não commitada em `infra/terraform/modules/cloud-run/
+    variables.tf`~~ — **obsoleto**: descartada nesta sessão (`git
+    restore`) por decisão do usuário, sem justificativa encontrada nos
+    logs do Cloud Run.
+
+18. **IAM/audit config de `storage` pendente em prod** — domínio inteiro
+    validado em dev, mas `observability-hub-prod` ainda não tem nenhuma
+    role `storage.*` (nem self nem cross), nem os 3 buckets mock, nem os
+    jobs LOAD/EXTRACT reais pra popular lineage/waste scanner. Checklist
+    completo em "Storage — domínio novo" → "Pendências pra promover em
+    prod" — bloqueia o PR de `feat/storage-mvp` → `main`.
+
+19. **Gap de `jobStatus.state != "DONE"` em todo parser de audit log do
+    projeto** (lineage, access, finops) — nenhum dos três filtra jobs
+    que falharam antes de virar aresta/evento. Descoberto durante a
+    extensão do lineage pra bucket (item 4 do domínio storage), mas é
+    pré-existente e afeta os três domínios, não só bucket. Não corrigido
+    de propósito (fora do escopo daquele item) — considerar como um
+    item de qualidade próprio, com spec/discussão de nível de confiança
+    aceitável antes de implementar (mesma cautela já usada pra outras
+    heurísticas do projeto).
+
+20. **`Bucket.updated` (colunas "Criado em"/"Atualizado em" do catálogo
+    de storage) não é o mesmo sinal que "dado ainda sendo gravado"** —
+    documentado com clareza na spec (seção 5) e no CHANGELOG, mas vale
+    revisitar se algum usuário real confundir os dois conceitos na
+    prática. Trade-off aceito conscientemente, não é um bug.
 ```
 
 ---
@@ -1309,27 +1509,40 @@ Bloqueantes de nenhuma fase, considerar quando aparecer necessidade:
 ## Próxima sprint
 
 ```
-Não há sprint em andamento nem spec pendente no momento desta
-atualização (2026-08-17). Tudo que estava planejado até aqui (Sprint
-3.2, FinOps 3 frentes, Admin ACL v1.0-v1.3, docs pra cliente) está
-concluído e mergeado em main/prod.
+Domínio storage completo e validado em dev (2026-08-18) — feat/storage-
+mvp, 8 commits, sem PR pra main ainda. Único bloqueador pro PR: promover
+mocks/IAM/audit config pra prod (checklist completo na seção "Storage —
+domínio novo" → "Pendências pra promover em prod", comandos passados ao
+usuário fora deste arquivo).
 
-Candidatos pro próximo passo, nenhum iniciado, em ordem de menor pra
-maior escopo:
-1. Resolver a mudança não commitada em variables.tf (Backlog item 17)
-   — perguntar ao usuário o que ela é antes de qualquer coisa.
-2. Fechar a documentação defasada: CHANGELOG.md (Backlog item 15) e
-   possivelmente docs/prd.md — marcar Fase 4/Sprint 3.2/Admin como
-   concluídas, registrar erros/aprendizados da sessão de 2026-08-17
-   (bug de regiões fantasma no finops budget é o mais rico pra registrar).
-3. Formalizar IAM cross-project em Terraform (Backlog item 2) — agora
-   são 5 roles x 2 SAs = 10 bindings manuais por direção, cada vez mais
-   trabalhoso de auditar só via gcloud.
-4. Expansão de cobertura pra além do BigQuery (Backlog item 14) — só
-   com alinhamento explícito do usuário, decisão consciente de adiar.
+Passo a passo até fechar esta sprint:
+1. Usuário roda o checklist de prod (IAM self+cross de storage.
+   bucketViewer/objectViewer, 3 buckets mock, 1 objeto + jobs LOAD/
+   EXTRACT reais em observability-hub-prod).
+2. Confirmar cada item ao vivo (gcloud/bq, não assumir) e registrar em
+   docs/onboarding-cliente.md — mesma disciplina de sempre.
+3. Abrir o PR de feat/storage-mvp → main.
+4. Depois do merge, confirmar deploy automático de prod verde
+   (gh run list) e validar visualmente as 4 funcionalidades em prod
+   (mesma limitação de sempre — sem Chromium headless neste sandbox,
+   validação visual é sempre do usuário).
 
-Nenhum desses foi validado com o usuário nesta sessão — são só o estado
-observável do backlog, não um plano aprovado. Perguntar antes de agir.
+Depois disso, nenhuma sprint nova está aprovada. Candidatos conhecidos
+pro próximo passo, nenhum iniciado, em ordem de menor pra maior escopo:
+1. Formalizar IAM cross-project em Terraform (Backlog item 2) — cresce
+   a cada domínio novo com role própria.
+2. ADR-009 com datas incorretas (Backlog item 16) — sinalizar ao
+   usuário antes de tocar (nunca apagar/reescrever ADR).
+3. Code-splitting do bundle frontend (Backlog item 13) — 1.327,96 kB /
+   gzip 392,71 kB, cresce a cada domínio novo.
+4. Gap de jobStatus.state != "DONE" em lineage/access/finops (Backlog
+   item 19) — precisa de spec/discussão de nível de confiança antes de
+   implementar.
+5. Scheduler/Workflows — próxima frente de "além do BigQuery" (Backlog
+   item 14), só com alinhamento explícito do usuário.
+
+Nenhum desses foi validado com o usuário como próxima sprint — são só o
+estado observável do backlog. Perguntar antes de agir.
 ```
 
 ---
@@ -1338,20 +1551,24 @@ observável do backlog, não um plano aprovado. Perguntar antes de agir.
 
 1. `cd ~/observability-hub && claude`
 2. Claude Code lê CLAUDE.md + SESSIONLOG.md
-3. `git fetch && git checkout main && git pull` — a `main` local está
-   desatualizada (`44ad7c9`, PR #17); o estado real são os PRs #18–#24,
-   todos mergeados em `origin/main` (`35c0205`). A branch local
-   `feature/admin-usage-analytics` é idêntica ao merge-base com
-   `origin/main` — não tem nada pendente de merge, só não foi limpa.
-4. Checar `git status` antes de qualquer coisa — há uma mudança não
-   commitada em `infra/terraform/modules/cloud-run/variables.tf`
-   (`max_instance_count` 2→5) sem contexto registrado; perguntar ao
-   usuário o que é antes de tocar nela.
-5. Não há sprint em andamento — confirmar com o usuário qual é o
-   próximo passo antes de começar qualquer implementação (ver "Próxima
-   sprint" acima pra candidatos conhecidos, nenhum aprovado ainda).
+3. `git fetch && git checkout main && git pull` — a `main` local fica
+   desatualizada com frequência (era `44ad7c9`/PR #17 na sessão anterior,
+   hoje é `35c0205`/PR #24); sempre conferir contra `origin/main` antes
+   de assumir o estado, nunca só a `main` local.
+4. Branch de trabalho é `feat/storage-mvp` (8 commits à frente de `main`,
+   `02adc81`..`ec0ae14`) — domínio storage completo e validado em dev,
+   **sem PR pra `main`**. Checar `git status`: working tree deve estar
+   limpo (nada pendente desta sessão).
+5. Próximo passo real: checklist de promoção pra prod (ver seção
+   "Storage — domínio novo" → "Pendências pra promover em prod") antes
+   de abrir o PR — não é uma sprint nova, é o fechamento desta.
 6. `docs/onboarding-cliente.md` é o checklist vivo de acesso pra projetos
    alvo (cliente ou dev/prod um observando o outro) — qualquer sessão que
    conceder/alterar IAM, API ou audit config num projeto deve registrar lá
    antes de considerar a tarefa concluída (ver CLAUDE.md, "Registro de
-   acessos e configurações"). Está em dia até 2026-08-17.
+   acessos e configurações"). Está em dia até 2026-08-18.
+7. **Lição desta sessão, não repetir**: commits de documentação numa
+   branch de feature só são confiáveis depois de mergeados em `main` via
+   PR — presos numa branch (mesmo pusheados pro remoto), somem quando
+   uma branch nova nasce de `main` atualizada. Ver "Storage — domínio
+   novo" → "Falha de processo".
