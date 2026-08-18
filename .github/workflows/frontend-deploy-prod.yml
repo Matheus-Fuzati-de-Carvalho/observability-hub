@@ -81,6 +81,10 @@ jobs:
     name: Build, push and deploy
     needs: wait-for-terraform
     runs-on: ubuntu-latest
+    # Gate manual: job fica "Waiting" até alguém aprovar em
+    # Settings > Environments > production (required reviewers). Deploy
+    # de app em prod nunca mais acontece só porque o push chegou.
+    environment: production
     steps:
       - uses: actions/checkout@v4
 

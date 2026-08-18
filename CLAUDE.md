@@ -138,7 +138,7 @@ Regra geral: **domains/ (backend) e features/ (frontend) espelham exatamente os 
 Gatilhos (a implementar em `.github/workflows/` na Fase 1, mas já são a política oficial de deploy):
 
 - **Push em qualquer branch** (exceto `main`) → build + deploy automático no ambiente **dev** (`observability-hub-dev`).
-- **Merge/push em `main`** → build + deploy automático no ambiente **prod** (`observability-hub-prod`).
+- **Merge/push em `main`** → build + deploy **de app** (`backend-deploy-prod.yml`, `frontend-deploy-prod.yml`) só roda depois de aprovação manual — os dois jobs usam `environment: production` (GitHub Environment com "required reviewers" configurado nas Settings do repo), então ficam em "Waiting" até alguém aprovar. `terraform-apply-prod.yml` continua automático (decisão consciente, 2026-08-18 — mudança de infra já passa por `terraform plan` revisado antes do merge; só o deploy de app, que sobe uma imagem nova sem revisão nenhuma no meio, ganhou o gate).
 
 Diretrizes para os workflows quando forem criados:
 
