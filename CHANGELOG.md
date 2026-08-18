@@ -5,6 +5,92 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Documentação para cliente — playbooks operacionais e manuais (PRs #22, #23, #24)
+
+Branch `feature/admin-usage-analytics`, três commits **docs-only** (não
+tocam `apps/`, sem deploy disparado — confirmado via `gh run list`).
+Fecha o ciclo iniciado por `docs/onboarding-cliente.md` (checklist
+técnico) com material de execução e material voltado a cliente final,
+todos referenciando o mesmo checklist e os ADRs 006/009 como fonte de
+verdade técnica.
+
+### O que foi feito
+
+**Dois playbooks internos** (`docs/playbooks/`, público: time do Hub):
+1. `liberar-projeto-para-o-hub.md` (216 linhas) — roteiro de "já tenho um
+   projeto GCP com dados, o que preciso fazer pra o Hub ler esse
+   projeto". Explicitamente não é fonte de verdade — aponta pra
+   `docs/onboarding-cliente.md` pra isso, e pede que quem executar volte
+   lá pra registrar a concessão. Deixa claro que a liberação de
+   infraestrutura GCP é só metade do caminho — a segunda camada (ACL do
+   Hub, ADR-009) é liberada depois, dentro do próprio `/admin`.
+2. `hospedar-hub-em-novo-projeto.md` (449 linhas) — roteiro de "quero
+   rodar minha própria cópia do Hub em projetos GCP diferentes dos
+   originais, do zero". Bootstrap único por par de ambientes (dev/prod);
+   depois de concluído, o dia a dia vira só `git push`. Cobre o
+   inventário completo de infraestrutura que o Hub precisa pra existir
+   (2 Cloud Run, Artifact Registry compartilhado, SAs de runtime,
+   Firestore, Secret Manager, WIF, bucket GCS de state).
+
+**Dois manuais voltados a cliente final** (linguagem sem jargão interno):
+3. `docs/manual-implementacao-cliente.md` (361 linhas) — implementação de
+   uma instância própria do Hub no GCP do cliente, hospedagem/
+   administração sob controle dele. Seção "Segurança e escopo" explícita:
+   tudo dentro dos projetos do próprio cliente, sem credencial de longa
+   duração (WIF), permissões mínimas, reversível, nada trafega pra fora
+   do ambiente GCP dele. Público: responsável técnico com papel *Owner*.
+4. `docs/manual-liberacao-acesso-cliente.md` (197 linhas) — contraparte de
+   `liberar-projeto-para-o-hub.md`, em linguagem de cliente: como
+   autorizar o Hub (já hospedado) a ler um projeto GCP existente. Mesma
+   seção "o que faz/não faz": só leitura, nada instalado no projeto do
+   cliente, acesso escopado e revogável, cliente confirma cada permissão
+   antes de conceder. Público: *Owner*/*IAM Admin*. Tempo estimado
+   10–15min (vs. meio dia do manual de implementação).
+
+### Decisões desta sessão
+
+**Decisão 1 — Quatro documentos, não dois, por causa da audiência**
+- Playbook interno (linguagem do time do Hub, assume contexto do
+  CLAUDE.md/ADRs) e manual de cliente (linguagem sem jargão, assume
+  Owner de um GCP que nunca ouviu falar do Hub) são públicos diferentes
+  o bastante pra não caber no mesmo texto — cada par (liberar acesso /
+  hospedar o Hub) ganhou uma versão de cada.
+
+### Status até o momento
+- Docs-only, sem impacto em testes/build/deploy.
+- Nenhum projeto de cliente real usou os manuais ainda — primeira
+  validação de uso real fica pra quando isso acontecer.
+
+---
+
+## Admin — refactor de colunas/filtros e UX de listas longas (commits `568622a`, `301fc59`)
+
+Branch `feature/admin-usage-analytics`. Depois da v1.3 (seis seções de
+analytics simultâneas na aba "Uso do Hub"), dois ajustes de qualidade
+antes de fechar a frente de Admin.
+
+### O que foi feito
+1. **Padronização de colunas/filtros (`568622a`)**: as seis seções tinham
+   crescido cada uma com sua própria tabela ad-hoc (nomes de coluna
+   diferentes pra projeto/dataset/tabela, filtros inconsistentes entre
+   seções). Refatorado pra um padrão único de colunas e filtros
+   compartilhado entre todas.
+2. **Tópicos recolhíveis + paginação (`301fc59`)**: as seis seções
+   (Acessos, Favoritos, Profiling, Solicitações, Navegação, Scans de
+   PII) e seus sub-blocos nomeados (ex: "Bases mais favoritadas",
+   "Drill-down") passaram a usar `CollapsibleSection` — abrem por
+   padrão, mas podem ser recolhidas. Toda lista tabular ganhou paginação
+   client-side de verdade via `usePagination`/`PaginationBar`
+   (10/20/50/100 linhas por página) dentro de um container com scroll
+   vertical, em vez de despejar a lista inteira na tela.
+
+### Status até o momento
+- Backend: sem mudança de API — refactor e paginação são só frontend.
+- Frontend: `biome check`, `tsc --noEmit`, `vite build` limpos.
+- Validação visual fica a cargo do usuário após deploy em dev.
+
+---
+
 ## Admin v1.3: solicitações de acesso, navegação agregada, atividade de scans de PII
 
 Branch `feature/admin-usage-analytics` (mesma do Admin v1.2, ainda sem
@@ -12,7 +98,7 @@ push/PR). Usuário pediu um brainstorm de que outros serviços/
 funcionalidades já existentes valeria mapear no painel "Uso do Hub" —
 escolheu, em ordem de custo/valor, os 3 desta rodada; deixou expansão
 pra serviços GCP fora do BigQuery registrada como backlog
-(`SESSIONLOG.md`, item 13), adiada por decisão explícita.
+(`SESSIONLOG.md`, item 14), adiada por decisão explícita.
 
 ### O que foi feito
 
@@ -1209,4 +1295,6 @@ implementação**
 | Sprint 2.3 | 4 melhorias de UX (sidebar, localStorage, not_contains, tabela ordenável) | ✅ Concluída |
 | Sprint 3.1 | Auth (Google OAuth), favoritos, histórico, fixes no modal de profiling | ✅ Concluída |
 | Sprint 3.2 | Filtros/ordenação, histórico de qualidade, lineage e órfãos, PII, mapa de acesso | ✅ Concluída (7 de 7 itens) |
-| Fase 4 | FinOps completo | ⏳ Em andamento (scanner de desperdício e budget concluídos, falta otimizações sugeridas) |
+| Fase 4 | FinOps completo (scanner de desperdício, budget de custo, sugestão de tipo de coluna) | ✅ Concluída (3 de 3 frentes — clustering deferido, ver ADR/spec) |
+| — | Admin ACL v1.0–v1.3 (controle de acesso usuário×projeto, projetos públicos, solicitação de acesso, painel "Uso do Hub") | ✅ Concluída |
+| — | Documentação para cliente (2 playbooks operacionais + 2 manuais voltados a cliente final) | ✅ Concluída |
