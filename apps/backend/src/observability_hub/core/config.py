@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     # em domains/finops pra estimar custo de storage de tabelas sem uso.
     bigquery_storage_price_usd_per_gb_month_active: float = 0.02
     bigquery_storage_price_usd_per_gb_month_long_term: float = 0.01
+    # Preço de storage do Cloud Storage por GB/mês (cloud.google.com/storage/
+    # pricing, região US, multi-region). Usado em domains/storage pra estimar
+    # a faixa de economia do scanner de desperdício (STANDARD → NEARLINE/
+    # COLDLINE) — não afeta billing real, mesma premissa dos preços do BQ
+    # acima. ARCHIVE de propósito fora da faixa (retrieval caro + duração
+    # mínima de 365 dias tornam a recomendação automática arriscada).
+    gcs_storage_price_usd_per_gb_month_standard: float = 0.020
+    gcs_storage_price_usd_per_gb_month_nearline: float = 0.010
+    gcs_storage_price_usd_per_gb_month_coldline: float = 0.004
     # Origens liberadas pro CORS do frontend, separadas por vírgula (o
     # frontend roda em outra origem tanto em dev — Vite dev server — quanto
     # em prod — outro serviço Cloud Run).

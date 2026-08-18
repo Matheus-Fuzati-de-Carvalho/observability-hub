@@ -110,6 +110,24 @@ scanner de particionamento do FinOps), calculada só sobre bytes reais
 armazenados (`size` × diferença de preço STANDARD→NEARLINE), nunca sobre
 suposição de padrão de acesso.
 
+**Implementado (2026-08-17)**: `GET /api/v1/storage/{project}/waste-
+candidates?min_days_unused=30|60|90` (`IntEnum`, mesma correção de
+`Literal`→422 já feita no FinOps). Diferente do FinOps (que ancora a
+faixa em custo de scan *observado*), aqui não há sinal de acesso real
+disponível — a faixa reflete **duas classes de destino plausíveis** sobre
+o mesmo byte real armazenado: `NEARLINE` (mínimo, conservador) e
+`COLDLINE` (máximo, agressivo). `ARCHIVE` fica de fora de propósito
+(custo de retrieval + duração mínima de 365 dias tornam a recomendação
+automática arriscada). Preços GCS entram em `core/config.py`
+(`gcs_storage_price_usd_per_gb_month_{standard,nearline,coldline}`),
+mesmo padrão dos preços do BigQuery já lá. Reaproveita 100% da
+infraestrutura do item 1 (`list_bucket_objects_cached`, `has_lifecycle_
+rule`) — nenhuma chamada nova à API do GCS. A limitação de "objeto nunca
+lido" vai sempre preenchida no campo `limitation` da resposta (não
+condicional), e o campo `savings_disclaimer` explica a faixa NEARLINE/
+COLDLINE por completo — evita que o frontend precise adivinhar o porquê
+de dois números.
+
 ## 7. Extensão do lineage — bucket como nó do grafo
 
 ### 7.1 Payloads reais confirmados (2026-08-17/18, `observability-hub-dev`)

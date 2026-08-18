@@ -6,8 +6,8 @@ lru_cache) e core/logging_client.py::get_logging_client().
 (storage.objects.list) com TTL de 5min, mesmo racional de
 core/bigquery.py::get_table_cached — é a chamada cara do domínio
 (paginada, custo cresce com o número de objetos), usada por catalog
-(tamanho total/contagem) e freshness (last_modified) pra não bater a API
-a cada refresh de tela.
+(tamanho total/contagem) e pelo scanner de desperdício (idade/classe dos
+objetos) pra não bater a API a cada refresh de tela.
 """
 
 import threading

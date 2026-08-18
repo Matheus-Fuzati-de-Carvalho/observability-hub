@@ -370,10 +370,16 @@ export function DatasetSidebar({ projectId }: DatasetSidebarProps) {
         open={cloudStorageOpen}
         onOpenChange={setCloudStorageOpen}
       >
-        <NavLink to="/storage" className={NAV_LINK_CLASS}>
-          <HardDrive size={16} />
-          Buckets
-        </NavLink>
+        <nav className="flex flex-col gap-0.5">
+          <NavLink to="/storage" end className={NAV_LINK_CLASS}>
+            <HardDrive size={16} />
+            Buckets
+          </NavLink>
+          <NavLink to="/storage/waste" className={NAV_LINK_CLASS}>
+            <PiggyBank size={16} />
+            Scanner de desperdício
+          </NavLink>
+        </nav>
       </SidebarServiceGroup>
     </aside>
   )

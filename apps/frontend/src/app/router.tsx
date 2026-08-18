@@ -14,6 +14,7 @@ import { DatasetFreshnessPage } from '@/features/freshness/DatasetFreshnessPage'
 import { FreshnessPage } from '@/features/freshness/FreshnessPage'
 import { OrphansPage } from '@/features/lineage/OrphansPage'
 import { BucketsPage } from '@/features/storage/BucketsPage'
+import { WastePage } from '@/features/storage/WastePage'
 
 export function AppRoutes() {
   return (
@@ -31,6 +32,7 @@ export function AppRoutes() {
           <Route path="finops/budget" element={<BudgetPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="storage" element={<BucketsPage />} />
+          <Route path="storage/waste" element={<WastePage />} />
           <Route element={<RequireAdmin />}>
             <Route path="admin" element={<AdminPage />} />
           </Route>

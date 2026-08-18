@@ -12,3 +12,22 @@ export interface BucketSummary {
 export interface BucketsListResponse {
   buckets: BucketSummary[]
 }
+
+export type MinDaysUnused = 30 | 60 | 90
+
+export interface WasteCandidate {
+  bucket_name: string
+  eligible_object_count: number
+  eligible_size_bytes: number
+  oldest_object_age_days: number
+  estimated_savings_usd_month_min: number
+  estimated_savings_usd_month_max: number
+}
+
+export interface WasteCandidatesResponse {
+  project_id: string
+  min_days_unused: MinDaysUnused
+  candidates: WasteCandidate[]
+  savings_disclaimer: string
+  limitation: string
+}
