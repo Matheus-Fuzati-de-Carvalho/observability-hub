@@ -88,6 +88,9 @@ Nunca compartilhar recursos entre `dev` e `prod`. Cada ambiente tem seu próprio
 ├── docs/adr/                     # Architecture Decision Records
 ├── docs/playbooks/                # Roteiros operacionais de execução rápida (ex: liberar
 │                                   # um projeto GCP pro Hub, hospedar o Hub em projetos novos)
+├── docs/apresentacao/            # HTML autocontido de apresentação do produto (dp6,
+│                                   # liberdade de execução sobre o frontend.md — ver CHANGELOG),
+│                                   # publicado via Claude Artifact e/ou GitHub Pages
 ├── scripts/                      # Scripts de apoio (setup local, seed, etc.)
 ├── CLAUDE.md
 └── .gitignore

@@ -1,13 +1,14 @@
 <title>Observability Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;900&family=Ubuntu:wght@300;400;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
 
 <style>
   :root {
-    /* dp6 brand tokens — docs/skills/frontend.md */
+    /* dp6 brand tokens — docs/skills/frontend.md (marca), com liberdade
+       de execução (tipografia de display, blocos de cor) reservada pra
+       esta peça de marketing, não pro app. */
     --color-primary: #FFB302;
-    --color-primary-hover: #E6A000;
     --color-bg-dark: #1D1D1B;
     --color-bg-surface: #2A2A28;
     --color-bg-muted: #3A3A38;
@@ -22,6 +23,7 @@
 
     --font-sans: 'Ubuntu', 'Verdana', system-ui, sans-serif;
     --font-mono: 'Ubuntu Mono', ui-monospace, monospace;
+    --font-display: 'Archivo', 'Ubuntu', system-ui, sans-serif;
 
     --text-xs: 0.75rem;
     --text-sm: 0.875rem;
@@ -29,18 +31,15 @@
     --text-lg: 1.125rem;
     --text-xl: 1.25rem;
     --text-2xl: 1.5rem;
-    --text-3xl: 1.875rem;
-    --text-display: clamp(1.75rem, 3.2vw, 2.75rem);
-    --text-hero: clamp(2.75rem, 6.5vw, 5.25rem);
+    --text-display: clamp(2rem, 3.6vw, 3.1rem);
+    --text-hero: clamp(3.2rem, 8vw, 6.75rem);
+    --text-stat: clamp(3.75rem, 8vw, 6.5rem);
 
     --topbar-h: 56px;
+    --ease-slide: cubic-bezier(0.22, 1, 0.36, 1);
 
     color-scheme: dark;
   }
-
-  /* Dark is the dp6 standard (skill: "dark mode é o padrão", light mode
-     explicitly deferred) — committed as a single deliberate theme,
-     painted explicitly so it holds regardless of host color-scheme. */
 
   * { box-sizing: border-box; }
 
@@ -52,561 +51,177 @@
     font-family: var(--font-sans);
     font-weight: 300;
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
   }
 
-  h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 700; }
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+  h3 { font-weight: 700; }
   p { margin: 0; }
 
   ::selection { background: var(--color-primary); color: var(--color-text-inverse); }
 
-  a { color: var(--color-primary); }
-
   /* ---------- topbar ---------- */
 
   .topbar {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: var(--topbar-h);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h);
+    display: flex; align-items: center; justify-content: space-between;
     padding: 0 20px 0 16px;
     background: var(--color-bg-dark);
     border-bottom: 2px solid var(--color-primary);
     z-index: 50;
   }
-
-  .brandmark {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .dp6-divider {
-    width: 2px;
-    height: 22px;
-    background: var(--color-primary);
-    flex: none;
-  }
-
-  .brandmark-name {
-    font-size: var(--text-sm);
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-
-  .brandmark-sub {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .slide-counter {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    letter-spacing: 0.05em;
-    font-variant-numeric: tabular-nums;
-  }
+  .brandmark { display: flex; align-items: center; gap: 12px; }
+  .dp6-divider { width: 2px; height: 22px; background: var(--color-primary); flex: none; }
+  .brandmark-name { font-size: var(--text-sm); font-weight: 700; letter-spacing: 0.02em; }
+  .brandmark-sub { font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+  .slide-counter { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
   .slide-counter b { color: var(--color-text-primary); font-weight: 700; }
 
-  /* ---------- scroll viewport ---------- */
+  /* ---------- horizontal deck ---------- */
 
-  .viewport {
-    height: 100vh;
-    padding-top: var(--topbar-h);
-    overflow-y: scroll;
-    scroll-snap-type: y mandatory;
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-bg-muted) transparent;
-  }
+  .viewport-outer { position: fixed; inset: 0; top: var(--topbar-h); overflow: hidden; }
+  .track { display: flex; height: 100%; width: max-content; transition: transform 0.6s var(--ease-slide); will-change: transform; }
+  @media (prefers-reduced-motion: reduce) { .track { transition: none; } }
 
-  .slide {
-    min-height: calc(100vh - var(--topbar-h));
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-    display: flex;
-    align-items: center;
-    padding: 56px 8vw;
-  }
+  .slide { position: relative; flex: none; width: 100vw; height: 100%; overflow-y: auto; display: flex; align-items: center; padding: 48px 8vw; }
+  .slide-inner { max-width: 1040px; margin: 0 auto; width: 100%; position: relative; }
 
-  .slide-inner {
-    max-width: 980px;
-    margin: 0 auto;
-    width: 100%;
-    opacity: 0;
-    transform: translateY(14px);
-    transition: opacity 0.4s ease, transform 0.4s ease;
-  }
+  .eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .eyebrow span { font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-primary); }
 
-  .slide.is-visible .slide-inner {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  .slide-title { font-family: var(--font-display); font-weight: 800; font-size: var(--text-display); line-height: 1.08; letter-spacing: -0.01em; margin-bottom: 18px; }
+  .slide-lede { font-size: var(--text-lg); color: var(--color-text-muted); max-width: 62ch; line-height: 1.55; margin-bottom: 8px; }
 
-  @media (prefers-reduced-motion: reduce) {
-    .slide-inner { transition: none; transform: none; opacity: 1; }
-  }
+  .reveal-item { opacity: 0; transform: translateY(12px); transition: opacity 0.5s ease, transform 0.5s ease; transition-delay: calc(var(--i, 0) * 60ms); }
+  .slide.is-active .reveal-item { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal-item { transition: none; transform: none; opacity: 1; } }
 
-  .eyebrow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
-  }
+  /* ---------- nav arrows / dots ---------- */
 
-  .eyebrow span {
-    font-size: var(--text-xs);
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--color-primary);
-  }
-
-  .slide-title {
-    font-size: var(--text-display);
-    line-height: 1.15;
-    margin-bottom: 20px;
-  }
-
-  .slide-lede {
-    font-size: var(--text-lg);
-    color: var(--color-text-muted);
-    max-width: 62ch;
-    line-height: 1.55;
-    margin-bottom: 8px;
-  }
-
-  /* ---------- dot nav ---------- */
-
-  .dotnav {
-    position: fixed;
-    right: 22px;
-    top: calc(var(--topbar-h) + (100vh - var(--topbar-h)) / 2);
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    z-index: 50;
-  }
-
-  .dotnav button {
-    width: 9px;
-    height: 9px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--color-text-muted);
-    background: transparent;
-    cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s, transform 0.15s;
-  }
-
-  .dotnav button:hover { border-color: var(--color-primary); transform: scale(1.2); }
-
-  .dotnav button.is-active {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-  }
-
-  .dotnav button:focus-visible,
-  a:focus-visible,
-  button:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
-  }
-
-  /* ---------- shared components ---------- */
-
-  .problem-list {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    margin-top: 8px;
-  }
-
-  .problem-item {
-    display: grid;
-    grid-template-columns: 88px 1fr;
-    gap: 20px;
-    align-items: baseline;
-    padding-bottom: 18px;
-    border-bottom: 1px solid var(--color-bg-muted);
-  }
-
-  .problem-item:last-child { border-bottom: none; }
-
-  .problem-tag {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .problem-item h3 {
-    font-size: var(--text-lg);
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .problem-item p {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    line-height: 1.5;
-    max-width: 58ch;
-  }
-
-  .closer-note {
-    margin-top: 28px;
-    font-size: var(--text-base);
-    color: var(--color-text-primary);
-    border-left: 2px solid var(--color-primary);
-    padding-left: 16px;
-    max-width: 60ch;
-    line-height: 1.5;
-  }
-
-  .kpi-row {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin: 28px 0 8px;
-  }
-
-  .kpi-card {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-radius: 8px;
-    padding: 16px 20px;
-    min-width: 150px;
-    flex: 1 1 150px;
-  }
-
-  .kpi-value {
-    font-size: var(--text-3xl);
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
-
-  .kpi-label {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: 8px;
-  }
-
-  .status-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 24px;
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-status-ok);
-    flex: none;
-  }
-
-  /* mermaid container */
-  .diagram-wrap {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-radius: 8px;
-    padding: 20px;
-    margin-top: 24px;
-    overflow-x: auto;
-  }
-
-  .diagram-caption {
-    margin-top: 12px;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  /* domain cards grid */
-  .domain-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin-top: 24px;
-  }
-
-  .domain-card {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-radius: 8px;
-    padding: 14px 16px;
+  .nav-arrow {
+    position: fixed; top: calc(var(--topbar-h) + (100vh - var(--topbar-h)) / 2); transform: translateY(-50%);
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--color-bg-surface); border: 1px solid var(--color-bg-muted); color: var(--color-text-primary);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 50;
     transition: border-color 0.15s;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
   }
+  .nav-arrow:hover { border-color: var(--color-primary); }
+  .nav-arrow:disabled { opacity: 0.25; pointer-events: none; }
+  .nav-arrow.prev { left: 20px; }
+  .nav-arrow.next { right: 20px; }
+  .nav-arrow svg { width: 18px; height: 18px; }
 
+  .dotnav { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; z-index: 50; }
+  .dotnav button { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 1px solid var(--color-text-muted); background: transparent; cursor: pointer; transition: background-color 0.15s, border-color 0.15s, transform 0.15s; }
+  .dotnav button:hover { border-color: var(--color-primary); transform: scale(1.2); }
+  .dotnav button.is-active { background: var(--color-primary); border-color: var(--color-primary); }
+  .dotnav button:focus-visible, .nav-arrow:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+  /* ---------- shared marketing components ---------- */
+
+  .problem-list { display: flex; flex-direction: column; gap: 18px; margin-top: 8px; }
+  .problem-item { display: grid; grid-template-columns: 88px 1fr; gap: 20px; align-items: baseline; padding-bottom: 18px; border-bottom: 1px solid var(--color-bg-muted); }
+  .problem-item:last-child { border-bottom: none; }
+  .problem-tag { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .problem-item h3 { font-size: var(--text-lg); margin-bottom: 4px; }
+  .problem-item p { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.5; max-width: 58ch; }
+
+  .closer-note { margin-top: 26px; font-size: var(--text-base); border-left: 2px solid var(--color-primary); padding-left: 16px; max-width: 60ch; line-height: 1.5; }
+
+  .kpi-row { display: flex; gap: 32px; flex-wrap: wrap; margin: 22px 0 26px; }
+  .kpi-block { flex: 1 1 220px; }
+  .kpi-value { font-family: var(--font-display); font-weight: 900; font-size: var(--text-stat); font-variant-numeric: tabular-nums; line-height: 0.9; color: var(--color-primary); }
+  .kpi-label { font-size: var(--text-xs); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 10px; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+  .feature-chip { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); padding: 8px 16px; border-radius: 999px; border: 1px solid var(--color-bg-muted); background: var(--color-bg-surface); }
+  .feature-chip .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-status-ok); }
+
+  .callout-strip { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); color: var(--color-text-muted); border-left: 2px solid var(--color-primary); padding: 10px 16px; background: var(--color-bg-surface); border-radius: 0 6px 6px 0; max-width: 62ch; }
+  .callout-strip b { color: var(--color-text-primary); font-weight: 700; }
+
+  .diagram-wrap { background: var(--color-bg-surface); border: 1px solid var(--color-bg-muted); border-radius: 8px; padding: 20px; margin-top: 22px; overflow-x: auto; }
+  .diagram-caption { margin-top: 12px; font-size: var(--text-xs); color: var(--color-text-muted); }
+
+  .domain-groups { display: grid; grid-template-columns: 1.7fr 1fr; gap: 22px; margin-top: 22px; }
+  .section-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); margin-bottom: 12px; }
+  .domain-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .domain-card { background: var(--color-bg-surface); border: 1px solid var(--color-bg-muted); border-radius: 8px; padding: 12px 14px; transition: border-color 0.15s; display: flex; flex-direction: column; gap: 6px; }
   .domain-card:hover { border-color: var(--color-primary); }
+  .domain-mono { width: 26px; height: 26px; border-radius: 6px; background: var(--color-bg-muted); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 700; }
+  .domain-card h3 { font-size: var(--text-sm); }
+  .domain-card p { font-size: 0.7rem; color: var(--color-text-muted); line-height: 1.4; }
 
-  .domain-mono {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    background: var(--color-bg-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-xs);
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
+  .domain-card--featured { background: var(--color-bg-surface); border: 1px solid var(--color-primary); border-radius: 8px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; height: calc(100% - 24px); justify-content: center; }
+  .domain-card--featured .domain-mono { width: 34px; height: 34px; font-size: var(--text-xs); background: var(--color-primary); color: var(--color-text-inverse); }
+  .domain-card--featured h3 { font-size: var(--text-xl); }
+  .domain-card--featured p { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.5; }
+  .badge-new { display: inline-flex; width: fit-content; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-primary); border: 1px solid var(--color-primary); border-radius: 999px; padding: 2px 10px; }
 
-  .domain-card h3 {
-    font-size: var(--text-sm);
-    font-weight: 700;
-  }
+  .backlog-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  .backlog-pill { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); border: 1px dashed var(--color-bg-muted); border-radius: 999px; padding: 5px 14px; }
 
-  .domain-card p {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    line-height: 1.45;
-  }
+  .proof-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 24px; }
+  .proof-chip { display: flex; align-items: center; gap: 10px; background: var(--color-bg-surface); border: 1px solid var(--color-bg-muted); border-radius: 8px; padding: 14px 20px; font-size: var(--text-sm); }
+  .proof-chip .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-status-info); flex: none; }
 
-  .domain-source {
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    color: var(--color-text-muted);
-    letter-spacing: 0.01em;
-  }
-
-  .domain-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.68rem;
-    color: var(--color-status-ok);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-top: 2px;
-  }
-
-  /* access model */
-  .flow {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin: 28px 0;
-    flex-wrap: wrap;
-  }
-
-  .flow-step {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-radius: 8px;
-    padding: 14px 18px;
-    font-size: var(--text-sm);
-  }
-
-  .flow-step b { display: block; font-size: var(--text-base); margin-bottom: 2px; }
-
-  .flow-arrow { color: var(--color-primary); font-size: var(--text-lg); }
-
-  .two-col {
-    display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 40px;
-    align-items: start;
-  }
-
-  .checklist {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .checklist li {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    line-height: 1.5;
-    padding-left: 18px;
-    position: relative;
-  }
-
-  .checklist li::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0.5em;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-primary);
-  }
-
-  /* traction slide */
-  .traction-card {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-left: 3px solid var(--color-status-info);
-    border-radius: 8px;
-    padding: 22px 26px;
-    margin-top: 24px;
-    max-width: 66ch;
-  }
-
-  .traction-card p { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.6; }
-  .traction-card p + p { margin-top: 12px; }
-
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    background: var(--color-bg-muted);
-    border-radius: 999px;
-    padding: 4px 12px;
-    color: var(--color-text-primary);
-  }
-
-  .pill.warn { color: var(--color-status-warn); }
-  .pill .status-dot.info { background: var(--color-status-info); }
-  .pill .status-dot.warn { background: var(--color-status-warn); }
-
-  /* maturity / backlog slide */
-  .decision-list {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .decision-item {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-bg-muted);
-    border-radius: 8px;
-    padding: 14px 18px;
-  }
-
-  .decision-item h3 {
-    font-size: var(--text-sm);
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .decision-item p {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    line-height: 1.5;
-  }
-
-  .backlog-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    counter-reset: backlog;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .backlog-list li {
-    counter-increment: backlog;
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    display: flex;
-    gap: 12px;
-    line-height: 1.5;
-  }
-
-  .backlog-list li::before {
-    content: counter(backlog, decimal-leading-zero);
-    font-family: var(--font-mono);
-    color: var(--color-primary);
-    font-size: var(--text-xs);
-    flex: none;
-    padding-top: 2px;
-  }
-
-  .section-label {
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--color-text-muted);
-    margin-bottom: 12px;
-  }
-
-  /* closing slide */
-  .ask-list {
-    list-style: none;
-    padding: 0;
-    margin: 28px 0 0;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .ask-list li {
-    display: grid;
-    grid-template-columns: 26px 1fr;
-    gap: 14px;
-    font-size: var(--text-base);
-    line-height: 1.5;
-  }
-
-  .ask-num {
-    font-family: var(--font-mono);
-    color: var(--color-primary);
-    font-weight: 700;
-  }
-
-  /* cover slide */
-  .cover .eyebrow { margin-bottom: 28px; }
-  .cover h1 {
-    font-size: var(--text-hero);
-    line-height: 1.05;
-    letter-spacing: -0.01em;
-  }
-  .cover .tagline {
-    font-size: var(--text-xl);
-    color: var(--color-text-muted);
-    margin-top: 20px;
-    max-width: 46ch;
-    font-weight: 300;
-  }
-  .cover .meta {
-    margin-top: 40px;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  .scroll-hint {
-    position: absolute;
-    bottom: 32px;
-    left: 8vw;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  /* ---------- cover ---------- */
+  .cover-canvas { position: absolute; inset: -48px -8vw; z-index: 0; pointer-events: none; }
+  .cover .slide-inner { z-index: 1; }
+  .cover .eyebrow { margin-bottom: 30px; }
+  .cover h1 { font-family: var(--font-display); font-weight: 900; font-size: var(--text-hero); line-height: 0.95; letter-spacing: -0.02em; }
+  .cover .tagline { font-size: var(--text-xl); color: var(--color-text-muted); margin-top: 24px; max-width: 44ch; font-weight: 300; }
+  .cover .meta { margin-top: 40px; font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+  .scroll-hint { position: absolute; z-index: 1; bottom: 28px; left: 8vw; font-size: var(--text-xs); color: var(--color-text-muted); letter-spacing: 0.05em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
   .scroll-hint svg { width: 12px; height: 12px; }
+
+  /* ---------- mini app mockup (recorte fiel do produto real) ---------- */
+
+  .app-mock { display: flex; flex-direction: column; border: 1px solid var(--color-bg-muted); border-radius: 12px; overflow: hidden; background: var(--color-bg-dark); max-width: 980px; width: 100%; box-shadow: 0 0 0 1px rgba(255,179,2,0.06); }
+  .app-mock-topbar { height: 56px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; background: var(--color-bg-dark); border-bottom: 2px solid var(--color-primary); font-size: 0.9rem; }
+  .app-mock-topbar .mock-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  .app-mock-topbar .mock-project { color: var(--color-text-muted); display: flex; align-items: center; gap: 8px; }
+  .app-mock-topbar .mock-project b { color: var(--color-text-primary); font-weight: 700; }
+  .app-mock-body { display: flex; }
+  .app-mock-sidebar { width: 190px; flex: none; background: var(--color-bg-surface); padding: 20px 16px; border-right: 1px solid var(--color-bg-muted); }
+  .mock-sidebar-label { font-size: 0.68rem; letter-spacing: 0.08em; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 14px; }
+  .mock-ds-item { font-size: 0.85rem; padding: 10px 12px; border-radius: 6px; display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .mock-ds-item span { color: var(--color-text-muted); font-size: 0.72rem; }
+  .mock-ds-item.is-active { background: var(--color-primary); color: var(--color-text-inverse); font-weight: 700; }
+  .mock-ds-item.is-active span { color: rgba(29,29,27,0.65); }
+  .app-mock-main { flex: 1; padding: 24px 28px; min-width: 0; }
+  .mock-kpi-row { display: flex; gap: 14px; margin-bottom: 20px; }
+  .mock-kpi { flex: 1; background: var(--color-bg-surface); border: 1px solid var(--color-bg-muted); border-radius: 8px; padding: 14px 16px; }
+  .mock-kpi-value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mock-kpi-value.is-crit { color: var(--color-status-error); }
+  .mock-kpi-label { font-size: 0.68rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; }
+  .mock-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .mock-table th { text-align: left; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; color: var(--color-text-muted); border-bottom: 1px solid var(--color-bg-muted); padding: 10px 10px; }
+  .mock-table td { padding: 13px 10px; border-bottom: 1px solid var(--color-bg-muted); }
+  .mock-table tr:last-child td { border-bottom: none; }
+  .mock-badge { font-size: 0.68rem; padding: 3px 10px; border-radius: 999px; background: var(--color-bg-muted); color: var(--color-text-muted); }
+  .mock-fresh { display: inline-flex; align-items: center; gap: 7px; }
+  .mock-fresh .status-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .mock-fresh.ok .status-dot { background: var(--color-status-ok); }
+  .mock-fresh.error .status-dot { background: var(--color-status-error); }
+  .mock-fresh.error { color: var(--color-status-error); }
+  .mock-caption { margin-top: 18px; font-size: var(--text-xs); color: var(--color-text-muted); }
+
+  /* ---------- punch slide (fechamento, bloco de cor) ---------- */
+
+  .slide--punch { background: #FFB302; --color-primary: #1D1D1B; --color-text-muted: rgba(29,29,27,0.62); color: #1D1D1B; }
+  .closing-line { font-family: var(--font-display); font-weight: 900; font-size: clamp(3rem, 6.5vw, 5.5rem); letter-spacing: -0.02em; line-height: 0.98; text-wrap: balance; }
+  .closing-sub { font-size: var(--text-xl); font-weight: 300; max-width: 46ch; margin-top: 28px; line-height: 1.5; color: rgba(29,29,27,0.72); }
+  .closing-mark { margin-top: 48px; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; }
 
   @media (max-width: 860px) {
     .domain-grid { grid-template-columns: repeat(2, 1fr); }
-    .two-col { grid-template-columns: 1fr; }
+    .domain-groups { grid-template-columns: 1fr; }
     .problem-item { grid-template-columns: 1fr; gap: 6px; }
-    .dotnav { display: none; }
+    .nav-arrow { display: none; }
     .slide { padding: 40px 6vw; }
+    .app-mock-body { flex-direction: column; }
+    .app-mock-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-bg-muted); }
   }
 </style>
 
@@ -616,327 +231,351 @@
     <span class="dp6-divider" aria-hidden="true"></span>
     <span class="brandmark-sub">Observability Hub</span>
   </div>
-  <div class="slide-counter"><b id="counter-current">01</b> / 09</div>
+  <div class="slide-counter"><b id="counter-current">01</b> / 08</div>
 </div>
 
+<button class="nav-arrow prev" id="btn-prev" aria-label="Slide anterior">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+</button>
+<button class="nav-arrow next" id="btn-next" aria-label="Próximo slide">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+</button>
+
 <nav class="dotnav" aria-label="Navegação entre seções">
-  <button data-target="slide-1" aria-label="Capa"></button>
-  <button data-target="slide-2" aria-label="O problema"></button>
-  <button data-target="slide-3" aria-label="Onde estamos hoje"></button>
-  <button data-target="slide-4" aria-label="Arquitetura"></button>
-  <button data-target="slide-5" aria-label="Os oito domínios"></button>
-  <button data-target="slide-6" aria-label="Modelo de acesso"></button>
-  <button data-target="slide-7" aria-label="Tração real"></button>
-  <button data-target="slide-8" aria-label="Maturidade e backlog"></button>
-  <button data-target="slide-9" aria-label="Fechamento"></button>
+  <button data-target="0" aria-label="Capa"></button>
+  <button data-target="1" aria-label="O problema"></button>
+  <button data-target="2" aria-label="Onde estamos"></button>
+  <button data-target="3" aria-label="Na prática"></button>
+  <button data-target="4" aria-label="Arquitetura"></button>
+  <button data-target="5" aria-label="Produto"></button>
+  <button data-target="6" aria-label="Tração"></button>
+  <button data-target="7" aria-label="Fechamento"></button>
 </nav>
 
-<div class="viewport" id="viewport">
+<div class="viewport-outer">
+  <div class="track" id="track">
 
-  <!-- 1. CAPA -->
-  <section class="slide cover" id="slide-1">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>dp6 · atualização de progresso</span></div>
-      <h1>Observability Hub</h1>
-      <p class="tagline">Catálogo, linhagem, qualidade, PII, acesso, freshness, custo e storage — de todos os dados no GCP, numa única plataforma.</p>
-      <p class="meta">20 de agosto de 2026</p>
-    </div>
-    <div class="scroll-hint">
-      role para navegar
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-    </div>
-  </section>
-
-  <!-- 2. O PROBLEMA -->
-  <section class="slide" id="slide-2">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>O problema</span></div>
-      <h2 class="slide-title">Três gargalos que toda consultoria de dados enfrenta</h2>
-      <div class="problem-list">
-        <div class="problem-item">
-          <span class="problem-tag">Discovery</span>
-          <div>
-            <h3>Lento</h3>
-            <p>Mapear o que existe — datasets, tabelas, volumes, donos — consome dias de trabalho manual via console GCP ou queries avulsas.</p>
-          </div>
-        </div>
-        <div class="problem-item">
-          <span class="problem-tag">Monitoria</span>
-          <div>
-            <h3>Reativa</h3>
-            <p>SLA de recebimento de bases é acompanhado manualmente ou não é acompanhado — falhas só aparecem quando alguém nota a ausência dos dados.</p>
-          </div>
-        </div>
-        <div class="problem-item">
-          <span class="problem-tag">Qualidade</span>
-          <div>
-            <h3>Cara de medir</h3>
-            <p>Perfilar colunas e tabelas exige escrever queries específicas a cada novo projeto, repetindo esforço que nunca vira ativo reutilizável.</p>
-          </div>
-        </div>
+    <!-- 0. CAPA -->
+    <section class="slide cover" id="slide-0">
+      <canvas class="cover-canvas" id="cover-canvas" aria-hidden="true"></canvas>
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>dp6 · Observability Hub</span></div>
+        <h1 class="reveal-item" style="--i:1">Observability Hub</h1>
+        <p class="tagline reveal-item" style="--i:2">Descubra, monitore e proteja todos os dados do seu projeto GCP — direto na fonte, sem mover um byte.</p>
+        <p class="meta reveal-item" style="--i:3">Observabilidade de dados no GCP</p>
       </div>
-      <p class="closer-note">O Hub resolve os três numa única interface, direto sobre BigQuery e Cloud Storage — sem mover dados, sem pipeline adicional.</p>
-    </div>
-  </section>
-
-  <!-- 3. ONDE ESTAMOS HOJE -->
-  <section class="slide" id="slide-3">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Onde estamos</span></div>
-      <h2 class="slide-title">MVP completo, os 8 domínios em produção</h2>
-      <p class="slide-lede">Do backend ao Terraform, dev e prod rodando de ponta a ponta. A adição mais recente — Storage — fechou o ciclo em 18/08: implementada, validada em dev, mergeada e no ar em prod.</p>
-      <div class="kpi-row">
-        <div class="kpi-card"><div class="kpi-value">8/8</div><div class="kpi-label">Domínios em produção</div></div>
-        <div class="kpi-card"><div class="kpi-value">2</div><div class="kpi-label">Ambientes isolados</div></div>
-        <div class="kpi-card"><div class="kpi-value">100%</div><div class="kpi-label">Deploys de dev automáticos</div></div>
-        <div class="kpi-card"><div class="kpi-value">1</div><div class="kpi-label">Gate manual de aprovação em prod</div></div>
+      <div class="scroll-hint reveal-item" style="--i:4">
+        arraste ou use as setas
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
       </div>
-      <div class="status-row"><span class="status-dot"></span> dev/prod isolados por projeto GCP, state e imagens próprios — nenhum recurso compartilhado</div>
-    </div>
-  </section>
+    </section>
 
-  <!-- 4. ARQUITETURA -->
-  <section class="slide" id="slide-4">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Arquitetura</span></div>
-      <h2 class="slide-title">Fundação sem chave de service account</h2>
-      <p class="slide-lede">Autenticação no GCP inteiramente via Workload Identity Federation. Terraform por diretório de ambiente — sem workspaces, sem lógica condicional em runtime.</p>
-      <div class="diagram-wrap">
-        <pre class="mermaid">
-%%{init: {'theme':'base', 'themeVariables': {
-  'background':'#2A2A28',
-  'primaryColor':'#2A2A28',
-  'primaryTextColor':'#FFFFFF',
-  'primaryBorderColor':'#FFB302',
-  'lineColor':'#8F96A1',
-  'secondaryColor':'#3A3A38',
-  'tertiaryColor':'#1D1D1B',
-  'clusterBkg':'#1D1D1B',
-  'clusterBorder':'#3A3A38',
-  'fontFamily':'Ubuntu, sans-serif',
-  'fontSize':'14px'
-}}}%%
+    <!-- 1. O PROBLEMA -->
+    <section class="slide" id="slide-1">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>O problema</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1">Três gargalos que travam qualquer time de dados</h2>
+        <div class="problem-list">
+          <div class="problem-item reveal-item" style="--i:2">
+            <span class="problem-tag">Discovery</span>
+            <div><h3>Lento</h3><p>Você chega num projeto GCP que não conhece — mapear o que existe (datasets, tabelas, volumes, donos) vira dias de console e queries avulsas.</p></div>
+          </div>
+          <div class="problem-item reveal-item" style="--i:3">
+            <span class="problem-tag">Monitoria</span>
+            <div><h3>Reativa</h3><p>SLA de recebimento de bases raramente é acompanhado de verdade — a falha só aparece quando alguém sente falta do dado.</p></div>
+          </div>
+          <div class="problem-item reveal-item" style="--i:4">
+            <span class="problem-tag">Qualidade</span>
+            <div><h3>Cara de medir</h3><p>Perfilar colunas exige escrever a mesma query específica a cada projeto novo, sem nunca virar um ativo reutilizável.</p></div>
+          </div>
+        </div>
+        <p class="closer-note reveal-item" style="--i:5">O Hub resolve os três numa única interface, direto sobre BigQuery e Cloud Storage — sem mover dado, sem pipeline adicional.</p>
+      </div>
+    </section>
+
+    <!-- 2. ONDE ESTAMOS -->
+    <section class="slide" id="slide-2">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Onde estamos</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1">Já em produção, cobrindo o ciclo inteiro do dado</h2>
+        <p class="slide-lede reveal-item" style="--i:2">Da descoberta ao custo, tudo abaixo já roda de ponta a ponta — em qualquer projeto GCP que você apontar.</p>
+        <div class="kpi-row">
+          <div class="kpi-block reveal-item" style="--i:3"><div class="kpi-value" data-count="8">0</div><div class="kpi-label">Funcionalidades ativas</div></div>
+          <div class="kpi-block reveal-item" style="--i:4"><div class="kpi-value" data-count="2">0</div><div class="kpi-label">Serviços GCP cobertos hoje</div></div>
+        </div>
+        <div class="chip-row">
+          <span class="feature-chip reveal-item" style="--i:5"><span class="status-dot"></span>Catálogo</span>
+          <span class="feature-chip reveal-item" style="--i:6"><span class="status-dot"></span>Lineage</span>
+          <span class="feature-chip reveal-item" style="--i:7"><span class="status-dot"></span>PII</span>
+          <span class="feature-chip reveal-item" style="--i:8"><span class="status-dot"></span>Acesso</span>
+          <span class="feature-chip reveal-item" style="--i:9"><span class="status-dot"></span>Qualidade</span>
+          <span class="feature-chip reveal-item" style="--i:10"><span class="status-dot"></span>Freshness</span>
+          <span class="feature-chip reveal-item" style="--i:11"><span class="status-dot"></span>FinOps</span>
+          <span class="feature-chip reveal-item" style="--i:12"><span class="status-dot"></span>Storage</span>
+        </div>
+        <div class="callout-strip reveal-item" style="--i:13"><b>Multi-projeto desde o primeiro dia</b> — aponte para qualquer projeto GCP, nada é instalado do lado de lá.</div>
+      </div>
+    </section>
+
+    <!-- 3. NA PRÁTICA (mockup) -->
+    <section class="slide" id="slide-3">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Na prática</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1; font-size: clamp(1.6rem, 2.6vw, 2.2rem); margin-bottom: 10px;">A mesma tela, tabela por tabela</h2>
+        <p class="slide-lede reveal-item" style="--i:2; font-size: var(--text-base); margin-bottom:18px;">Mesma interface do produto em produção — dado de exemplo.</p>
+        <div class="app-mock reveal-item" style="--i:3">
+          <div class="app-mock-topbar">
+            <span class="mock-brand">▌ dp6</span>
+            <span class="mock-project">GCP Project: <b>observability-hub-dev</b> ▾</span>
+          </div>
+          <div class="app-mock-body">
+            <div class="app-mock-sidebar">
+              <div class="mock-sidebar-label">Datasets</div>
+              <div class="mock-ds-item is-active">RAW <span>3 tabelas</span></div>
+              <div class="mock-ds-item">TRUSTED <span>2 tabelas</span></div>
+              <div class="mock-ds-item">REFINED <span>2 views</span></div>
+            </div>
+            <div class="app-mock-main">
+              <div class="mock-kpi-row">
+                <div class="mock-kpi"><div class="mock-kpi-value">US</div><div class="mock-kpi-label">Região</div></div>
+                <div class="mock-kpi"><div class="mock-kpi-value">3</div><div class="mock-kpi-label">Tabelas</div></div>
+                <div class="mock-kpi"><div class="mock-kpi-value">19.6 GB</div><div class="mock-kpi-label">Tamanho</div></div>
+                <div class="mock-kpi"><div class="mock-kpi-value">6,7M</div><div class="mock-kpi-label">Linhas</div></div>
+                <div class="mock-kpi"><div class="mock-kpi-value is-crit">1</div><div class="mock-kpi-label">Fora do SLA</div></div>
+              </div>
+              <table class="mock-table">
+                <thead><tr><th>Nome</th><th>Tipo</th><th>Linhas</th><th>Freshness</th></tr></thead>
+                <tbody>
+                  <tr><td>crm_leads_raw</td><td><span class="mock-badge">TABLE</span></td><td>842.311</td><td><span class="mock-fresh ok"><span class="status-dot"></span>2 min atrás</span></td></tr>
+                  <tr><td>ga4_events_daily</td><td><span class="mock-badge">VIEW</span></td><td>—</td><td><span class="mock-fresh ok"><span class="status-dot"></span>1h atrás</span></td></tr>
+                  <tr><td>billing_export_legacy</td><td><span class="mock-badge">TABLE</span></td><td>5.900.204</td><td><span class="mock-fresh error"><span class="status-dot"></span>47 dias atrás</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="mock-caption reveal-item" style="--i:4">Catálogo — BigQuery, projeto observability-hub-dev (dado de exemplo)</p>
+      </div>
+    </section>
+
+    <!-- 4. ARQUITETURA -->
+    <section class="slide" id="slide-4">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Arquitetura</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1">Lê direto da fonte, sem mover dado</h2>
+        <p class="slide-lede reveal-item" style="--i:2">Frontend e backend vivem num serviço leve; toda a inteligência vem de consultar metadados e audit logs do próprio GCP.</p>
+        <div class="diagram-wrap reveal-item" style="--i:3">
+          <pre class="mermaid">
+%%{init: {'theme':'base', 'themeVariables': {'background':'#2A2A28','primaryColor':'#2A2A28','primaryTextColor':'#FFFFFF','primaryBorderColor':'#FFB302','lineColor':'#8F96A1','secondaryColor':'#3A3A38','tertiaryColor':'#1D1D1B','fontFamily':'Ubuntu, sans-serif','fontSize':'14px'}}}%%
 flowchart LR
-  PUSH["Push em branch"] -->|dev automático| CID["GitHub Actions + WIF"]
-  MAIN["Merge em main"] -->|gate manual de aprovação| CIP["GitHub Actions + WIF"]
-  CID --> CRD["Cloud Run — backend + frontend<br/>observability-hub-dev"]
-  CIP --> CRP["Cloud Run — backend + frontend<br/>observability-hub-prod"]
-  CRD --> BQ[("BigQuery<br/>INFORMATION_SCHEMA")]
-  CRD --> LOG["Cloud Logging<br/>audit logs"]
-  CRD --> GCS[("Cloud Storage")]
-  CRD --> SM["Secret Manager"]
-  CRP --> BQ
-  CRP --> LOG
-  CRP --> GCS
-  CRP --> SM
-        </pre>
+FE["Frontend&lt;br/&gt;React"] --> BE["Backend&lt;br/&gt;FastAPI"]
+BE -->|leitura, IAM por projeto| BQ[("BigQuery&lt;br/&gt;INFORMATION_SCHEMA")]
+BE -->|leitura, IAM por projeto| GCS[("Cloud Storage")]
+BE -->|leitura, IAM por projeto| LOG["Cloud Logging&lt;br/&gt;audit logs"]
+BE --> SM["Secret Manager&lt;br/&gt;credenciais"]
+          </pre>
+        </div>
+        <p class="diagram-caption reveal-item" style="--i:4">Acesso concedido projeto a projeto via IAM — o Hub nunca grava nem replica dado do cliente.</p>
       </div>
-      <p class="diagram-caption">Terraform: bucket de state e imagens de Artifact Registry próprios por ambiente — sem recurso compartilhado entre dev e prod.</p>
-    </div>
-  </section>
+    </section>
 
-  <!-- 5. OS 8 DOMÍNIOS -->
-  <section class="slide" id="slide-5">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Produto</span></div>
-      <h2 class="slide-title">Oito domínios, uma plataforma</h2>
-      <div class="domain-grid">
-        <div class="domain-card">
-          <div class="domain-mono">CT</div>
-          <h3>Catálogo</h3>
-          <p>Inventário navegável de datasets e tabelas.</p>
-          <span class="domain-source">INFORMATION_SCHEMA</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">LN</div>
-          <h3>Lineage</h3>
-          <p>Dependências entre tabelas e buckets, tabelas órfãs.</p>
-          <span class="domain-source">Cloud Logging — audit logs de jobs</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">PII</div>
-          <h3>PII</h3>
-          <p>Detecção de colunas com dados pessoais sensíveis.</p>
-          <span class="domain-source">INFORMATION_SCHEMA + amostragem</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">AC</div>
-          <h3>Acesso</h3>
-          <p>Quem acessou o quê, e quando.</p>
-          <span class="domain-source">Cloud Logging — data access logs</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">QL</div>
-          <h3>Qualidade</h3>
-          <p>Schema drift e quebras de contrato ao longo do tempo.</p>
-          <span class="domain-source">INFORMATION_SCHEMA — snapshots</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">FR</div>
-          <h3>Freshness</h3>
-          <p>SLA de atualização configurável por tabela.</p>
-          <span class="domain-source">Metadados de última modificação</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">FO</div>
-          <h3>FinOps</h3>
-          <p>Scanner de desperdício e acompanhamento de budget.</p>
-          <span class="domain-source">BigQuery + Cloud Billing</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-        <div class="domain-card">
-          <div class="domain-mono">ST</div>
-          <h3>Storage</h3>
-          <p>Catálogo de buckets, scanner de desperdício com confirmação de uso real.</p>
-          <span class="domain-source">Storage API + Cloud Logging</span>
-          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 6. MODELO DE ACESSO CROSS-PROJECT -->
-  <section class="slide" id="slide-6">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Como escala</span></div>
-      <h2 class="slide-title">Um Hub, qualquer projeto GCP</h2>
-      <div class="two-col">
-        <div>
-          <p class="slide-lede">ADR-006 — a service account de runtime do Hub recebe leitura nos projetos alvo; o usuário informa qual projeto quer inspecionar, sem precisar instalar nada lá.</p>
-          <div class="flow">
-            <div class="flow-step"><b>Admin do projeto alvo</b>concede as roles à SA, uma vez</div>
-            <span class="flow-arrow">→</span>
-            <div class="flow-step"><b>Usuário no Hub</b>informa o project_id</div>
-            <span class="flow-arrow">→</span>
-            <div class="flow-step"><b>Todos os módulos</b>passam a operar sobre ele</div>
+    <!-- 5. PRODUTO -->
+    <section class="slide" id="slide-5">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Produto</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1">Duas frentes hoje, mais a caminho</h2>
+        <div class="callout-strip reveal-item" style="--i:2"><b>Sem instalação no projeto do cliente</b> — todas rodam sobre qualquer projeto GCP que você apontar.</div>
+        <div class="domain-groups">
+          <div>
+            <div class="section-label reveal-item" style="--i:3">BigQuery</div>
+            <div class="domain-grid">
+              <div class="domain-card reveal-item" style="--i:4"><div class="domain-mono">CT</div><h3>Catálogo</h3><p>Inventário navegável de datasets e tabelas.</p></div>
+              <div class="domain-card reveal-item" style="--i:5"><div class="domain-mono">LN</div><h3>Lineage</h3><p>Dependências entre tabelas, tabelas órfãs.</p></div>
+              <div class="domain-card reveal-item" style="--i:6"><div class="domain-mono">PII</div><h3>PII</h3><p>Colunas com dados pessoais sensíveis.</p></div>
+              <div class="domain-card reveal-item" style="--i:7"><div class="domain-mono">AC</div><h3>Acesso</h3><p>Quem acessou o quê, e quando.</p></div>
+              <div class="domain-card reveal-item" style="--i:8"><div class="domain-mono">QL</div><h3>Qualidade</h3><p>Schema drift e quebras de contrato.</p></div>
+              <div class="domain-card reveal-item" style="--i:9"><div class="domain-mono">FR</div><h3>Freshness</h3><p>SLA de atualização por tabela.</p></div>
+              <div class="domain-card reveal-item" style="--i:10"><div class="domain-mono">FO</div><h3>FinOps</h3><p>Desperdício e budget de custo.</p></div>
+            </div>
           </div>
-          <p class="slide-lede" style="font-size: var(--text-sm); margin-top: 8px;">Sem OAuth, sem troca de token — simples de implementar, pensado para o cenário real de consultoria.</p>
-        </div>
-        <div>
-          <div class="section-label">Checklist vivo por projeto alvo</div>
-          <ul class="checklist">
-            <li>APIs habilitadas (BigQuery, Storage, Logging)</li>
-            <li>Roles IAM concedidas à SA de runtime do Hub</li>
-            <li>Data Access audit logs configurados</li>
-            <li>Registrado em <code>docs/onboarding-cliente.md</code> antes de fechar a tarefa</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 7. TRAÇÃO REAL -->
-  <section class="slide" id="slide-7">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Tração</span></div>
-      <h2 class="slide-title">Em rollout dentro da própria dp6</h2>
-      <p class="slide-lede">Este piloto já foi importado para o repositório real da empresa e aponta para o projeto GCP de produção da dp6 — não é mais só prova de conceito.</p>
-      <div class="traction-card">
-        <p><span class="pill"><span class="status-dot info"></span>concluído</span>&nbsp; Bootstrap Terraform aplicado — WIF, service accounts de deploy, bucket de state, APIs habilitadas. Secrets do GitHub Actions configurados, environment de produção com reviewer definido.</p>
-        <p><span class="pill warn"><span class="status-dot warn"></span>bloqueado</span>&nbsp; Falta liberar o acesso público (<code>allUsers</code>) dos dois serviços Cloud Run — barrado pela Org Policy da conta. Exceção pedida ao TI, aguardando retorno.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- 8. MATURIDADE + BACKLOG -->
-  <section class="slide" id="slide-8">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Processo</span></div>
-      <h2 class="slide-title">Maturidade de engenharia acompanhando o produto</h2>
-      <div class="two-col">
-        <div>
-          <div class="section-label">Decisões recentes</div>
-          <div class="decision-list">
-            <div class="decision-item">
-              <h3>Gate manual antes do deploy de app em prod</h3>
-              <p>Nasceu de uma investigação de custo real do Cloud Run — deploy de app agora espera aprovação; apply de infra continua automático porque já passa por plan revisado.</p>
-            </div>
-            <div class="decision-item">
-              <h3>Diagnóstico de custo do Cloud Run</h3>
-              <p>CPU alocada continuamente (fora do padrão do projeto) nos 4 serviços, revertido e confirmado — não era vazamento de tráfego.</p>
-            </div>
-            <div class="decision-item">
-              <h3>Auditoria da documentação de acesso</h3>
-              <p>Revisão ponta a ponta dos manuais entregues a clientes e dos playbooks de hospedagem — lacunas reais encontradas e corrigidas.</p>
+          <div>
+            <div class="section-label reveal-item" style="--i:5">Cloud Storage</div>
+            <div class="domain-card--featured reveal-item" style="--i:6">
+              <span class="badge-new">Novidade</span>
+              <div class="domain-mono">ST</div>
+              <h3>Storage</h3>
+              <p>Catálogo de buckets e scanner de desperdício, com confirmação de uso real via audit log.</p>
             </div>
           </div>
         </div>
-        <div>
-          <div class="section-label">Backlog priorizado — nenhum aprovado ainda</div>
-          <ol class="backlog-list">
-            <li>Formalizar IAM cross-project em Terraform</li>
-            <li>Code-splitting do bundle do frontend</li>
-            <li>Tratar jobs não concluídos em lineage/acesso/FinOps</li>
-            <li>Scheduler e Workflows — próxima fronteira além do BigQuery</li>
-          </ol>
+        <div class="backlog-row reveal-item" style="--i:11">
+          <span class="section-label" style="margin: 0;">Backlog — ainda não iniciado:</span>
+          <span class="backlog-pill">Scheduler</span>
+          <span class="backlog-pill">Workflows</span>
+          <span class="backlog-pill">Data Transfer</span>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- 9. FECHAMENTO -->
-  <section class="slide" id="slide-9">
-    <div class="slide-inner">
-      <div class="eyebrow"><span class="dp6-divider"></span><span>Fechamento</span></div>
-      <h2 class="slide-title">O que precisa de decisão</h2>
-      <ol class="ask-list">
-        <li><span class="ask-num">01</span><span>Status da exceção de Org Policy no TI — segue o rollout interno na dp6.</span></li>
-        <li><span class="ask-num">02</span><span>Aprovar qual item do backlog vira a próxima sprint.</span></li>
-        <li><span class="ask-num">03</span><span>Definir se o Hub passa a ser tratado como produto interno formal da dp6.</span></li>
-      </ol>
-      <p class="closer-note">Observability Hub — dp6</p>
-    </div>
-  </section>
+    <!-- 6. TRAÇÃO -->
+    <section class="slide" id="slide-6">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Tração</span></div>
+        <h2 class="slide-title reveal-item" style="--i:1">Já em testes com projetos piloto reais</h2>
+        <p class="slide-lede reveal-item" style="--i:2">Validado de ponta a ponta contra projetos GCP reais — dev e prod se observando como alvo um do outro — e agora começando o primeiro piloto interno, dentro da própria dp6.</p>
+        <div class="proof-row">
+          <div class="proof-chip reveal-item" style="--i:3"><span class="status-dot"></span>Ambientes reais, não sandbox</div>
+          <div class="proof-chip reveal-item" style="--i:4"><span class="status-dot"></span>Primeiro piloto: a própria dp6</div>
+        </div>
+      </div>
+    </section>
 
+    <!-- 7. FECHAMENTO (bloco de cor) -->
+    <section class="slide slide--punch" id="slide-7">
+      <div class="slide-inner">
+        <div class="eyebrow reveal-item" style="--i:0"><span class="dp6-divider"></span><span>Fechamento</span></div>
+        <p class="closing-line reveal-item" style="--i:1">Um Hub.<br>Qualquer projeto GCP.</p>
+        <p class="closing-sub reveal-item" style="--i:2">8 funcionalidades ativas hoje, do catálogo ao FinOps — direto na fonte, sem mover um byte do seu dado.</p>
+        <p class="closing-mark reveal-item" style="--i:3">Observability Hub — dp6</p>
+      </div>
+    </section>
+
+  </div>
 </div>
 
 <script>
   (function () {
-    var viewport = document.getElementById('viewport');
+    var track = document.getElementById('track');
     var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
     var dots = Array.prototype.slice.call(document.querySelectorAll('.dotnav button'));
     var counter = document.getElementById('counter-current');
+    var btnPrev = document.getElementById('btn-prev');
+    var btnNext = document.getElementById('btn-next');
     var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var index = 0;
+    var countAnimated = false;
 
-    function setActive(index) {
-      dots.forEach(function (d, i) { d.classList.toggle('is-active', i === index); });
-      counter.textContent = String(index + 1).padStart(2, '0');
+    function animateCount(el, target, duration) {
+      var start = performance.now();
+      function step(now) {
+        var p = Math.min(1, (now - start) / duration);
+        var eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(eased * target);
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
     }
 
-    var observer = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        var idx = slides.indexOf(entry.target);
-        if (entry.isIntersecting) {
-          entry.target.classList.add('is-visible');
-          if (entry.intersectionRatio > 0.55) setActive(idx);
-        }
-      });
-    }, { root: viewport, threshold: [0, 0.55, 1] });
+    function goTo(i) {
+      index = Math.max(0, Math.min(slides.length - 1, i));
+      track.style.transform = 'translateX(-' + (index * 100) + 'vw)';
+      slides.forEach(function (s, si) { s.classList.toggle('is-active', si === index); });
+      dots.forEach(function (d, di) { d.classList.toggle('is-active', di === index); });
+      counter.textContent = String(index + 1).padStart(2, '0');
+      btnPrev.disabled = index === 0;
+      btnNext.disabled = index === slides.length - 1;
 
-    slides.forEach(function (s) { observer.observe(s); });
+      if (index === 2 && !countAnimated) {
+        countAnimated = true;
+        var vals = slides[2].querySelectorAll('.kpi-value');
+        vals.forEach(function (el) {
+          var target = parseInt(el.getAttribute('data-count'), 10);
+          if (reduced) { el.textContent = target; } else { animateCount(el, target, 900); }
+        });
+      }
+    }
 
-    dots.forEach(function (dot, i) {
-      dot.addEventListener('click', function () {
-        slides[i].scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
-      });
-    });
+    dots.forEach(function (dot, i) { dot.addEventListener('click', function () { goTo(i); }); });
+    btnPrev.addEventListener('click', function () { goTo(index - 1); });
+    btnNext.addEventListener('click', function () { goTo(index + 1); });
 
     window.addEventListener('keydown', function (e) {
-      var current = dots.findIndex(function (d) { return d.classList.contains('is-active'); });
-      if (current === -1) current = 0;
-      var next = null;
-      if (['ArrowDown', 'PageDown'].indexOf(e.key) !== -1) next = Math.min(current + 1, slides.length - 1);
-      if (['ArrowUp', 'PageUp'].indexOf(e.key) !== -1) next = Math.max(current - 1, 0);
-      if (next !== null) {
-        e.preventDefault();
-        slides[next].scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+      if (['ArrowRight', 'PageDown'].indexOf(e.key) !== -1) { e.preventDefault(); goTo(index + 1); }
+      if (['ArrowLeft', 'PageUp'].indexOf(e.key) !== -1) { e.preventDefault(); goTo(index - 1); }
+    });
+
+    var touchStartX = null, touchStartY = null;
+    window.addEventListener('touchstart', function (e) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    window.addEventListener('touchend', function (e) {
+      if (touchStartX === null) return;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      var dy = e.changedTouches[0].clientY - touchStartY;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+        goTo(index + (dx < 0 ? 1 : -1));
       }
+      touchStartX = null; touchStartY = null;
+    }, { passive: true });
+
+    goTo(0);
+
+    /* ambient node-graph on cover */
+    var canvas = document.getElementById('cover-canvas');
+    var ctx = canvas.getContext('2d');
+    var nodes = [];
+
+    function resize() {
+      var rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+
+    function initNodes() {
+      nodes = [];
+      var count = Math.round((canvas.width * canvas.height) / 42000);
+      for (var i = 0; i < count; i++) {
+        nodes.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.15,
+          vy: (Math.random() - 0.5) * 0.15,
+          accent: Math.random() < 0.16
+        });
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      var linkDist = 150;
+      for (var i = 0; i < nodes.length; i++) {
+        var a = nodes[i];
+        if (!reduced) { a.x += a.vx; a.y += a.vy; }
+        if (a.x < 0 || a.x > canvas.width) a.vx *= -1;
+        if (a.y < 0 || a.y > canvas.height) a.vy *= -1;
+        for (var j = i + 1; j < nodes.length; j++) {
+          var b = nodes[j];
+          var dx = a.x - b.x, dy = a.y - b.y;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < linkDist) {
+            ctx.strokeStyle = 'rgba(143,150,161,' + (0.16 * (1 - dist / linkDist)) + ')';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+      for (var k = 0; k < nodes.length; k++) {
+        var n = nodes[k];
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.accent ? 2.2 : 1.6, 0, Math.PI * 2);
+        ctx.fillStyle = n.accent ? 'rgba(255,179,2,0.55)' : 'rgba(143,150,161,0.4)';
+        ctx.fill();
+      }
+      if (!reduced) requestAnimationFrame(draw);
+    }
+
+    resize();
+    initNodes();
+    draw();
+
+    window.addEventListener('resize', function () {
+      resize();
+      initNodes();
+      if (reduced) draw();
     });
   })();
 </script>

@@ -5,6 +5,87 @@ Atualizado ao final de cada fase pelo Claude Code.
 
 ---
 
+## Apresentação HTML institucional/comercial do Hub — em andamento, ainda não commitada
+
+Pedido do usuário: um HTML autocontido (sem PowerPoint) pra apresentar o
+produto, publicado como Claude Artifact e, no fim, hospedado via GitHub
+Pages (repo já é público). Duas rodadas de brainstorm explícitas antes
+de qualquer código, seguindo a convenção de sempre debater antes de
+executar.
+
+### Primeira versão (commit `f1686d4`)
+Deck vertical (scroll-snap), 9 seções, identidade dp6 estrita
+(`docs/skills/frontend.md`) sem nenhuma liberdade de execução: capa,
+problema (3 gargalos do PRD), status por fase, arquitetura completa
+incluindo pipeline de CI/CD, os 8 domínios, modelo de acesso
+cross-project (ADR-006) como página própria, tração real (rollout
+interno na dp6, incluindo o bloqueio real de Org Policy aguardando
+retorno do TI), maturidade de processo/backlog, fechamento com decisões
+pendentes de liderança.
+
+### Redesign — mudança de direção pedida pelo usuário (ainda local, não commitado)
+Reestruturação quase completa pedida pelo usuário: navegação horizontal
+(não vertical); conteúdo mais comercial ("o que a plataforma entrega")
+em vez de update operacional interno; "Onde estamos" e "Produto"
+separados (o primeiro é resumo + cross-project, o segundo é o grid
+detalhado BigQuery vs Cloud Storage + backlog de Scheduler/Workflows/
+Data Transfer); "Como escala" deixou de ser página própria (virou
+callout dentro de Produto); "Processo" (maturidade/backlog interno)
+removido por completo; "Tração" suavizada (sem o bloqueio de Org
+Policy/TI, só "já em testes com projetos piloto reais").
+
+Nível de liberdade de marca definido explicitamente com o usuário:
+regras de *app* do `frontend.md` (só Ubuntu, sem tipografia de display)
+podem ser quebradas nesta peça de marketing — âmbar continua a
+assinatura única, mas título/capa/stats ganharam **Archivo** (900) como
+fonte de display. Regras de *marca* (flat, sem gradiente, sem sombra
+pesada) mantidas.
+
+Nova seção "Na prática" — recriação fiel (não mockup genérico) da tela
+de Catálogo especificada no `frontend.md` (topbar + sidebar de datasets
++ KPI row + tabela com freshness colorida por status), como prova
+visual de produto real, não promessa. Fechamento virou bloco de cor
+sólido âmbar (token `--color-primary` invertido localmente pra escuro
+dentro do slide) — mantido mesmo depois de duas rodadas de "não
+gostei"; o problema real era o texto de fechamento fraco, não a cor.
+
+### Bugs reais encontrados e corrigidos (aprendizado de CSS/HTML pra próxima peça)
+- **Mermaid renderizando em branco**: `<br/>` cru dentro de
+  `<pre class="mermaid">` é parseado como tag HTML real pelo navegador
+  antes do mermaid ler o texto, corrompendo os node labels do diagrama.
+  Fix: escapar como `&lt;br/&gt;` (o `textContent` decodifica de volta
+  pro literal que o mermaid espera). A diretiva `%%{init}%%` também
+  precisa ficar numa linha só — multi-linha quebrou o parser.
+- **Sobreposição de texto na capa**: elemento `position: absolute`
+  dentro de um container sem altura própria (`.slide-inner`, que só tem
+  a altura do próprio conteúdo, não da tela) ancora relativo a essa
+  altura curta em vez da tela cheia. Fix: mover pra fora, como filho
+  direto de um ancestral com altura real.
+- **Slide de fechamento completamente invisível**: reusar o mesmo nome
+  de custom property (`--color-primary`) tanto pro valor consumido
+  quanto pra redefinição local, na mesma regra CSS — `var()` resolve
+  pelo valor final já sobrescrito (cascade dentro da própria regra), não
+  pelo valor no momento da declaração anterior. Fundo e texto acabaram
+  exatamente na mesma cor. Fix: usar valor literal pro que precisa do
+  valor "antigo" do token.
+- Efeito colateral do mesmo tipo de bug: `.track` recebe `transform`
+  via JS pra animar a troca de slide — isso o torna *containing block*
+  de qualquer descendente `position: absolute` sem ancestral posicionado
+  mais próximo (regra do CSS, não só de convenção). O canvas animado da
+  capa estava sendo posicionado relativo ao track inteiro (~800vw de
+  largura, soma de todos os slides), não ao slide atual. Fix: dar
+  `position: relative` a `.slide`.
+
+### Estado no fim desta sessão
+Arquivo em `docs/apresentacao/observability-hub.html`, publicado como
+Claude Artifact (privado). **Só o commit `f1686d4` (primeira versão,
+pré-redesign) está em `main`** — todo o redesign e os fixes de bug
+acima existem só no working tree local, aguardando aprovação explícita
+do usuário antes do próximo commit. GitHub Pages ainda não habilitado —
+decisão consciente do usuário ("ainda não").
+
+---
+
 ## CI/CD: gate de aprovação manual antes de deploy de app em prod
 
 Direto em `main`, fora de qualquer sprint — pedido do usuário depois de

@@ -7,53 +7,47 @@ Lido obrigatoriamente no início de cada nova sessão após um reset.
 
 ## Status atual
 
-**Última atualização:** 2026-08-18 — sessão de implementação do domínio
-`storage` (Cloud Storage), do zero até deployado em produção, 4 itens
-completos, **sprint fechada de ponta a ponta**; seguida, na mesma
-sessão, de um gate de aprovação manual pro deploy de app em prod
-(pedido do usuário) e de uma auditoria completa da documentação de
-acesso/hospedagem (ver seção "CI/CD: gate de aprovação manual em prod +
-auditoria de documentação" abaixo — achou e corrigiu lacunas reais,
-incluindo um requisito obrigatório de nomenclatura de projeto GCP que
-nunca tinha sido documentado como obrigatório). Sessão anterior
-(2026-08-17) tinha reconstruído este arquivo depois de 4 dias sem
-atualização (ver seção "Storage — domínio novo" abaixo, "Falha de
-processo" — os commits dessa reconstrução ficaram presos numa branch
-errada e quase se perderam de novo; corrigido nesta sessão com um merge
-explícito).
+**Última atualização:** 2026-08-20 — sessão fora do fluxo de sprint de
+domínio: criação (e duas rodadas de redesign) de um HTML autocontido de
+apresentação do produto, ver seção "Apresentação HTML institucional/
+comercial do Hub" abaixo pro detalhe completo. Nenhum código de
+`apps/`/`infra/` tocado nesta sessão.
 
-**Estado real agora:** domínio `storage` (Cloud Storage) implementado
-por completo — catálogo de buckets, scanner de desperdício (config +
-uso real via audit log), extensão do lineage (bucket como nó). Todos os
-4 itens validados em dev pelo usuário, incluindo o grafo de lineage real
-(`RAW.crm_leads_staging` com bucket `landing` upstream e `processed`
-downstream, jobs LOAD/EXTRACT reais). Infraestrutura de prod promovida
-(IAM cross-project completo das duas roles de storage, 3 buckets mock
-espelhando dev, dados reais, Data Access audit log habilitado — decisão
-do usuário, também em prod, não só dev). **PR #25 aberto e mergeado em
-`main`**; deploy automático de prod confirmado verde (`gh run list`) e
-as duas rotas novas (`/api/v1/storage/.../buckets`,
-`/api/v1/storage/.../waste-candidates`) e o `LineageNode` com
-`type`/`bucket_name` confirmados no ar via `/openapi.json` de prod.
+**Estado real agora:** `docs/apresentacao/observability-hub.html`
+existe com uma versão bem mais elaborada do que a commitada — deck
+horizontal, tom comercial, tipografia de display (Archivo) liberada
+pra essa peça, seção "Na prática" com recorte fiel da tela de Catálogo,
+fechamento em bloco de cor âmbar. Publicado como Claude Artifact
+(privado): `https://claude.ai/code/artifact/ddcb1644-804e-4598-a162-6a481d7f3756`.
+**Só a primeira versão (commit `f1686d4`) está em `main`** — todo o
+redesign e os 4 bugs de CSS/HTML corrigidos (mermaid em branco,
+sobreposição de texto na capa, slide de fechamento invisível, canvas
+mal posicionado por causa do `transform` no `.track`) existem só no
+working tree local. Ver CHANGELOG pro relato completo dos bugs — vale a
+pena ler antes de mexer em CSS com `position: absolute` de novo.
 
-**Item resolvido nesta sessão**: a mudança não commitada em
-`infra/terraform/modules/cloud-run/variables.tf` (`max_instance_count`
-2→5, registrada como pendente na atualização anterior) foi **descartada**
-por decisão do usuário (`git restore`) — sem justificativa encontrada
-nos logs do Cloud Run (nenhum sinal de estar batendo no teto de 2
-instâncias), não fazia parte de nenhum trabalho desta sessão.
+GitHub Pages ainda **não** habilitado — usuário confirmou "ainda não"
+depois de aprovar o visual corrigido. Repo já é público
+(`Matheus-Fuzati-de-Carvalho/observability-hub`), então habilitar é
+só Settings → Pages quando o usuário pedir.
+
+Nota de credencial encontrada nesta sessão: a conta `gh`/git ativa na
+máquina estava em `matheusfuzati` (sem permissão de push no repo, que
+pertence a `Matheus-Fuzati-de-Carvalho`) — troquei com
+`gh auth switch --hostname github.com --user Matheus-Fuzati-de-Carvalho`.
+Deve continuar ativa, mas vale conferir com `gh auth status` se um push
+futuro voltar a dar 403.
 
 Ver a seção "Storage — domínio novo" abaixo pra todo o detalhe técnico
-(decisões de desenho, bugs reais encontrados em dev, payloads reais de
-audit log capturados). As seções anteriores (Sprint 3.2, FinOps, Admin
-ACL, Documentação para cliente) continuam válidas — nada mudou nelas
-nesta sessão, só ficaram mais antigas na lista.
+da última sprint de domínio (2026-08-18) — nada mudou nela nesta sessão,
+só ficou mais antiga na lista. Idem pras seções anteriores (Sprint 3.2,
+FinOps, Admin ACL, Documentação para cliente).
 
-**Próximo passo:** nenhum pendente desta sprint — está fechada por
-completo (dev, prod, PR, deploy, docs). Validação visual das 4
-funcionalidades em prod fica a cargo do usuário (sem ferramenta de
-browser neste sandbox, mesma limitação de sempre). Candidatos pra
-próxima sprint estão em "Backlog"/"Próxima sprint" abaixo, nenhum
+**Próximo passo:** aguardando o usuário aprovar o visual atual da
+apresentação (arquitetura, capa e fechamento corrigidos, ainda não
+confirmados por ele) antes de: 1) commitar o redesign, 2) habilitar
+GitHub Pages. Nenhuma sprint de domínio em andamento — candidatos pra
+próxima sprint continuam em "Backlog"/"Próxima sprint" abaixo, nenhum
 aprovado ainda.
 
 ---
@@ -1715,3 +1709,10 @@ estado observável do backlog. Perguntar antes de agir.
    PR — presos numa branch (mesmo pusheados pro remoto), somem quando
    uma branch nova nasce de `main` atualizada. Ver "Storage — domínio
    novo" → "Falha de processo".
+8. `git status` deve mostrar `docs/apresentacao/observability-hub.html`
+   como modificado (não staged) — é o redesign da apresentação
+   (2026-08-20), aprovado visualmente mas **não commitado** por decisão
+   do usuário ("ainda não" ao GitHub Pages). Não descartar essa mudança
+   sem confirmar com o usuário; ver seção "Apresentação HTML
+   institucional/comercial do Hub" no CHANGELOG pro contexto completo
+   antes de continuar esse trabalho.
