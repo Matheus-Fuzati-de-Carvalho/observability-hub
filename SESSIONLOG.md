@@ -14,41 +14,40 @@ comercial do Hub" abaixo pro detalhe completo. Nenhum código de
 `apps/`/`infra/` tocado nesta sessão.
 
 **Estado real agora:** `docs/apresentacao/observability-hub.html`
-existe com uma versão bem mais elaborada do que a commitada — deck
-horizontal, tom comercial, tipografia de display (Archivo) liberada
-pra essa peça, seção "Na prática" com recorte fiel da tela de Catálogo,
-fechamento em bloco de cor âmbar. Publicado como Claude Artifact
-(privado): `https://claude.ai/code/artifact/ddcb1644-804e-4598-a162-6a481d7f3756`.
-**Só a primeira versão (commit `f1686d4`) está em `main`** — todo o
-redesign e os 4 bugs de CSS/HTML corrigidos (mermaid em branco,
+fechado e **em `main`** (commit `a72487d`, pushado) — deck horizontal,
+tom comercial, tipografia de display (Archivo) liberada pra essa peça,
+seção "Na prática" com recorte fiel da tela de Catálogo, fechamento em
+bloco de cor âmbar, 4 bugs de CSS/HTML corrigidos (mermaid em branco,
 sobreposição de texto na capa, slide de fechamento invisível, canvas
-mal posicionado por causa do `transform` no `.track`) existem só no
-working tree local. Ver CHANGELOG pro relato completo dos bugs — vale a
-pena ler antes de mexer em CSS com `position: absolute` de novo.
+mal posicionado por causa do `transform` no `.track` — ver CHANGELOG
+pro relato completo, vale ler antes de mexer em CSS com
+`position: absolute` de novo). Também publicado como Claude Artifact
+(privado): `https://claude.ai/code/artifact/ddcb1644-804e-4598-a162-6a481d7f3756`
+— redeploy nesse mesmo link se o arquivo mudar de novo (mesmo
+`file_path`), não criar um Artifact novo.
 
-GitHub Pages ainda **não** habilitado — usuário confirmou "ainda não"
-depois de aprovar o visual corrigido. Repo já é público
-(`Matheus-Fuzati-de-Carvalho/observability-hub`), então habilitar é
-só Settings → Pages quando o usuário pedir.
+GitHub Pages ainda **não** habilitado — decisão consciente do usuário,
+não pendência esquecida. Repo já é público
+(`Matheus-Fuzati-de-Carvalho/observability-hub`), então habilitar é só
+Settings → Pages quando o usuário pedir.
 
-Nota de credencial encontrada nesta sessão: a conta `gh`/git ativa na
+Nota de credencial desta sessão, pode repetir: a conta `gh`/git ativa na
 máquina estava em `matheusfuzati` (sem permissão de push no repo, que
 pertence a `Matheus-Fuzati-de-Carvalho`) — troquei com
 `gh auth switch --hostname github.com --user Matheus-Fuzati-de-Carvalho`.
-Deve continuar ativa, mas vale conferir com `gh auth status` se um push
-futuro voltar a dar 403.
+Se um push voltar a dar 403, conferir `gh auth status` antes de
+investigar qualquer outra coisa.
 
 Ver a seção "Storage — domínio novo" abaixo pra todo o detalhe técnico
 da última sprint de domínio (2026-08-18) — nada mudou nela nesta sessão,
 só ficou mais antiga na lista. Idem pras seções anteriores (Sprint 3.2,
 FinOps, Admin ACL, Documentação para cliente).
 
-**Próximo passo:** aguardando o usuário aprovar o visual atual da
-apresentação (arquitetura, capa e fechamento corrigidos, ainda não
-confirmados por ele) antes de: 1) commitar o redesign, 2) habilitar
-GitHub Pages. Nenhuma sprint de domínio em andamento — candidatos pra
-próxima sprint continuam em "Backlog"/"Próxima sprint" abaixo, nenhum
-aprovado ainda.
+**Próximo passo:** nenhum pendente desta tarefa — apresentação fechada,
+commitada e pushada. Dois follow-ups conhecidos, nenhum aprovado ainda:
+1) habilitar GitHub Pages (usuário disse "ainda não"); 2) nenhuma
+sprint de domínio em andamento — candidatos em "Backlog"/"Próxima
+sprint" abaixo.
 
 ---
 
@@ -1709,10 +1708,9 @@ estado observável do backlog. Perguntar antes de agir.
    PR — presos numa branch (mesmo pusheados pro remoto), somem quando
    uma branch nova nasce de `main` atualizada. Ver "Storage — domínio
    novo" → "Falha de processo".
-8. `git status` deve mostrar `docs/apresentacao/observability-hub.html`
-   como modificado (não staged) — é o redesign da apresentação
-   (2026-08-20), aprovado visualmente mas **não commitado** por decisão
-   do usuário ("ainda não" ao GitHub Pages). Não descartar essa mudança
-   sem confirmar com o usuário; ver seção "Apresentação HTML
-   institucional/comercial do Hub" no CHANGELOG pro contexto completo
-   antes de continuar esse trabalho.
+8. Apresentação HTML (`docs/apresentacao/observability-hub.html`) está
+   fechada, commitada e pushada (`a72487d`) — ver "Apresentação HTML
+   institucional/comercial do Hub" no CHANGELOG pro histórico completo
+   (inclui 4 bugs reais de CSS/HTML, vale ler antes de mexer nesse
+   arquivo de novo). Único follow-up pendente: habilitar GitHub Pages,
+   só quando o usuário pedir — não fazer proativamente.
