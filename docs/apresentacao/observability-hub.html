@@ -1,0 +1,942 @@
+<title>Observability Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* dp6 brand tokens — docs/skills/frontend.md */
+    --color-primary: #FFB302;
+    --color-primary-hover: #E6A000;
+    --color-bg-dark: #1D1D1B;
+    --color-bg-surface: #2A2A28;
+    --color-bg-muted: #3A3A38;
+    --color-text-primary: #FFFFFF;
+    --color-text-muted: #8F96A1;
+    --color-text-inverse: #1D1D1B;
+
+    --color-status-ok: #34D399;
+    --color-status-warn: #FFB302;
+    --color-status-error: #E53E3E;
+    --color-status-info: #63B3ED;
+
+    --font-sans: 'Ubuntu', 'Verdana', system-ui, sans-serif;
+    --font-mono: 'Ubuntu Mono', ui-monospace, monospace;
+
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 1.875rem;
+    --text-display: clamp(1.75rem, 3.2vw, 2.75rem);
+    --text-hero: clamp(2.75rem, 6.5vw, 5.25rem);
+
+    --topbar-h: 56px;
+
+    color-scheme: dark;
+  }
+
+  /* Dark is the dp6 standard (skill: "dark mode é o padrão", light mode
+     explicitly deferred) — committed as a single deliberate theme,
+     painted explicitly so it holds regardless of host color-scheme. */
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--color-bg-dark);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 700; }
+  p { margin: 0; }
+
+  ::selection { background: var(--color-primary); color: var(--color-text-inverse); }
+
+  a { color: var(--color-primary); }
+
+  /* ---------- topbar ---------- */
+
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: var(--topbar-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px 0 16px;
+    background: var(--color-bg-dark);
+    border-bottom: 2px solid var(--color-primary);
+    z-index: 50;
+  }
+
+  .brandmark {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .dp6-divider {
+    width: 2px;
+    height: 22px;
+    background: var(--color-primary);
+    flex: none;
+  }
+
+  .brandmark-name {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .brandmark-sub {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .slide-counter {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.05em;
+    font-variant-numeric: tabular-nums;
+  }
+  .slide-counter b { color: var(--color-text-primary); font-weight: 700; }
+
+  /* ---------- scroll viewport ---------- */
+
+  .viewport {
+    height: 100vh;
+    padding-top: var(--topbar-h);
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-bg-muted) transparent;
+  }
+
+  .slide {
+    min-height: calc(100vh - var(--topbar-h));
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    display: flex;
+    align-items: center;
+    padding: 56px 8vw;
+  }
+
+  .slide-inner {
+    max-width: 980px;
+    margin: 0 auto;
+    width: 100%;
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+
+  .slide.is-visible .slide-inner {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slide-inner { transition: none; transform: none; opacity: 1; }
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .eyebrow span {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-primary);
+  }
+
+  .slide-title {
+    font-size: var(--text-display);
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+
+  .slide-lede {
+    font-size: var(--text-lg);
+    color: var(--color-text-muted);
+    max-width: 62ch;
+    line-height: 1.55;
+    margin-bottom: 8px;
+  }
+
+  /* ---------- dot nav ---------- */
+
+  .dotnav {
+    position: fixed;
+    right: 22px;
+    top: calc(var(--topbar-h) + (100vh - var(--topbar-h)) / 2);
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 50;
+  }
+
+  .dotnav button {
+    width: 9px;
+    height: 9px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--color-text-muted);
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, transform 0.15s;
+  }
+
+  .dotnav button:hover { border-color: var(--color-primary); transform: scale(1.2); }
+
+  .dotnav button.is-active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+
+  .dotnav button:focus-visible,
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* ---------- shared components ---------- */
+
+  .problem-list {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-top: 8px;
+  }
+
+  .problem-item {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 20px;
+    align-items: baseline;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--color-bg-muted);
+  }
+
+  .problem-item:last-child { border-bottom: none; }
+
+  .problem-tag {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .problem-item h3 {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .problem-item p {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    max-width: 58ch;
+  }
+
+  .closer-note {
+    margin-top: 28px;
+    font-size: var(--text-base);
+    color: var(--color-text-primary);
+    border-left: 2px solid var(--color-primary);
+    padding-left: 16px;
+    max-width: 60ch;
+    line-height: 1.5;
+  }
+
+  .kpi-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 28px 0 8px;
+  }
+
+  .kpi-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-radius: 8px;
+    padding: 16px 20px;
+    min-width: 150px;
+    flex: 1 1 150px;
+  }
+
+  .kpi-value {
+    font-size: var(--text-3xl);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .kpi-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 8px;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 24px;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-status-ok);
+    flex: none;
+  }
+
+  /* mermaid container */
+  .diagram-wrap {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 24px;
+    overflow-x: auto;
+  }
+
+  .diagram-caption {
+    margin-top: 12px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  /* domain cards grid */
+  .domain-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  .domain-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: border-color 0.15s;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .domain-card:hover { border-color: var(--color-primary); }
+
+  .domain-mono {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--color-bg-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .domain-card h3 {
+    font-size: var(--text-sm);
+    font-weight: 700;
+  }
+
+  .domain-card p {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.45;
+  }
+
+  .domain-source {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--color-text-muted);
+    letter-spacing: 0.01em;
+  }
+
+  .domain-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.68rem;
+    color: var(--color-status-ok);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+
+  /* access model */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 28px 0;
+    flex-wrap: wrap;
+  }
+
+  .flow-step {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: var(--text-sm);
+  }
+
+  .flow-step b { display: block; font-size: var(--text-base); margin-bottom: 2px; }
+
+  .flow-arrow { color: var(--color-primary); font-size: var(--text-lg); }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 40px;
+    align-items: start;
+  }
+
+  .checklist {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .checklist li {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    padding-left: 18px;
+    position: relative;
+  }
+
+  .checklist li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.5em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+  }
+
+  /* traction slide */
+  .traction-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-left: 3px solid var(--color-status-info);
+    border-radius: 8px;
+    padding: 22px 26px;
+    margin-top: 24px;
+    max-width: 66ch;
+  }
+
+  .traction-card p { font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.6; }
+  .traction-card p + p { margin-top: 12px; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--color-bg-muted);
+    border-radius: 999px;
+    padding: 4px 12px;
+    color: var(--color-text-primary);
+  }
+
+  .pill.warn { color: var(--color-status-warn); }
+  .pill .status-dot.info { background: var(--color-status-info); }
+  .pill .status-dot.warn { background: var(--color-status-warn); }
+
+  /* maturity / backlog slide */
+  .decision-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .decision-item {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-bg-muted);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+
+  .decision-item h3 {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .decision-item p {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+  }
+
+  .backlog-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: backlog;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .backlog-list li {
+    counter-increment: backlog;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    display: flex;
+    gap: 12px;
+    line-height: 1.5;
+  }
+
+  .backlog-list li::before {
+    content: counter(backlog, decimal-leading-zero);
+    font-family: var(--font-mono);
+    color: var(--color-primary);
+    font-size: var(--text-xs);
+    flex: none;
+    padding-top: 2px;
+  }
+
+  .section-label {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+  }
+
+  /* closing slide */
+  .ask-list {
+    list-style: none;
+    padding: 0;
+    margin: 28px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .ask-list li {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 14px;
+    font-size: var(--text-base);
+    line-height: 1.5;
+  }
+
+  .ask-num {
+    font-family: var(--font-mono);
+    color: var(--color-primary);
+    font-weight: 700;
+  }
+
+  /* cover slide */
+  .cover .eyebrow { margin-bottom: 28px; }
+  .cover h1 {
+    font-size: var(--text-hero);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+  }
+  .cover .tagline {
+    font-size: var(--text-xl);
+    color: var(--color-text-muted);
+    margin-top: 20px;
+    max-width: 46ch;
+    font-weight: 300;
+  }
+  .cover .meta {
+    margin-top: 40px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .scroll-hint {
+    position: absolute;
+    bottom: 32px;
+    left: 8vw;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .scroll-hint svg { width: 12px; height: 12px; }
+
+  @media (max-width: 860px) {
+    .domain-grid { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+    .problem-item { grid-template-columns: 1fr; gap: 6px; }
+    .dotnav { display: none; }
+    .slide { padding: 40px 6vw; }
+  }
+</style>
+
+<div class="topbar">
+  <div class="brandmark">
+    <span class="brandmark-name">dp6</span>
+    <span class="dp6-divider" aria-hidden="true"></span>
+    <span class="brandmark-sub">Observability Hub</span>
+  </div>
+  <div class="slide-counter"><b id="counter-current">01</b> / 09</div>
+</div>
+
+<nav class="dotnav" aria-label="Navegação entre seções">
+  <button data-target="slide-1" aria-label="Capa"></button>
+  <button data-target="slide-2" aria-label="O problema"></button>
+  <button data-target="slide-3" aria-label="Onde estamos hoje"></button>
+  <button data-target="slide-4" aria-label="Arquitetura"></button>
+  <button data-target="slide-5" aria-label="Os oito domínios"></button>
+  <button data-target="slide-6" aria-label="Modelo de acesso"></button>
+  <button data-target="slide-7" aria-label="Tração real"></button>
+  <button data-target="slide-8" aria-label="Maturidade e backlog"></button>
+  <button data-target="slide-9" aria-label="Fechamento"></button>
+</nav>
+
+<div class="viewport" id="viewport">
+
+  <!-- 1. CAPA -->
+  <section class="slide cover" id="slide-1">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>dp6 · atualização de progresso</span></div>
+      <h1>Observability Hub</h1>
+      <p class="tagline">Catálogo, linhagem, qualidade, PII, acesso, freshness, custo e storage — de todos os dados no GCP, numa única plataforma.</p>
+      <p class="meta">20 de agosto de 2026</p>
+    </div>
+    <div class="scroll-hint">
+      role para navegar
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    </div>
+  </section>
+
+  <!-- 2. O PROBLEMA -->
+  <section class="slide" id="slide-2">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>O problema</span></div>
+      <h2 class="slide-title">Três gargalos que toda consultoria de dados enfrenta</h2>
+      <div class="problem-list">
+        <div class="problem-item">
+          <span class="problem-tag">Discovery</span>
+          <div>
+            <h3>Lento</h3>
+            <p>Mapear o que existe — datasets, tabelas, volumes, donos — consome dias de trabalho manual via console GCP ou queries avulsas.</p>
+          </div>
+        </div>
+        <div class="problem-item">
+          <span class="problem-tag">Monitoria</span>
+          <div>
+            <h3>Reativa</h3>
+            <p>SLA de recebimento de bases é acompanhado manualmente ou não é acompanhado — falhas só aparecem quando alguém nota a ausência dos dados.</p>
+          </div>
+        </div>
+        <div class="problem-item">
+          <span class="problem-tag">Qualidade</span>
+          <div>
+            <h3>Cara de medir</h3>
+            <p>Perfilar colunas e tabelas exige escrever queries específicas a cada novo projeto, repetindo esforço que nunca vira ativo reutilizável.</p>
+          </div>
+        </div>
+      </div>
+      <p class="closer-note">O Hub resolve os três numa única interface, direto sobre BigQuery e Cloud Storage — sem mover dados, sem pipeline adicional.</p>
+    </div>
+  </section>
+
+  <!-- 3. ONDE ESTAMOS HOJE -->
+  <section class="slide" id="slide-3">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Onde estamos</span></div>
+      <h2 class="slide-title">MVP completo, os 8 domínios em produção</h2>
+      <p class="slide-lede">Do backend ao Terraform, dev e prod rodando de ponta a ponta. A adição mais recente — Storage — fechou o ciclo em 18/08: implementada, validada em dev, mergeada e no ar em prod.</p>
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-value">8/8</div><div class="kpi-label">Domínios em produção</div></div>
+        <div class="kpi-card"><div class="kpi-value">2</div><div class="kpi-label">Ambientes isolados</div></div>
+        <div class="kpi-card"><div class="kpi-value">100%</div><div class="kpi-label">Deploys de dev automáticos</div></div>
+        <div class="kpi-card"><div class="kpi-value">1</div><div class="kpi-label">Gate manual de aprovação em prod</div></div>
+      </div>
+      <div class="status-row"><span class="status-dot"></span> dev/prod isolados por projeto GCP, state e imagens próprios — nenhum recurso compartilhado</div>
+    </div>
+  </section>
+
+  <!-- 4. ARQUITETURA -->
+  <section class="slide" id="slide-4">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Arquitetura</span></div>
+      <h2 class="slide-title">Fundação sem chave de service account</h2>
+      <p class="slide-lede">Autenticação no GCP inteiramente via Workload Identity Federation. Terraform por diretório de ambiente — sem workspaces, sem lógica condicional em runtime.</p>
+      <div class="diagram-wrap">
+        <pre class="mermaid">
+%%{init: {'theme':'base', 'themeVariables': {
+  'background':'#2A2A28',
+  'primaryColor':'#2A2A28',
+  'primaryTextColor':'#FFFFFF',
+  'primaryBorderColor':'#FFB302',
+  'lineColor':'#8F96A1',
+  'secondaryColor':'#3A3A38',
+  'tertiaryColor':'#1D1D1B',
+  'clusterBkg':'#1D1D1B',
+  'clusterBorder':'#3A3A38',
+  'fontFamily':'Ubuntu, sans-serif',
+  'fontSize':'14px'
+}}}%%
+flowchart LR
+  PUSH["Push em branch"] -->|dev automático| CID["GitHub Actions + WIF"]
+  MAIN["Merge em main"] -->|gate manual de aprovação| CIP["GitHub Actions + WIF"]
+  CID --> CRD["Cloud Run — backend + frontend<br/>observability-hub-dev"]
+  CIP --> CRP["Cloud Run — backend + frontend<br/>observability-hub-prod"]
+  CRD --> BQ[("BigQuery<br/>INFORMATION_SCHEMA")]
+  CRD --> LOG["Cloud Logging<br/>audit logs"]
+  CRD --> GCS[("Cloud Storage")]
+  CRD --> SM["Secret Manager"]
+  CRP --> BQ
+  CRP --> LOG
+  CRP --> GCS
+  CRP --> SM
+        </pre>
+      </div>
+      <p class="diagram-caption">Terraform: bucket de state e imagens de Artifact Registry próprios por ambiente — sem recurso compartilhado entre dev e prod.</p>
+    </div>
+  </section>
+
+  <!-- 5. OS 8 DOMÍNIOS -->
+  <section class="slide" id="slide-5">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Produto</span></div>
+      <h2 class="slide-title">Oito domínios, uma plataforma</h2>
+      <div class="domain-grid">
+        <div class="domain-card">
+          <div class="domain-mono">CT</div>
+          <h3>Catálogo</h3>
+          <p>Inventário navegável de datasets e tabelas.</p>
+          <span class="domain-source">INFORMATION_SCHEMA</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">LN</div>
+          <h3>Lineage</h3>
+          <p>Dependências entre tabelas e buckets, tabelas órfãs.</p>
+          <span class="domain-source">Cloud Logging — audit logs de jobs</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">PII</div>
+          <h3>PII</h3>
+          <p>Detecção de colunas com dados pessoais sensíveis.</p>
+          <span class="domain-source">INFORMATION_SCHEMA + amostragem</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">AC</div>
+          <h3>Acesso</h3>
+          <p>Quem acessou o quê, e quando.</p>
+          <span class="domain-source">Cloud Logging — data access logs</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">QL</div>
+          <h3>Qualidade</h3>
+          <p>Schema drift e quebras de contrato ao longo do tempo.</p>
+          <span class="domain-source">INFORMATION_SCHEMA — snapshots</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">FR</div>
+          <h3>Freshness</h3>
+          <p>SLA de atualização configurável por tabela.</p>
+          <span class="domain-source">Metadados de última modificação</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">FO</div>
+          <h3>FinOps</h3>
+          <p>Scanner de desperdício e acompanhamento de budget.</p>
+          <span class="domain-source">BigQuery + Cloud Billing</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+        <div class="domain-card">
+          <div class="domain-mono">ST</div>
+          <h3>Storage</h3>
+          <p>Catálogo de buckets, scanner de desperdício com confirmação de uso real.</p>
+          <span class="domain-source">Storage API + Cloud Logging</span>
+          <span class="domain-status"><span class="status-dot"></span>Em produção</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. MODELO DE ACESSO CROSS-PROJECT -->
+  <section class="slide" id="slide-6">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Como escala</span></div>
+      <h2 class="slide-title">Um Hub, qualquer projeto GCP</h2>
+      <div class="two-col">
+        <div>
+          <p class="slide-lede">ADR-006 — a service account de runtime do Hub recebe leitura nos projetos alvo; o usuário informa qual projeto quer inspecionar, sem precisar instalar nada lá.</p>
+          <div class="flow">
+            <div class="flow-step"><b>Admin do projeto alvo</b>concede as roles à SA, uma vez</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step"><b>Usuário no Hub</b>informa o project_id</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-step"><b>Todos os módulos</b>passam a operar sobre ele</div>
+          </div>
+          <p class="slide-lede" style="font-size: var(--text-sm); margin-top: 8px;">Sem OAuth, sem troca de token — simples de implementar, pensado para o cenário real de consultoria.</p>
+        </div>
+        <div>
+          <div class="section-label">Checklist vivo por projeto alvo</div>
+          <ul class="checklist">
+            <li>APIs habilitadas (BigQuery, Storage, Logging)</li>
+            <li>Roles IAM concedidas à SA de runtime do Hub</li>
+            <li>Data Access audit logs configurados</li>
+            <li>Registrado em <code>docs/onboarding-cliente.md</code> antes de fechar a tarefa</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. TRAÇÃO REAL -->
+  <section class="slide" id="slide-7">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Tração</span></div>
+      <h2 class="slide-title">Em rollout dentro da própria dp6</h2>
+      <p class="slide-lede">Este piloto já foi importado para o repositório real da empresa e aponta para o projeto GCP de produção da dp6 — não é mais só prova de conceito.</p>
+      <div class="traction-card">
+        <p><span class="pill"><span class="status-dot info"></span>concluído</span>&nbsp; Bootstrap Terraform aplicado — WIF, service accounts de deploy, bucket de state, APIs habilitadas. Secrets do GitHub Actions configurados, environment de produção com reviewer definido.</p>
+        <p><span class="pill warn"><span class="status-dot warn"></span>bloqueado</span>&nbsp; Falta liberar o acesso público (<code>allUsers</code>) dos dois serviços Cloud Run — barrado pela Org Policy da conta. Exceção pedida ao TI, aguardando retorno.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. MATURIDADE + BACKLOG -->
+  <section class="slide" id="slide-8">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Processo</span></div>
+      <h2 class="slide-title">Maturidade de engenharia acompanhando o produto</h2>
+      <div class="two-col">
+        <div>
+          <div class="section-label">Decisões recentes</div>
+          <div class="decision-list">
+            <div class="decision-item">
+              <h3>Gate manual antes do deploy de app em prod</h3>
+              <p>Nasceu de uma investigação de custo real do Cloud Run — deploy de app agora espera aprovação; apply de infra continua automático porque já passa por plan revisado.</p>
+            </div>
+            <div class="decision-item">
+              <h3>Diagnóstico de custo do Cloud Run</h3>
+              <p>CPU alocada continuamente (fora do padrão do projeto) nos 4 serviços, revertido e confirmado — não era vazamento de tráfego.</p>
+            </div>
+            <div class="decision-item">
+              <h3>Auditoria da documentação de acesso</h3>
+              <p>Revisão ponta a ponta dos manuais entregues a clientes e dos playbooks de hospedagem — lacunas reais encontradas e corrigidas.</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="section-label">Backlog priorizado — nenhum aprovado ainda</div>
+          <ol class="backlog-list">
+            <li>Formalizar IAM cross-project em Terraform</li>
+            <li>Code-splitting do bundle do frontend</li>
+            <li>Tratar jobs não concluídos em lineage/acesso/FinOps</li>
+            <li>Scheduler e Workflows — próxima fronteira além do BigQuery</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. FECHAMENTO -->
+  <section class="slide" id="slide-9">
+    <div class="slide-inner">
+      <div class="eyebrow"><span class="dp6-divider"></span><span>Fechamento</span></div>
+      <h2 class="slide-title">O que precisa de decisão</h2>
+      <ol class="ask-list">
+        <li><span class="ask-num">01</span><span>Status da exceção de Org Policy no TI — segue o rollout interno na dp6.</span></li>
+        <li><span class="ask-num">02</span><span>Aprovar qual item do backlog vira a próxima sprint.</span></li>
+        <li><span class="ask-num">03</span><span>Definir se o Hub passa a ser tratado como produto interno formal da dp6.</span></li>
+      </ol>
+      <p class="closer-note">Observability Hub — dp6</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    var viewport = document.getElementById('viewport');
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.dotnav button'));
+    var counter = document.getElementById('counter-current');
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function setActive(index) {
+      dots.forEach(function (d, i) { d.classList.toggle('is-active', i === index); });
+      counter.textContent = String(index + 1).padStart(2, '0');
+    }
+
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var idx = slides.indexOf(entry.target);
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          if (entry.intersectionRatio > 0.55) setActive(idx);
+        }
+      });
+    }, { root: viewport, threshold: [0, 0.55, 1] });
+
+    slides.forEach(function (s) { observer.observe(s); });
+
+    dots.forEach(function (dot, i) {
+      dot.addEventListener('click', function () {
+        slides[i].scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+      });
+    });
+
+    window.addEventListener('keydown', function (e) {
+      var current = dots.findIndex(function (d) { return d.classList.contains('is-active'); });
+      if (current === -1) current = 0;
+      var next = null;
+      if (['ArrowDown', 'PageDown'].indexOf(e.key) !== -1) next = Math.min(current + 1, slides.length - 1);
+      if (['ArrowUp', 'PageUp'].indexOf(e.key) !== -1) next = Math.max(current - 1, 0);
+      if (next !== null) {
+        e.preventDefault();
+        slides[next].scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+      }
+    });
+  })();
+</script>
